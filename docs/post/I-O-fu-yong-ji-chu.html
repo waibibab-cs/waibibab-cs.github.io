@@ -19,7 +19,7 @@
 <meta property="og:url" content="https://waibibab-cs.github.io/post/I-O-fu-yong-ji-chu.html">
 <meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
 <title>I/O复用基础</title>
-<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+
 
 
 </head>
@@ -103,41 +103,42 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 <a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260107111013.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260107111013.png" alt="image.png" style="max-width: 100%;"></a><br>
 <strong>举一个例子</strong>：</li>
 </ol>
-<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">#include</span> <span class="pl-s">&lt;stdio.h&gt;</span>
-<span class="pl-k">#include</span> <span class="pl-s">&lt;sys/select.h&gt;</span>
+<pre lang="c" class="notranslate"><code class="notranslate">#include &lt;stdio.h&gt;
+#include &lt;sys/select.h&gt;
 
-<span class="pl-smi">int</span> <span class="pl-en">main</span>() {
-    <span class="pl-c">// 1. 定义一个fd_set集合</span>
-    <span class="pl-smi">fd_set</span> <span class="pl-s1">my_fd_set</span>;
+int main() {
+    // 1. 定义一个fd_set集合
+    fd_set my_fd_set;
 
-    <span class="pl-c">// 2. 清空集合（必须先清空，否则初始值是随机的）</span>
-    <span class="pl-en">FD_ZERO</span>(<span class="pl-c1">&amp;</span><span class="pl-s1">my_fd_set</span>);
+    // 2. 清空集合（必须先清空，否则初始值是随机的）
+    FD_ZERO(&amp;my_fd_set);
 
-    <span class="pl-c">// 3. 装载（添加）fd到集合中</span>
-    <span class="pl-smi">int</span> <span class="pl-s1">fd1</span> <span class="pl-c1">=</span> <span class="pl-c1">3</span>;  <span class="pl-c">// 假设是listenfd</span>
-    <span class="pl-smi">int</span> <span class="pl-s1">fd2</span> <span class="pl-c1">=</span> <span class="pl-c1">5</span>;  <span class="pl-c">// 假设是connfd</span>
-    <span class="pl-en">FD_SET</span>(<span class="pl-s1">fd1</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">my_fd_set</span>);
-    <span class="pl-en">FD_SET</span>(<span class="pl-s1">fd2</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">my_fd_set</span>);
+    // 3. 装载（添加）fd到集合中
+    int fd1 = 3;  // 假设是listenfd
+    int fd2 = 5;  // 假设是connfd
+    FD_SET(fd1, &amp;my_fd_set);
+    FD_SET(fd2, &amp;my_fd_set);
 
-    <span class="pl-c">// 4. 判断某个fd是否在集合中</span>
-    <span class="pl-k">if</span> (<span class="pl-en">FD_ISSET</span>(<span class="pl-s1">fd1</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">my_fd_set</span>)) {
-        <span class="pl-en">printf</span>(<span class="pl-s">"fd=%d 已被装载到集合中\n"</span>, <span class="pl-s1">fd1</span>);
+    // 4. 判断某个fd是否在集合中
+    if (FD_ISSET(fd1, &amp;my_fd_set)) {
+        printf("fd=%d 已被装载到集合中\n", fd1);
     }
-    <span class="pl-k">if</span> (<span class="pl-en">FD_ISSET</span>(<span class="pl-s1">fd2</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">my_fd_set</span>)) {
-        <span class="pl-en">printf</span>(<span class="pl-s">"fd=%d 已被装载到集合中\n"</span>, <span class="pl-s1">fd2</span>);
+    if (FD_ISSET(fd2, &amp;my_fd_set)) {
+        printf("fd=%d 已被装载到集合中\n", fd2);
     }
-    <span class="pl-k">if</span> (!<span class="pl-en">FD_ISSET</span>(<span class="pl-c1">4</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">my_fd_set</span>)) {
-        <span class="pl-en">printf</span>(<span class="pl-s">"fd=4 不在集合中\n"</span>);
-    }
-
-    <span class="pl-c">// 5. 从集合中移除fd</span>
-    <span class="pl-en">FD_CLR</span>(<span class="pl-s1">fd2</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">my_fd_set</span>);
-    <span class="pl-k">if</span> (!<span class="pl-en">FD_ISSET</span>(<span class="pl-s1">fd2</span>, <span class="pl-c1">&amp;</span><span class="pl-s1">my_fd_set</span>)) {
-        <span class="pl-en">printf</span>(<span class="pl-s">"fd=%d 已从集合中移除\n"</span>, <span class="pl-s1">fd2</span>);
+    if (!FD_ISSET(4, &amp;my_fd_set)) {
+        printf("fd=4 不在集合中\n");
     }
 
-    <span class="pl-k">return</span> <span class="pl-c1">0</span>;
-}</pre></div>
+    // 5. 从集合中移除fd
+    FD_CLR(fd2, &amp;my_fd_set);
+    if (!FD_ISSET(fd2, &amp;my_fd_set)) {
+        printf("fd=%d 已从集合中移除\n", fd2);
+    }
+
+    return 0;
+}
+</code></pre>
 <ol start="3">
 <li><code class="notranslate">timeout</code>：设置select函数的超时时间<br>
 <a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260107112937.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260107112937.png" alt="image.png" style="max-width: 100%;"></a>
@@ -230,33 +231,34 @@ socket 的写端被关闭（如调用<code class="notranslate">shutdown(sockfd, 
 <li><strong><code class="notranslate">POLLNVAL</code></strong> ：文件描述符没有打开。</li>
 </ul>
 <p>代码案例：</p>
-<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">struct</span> <span class="pl-en">pollfd</span> fds[<span class="pl-c1">2</span>];
-<span class="pl-c"><span class="pl-c">//</span> 监听socket的可读事件（比如是否有客户端连接、是否有数据发送过来）</span>
-fds[<span class="pl-c1">0</span>].fd = sockfd;
-fds[<span class="pl-c1">0</span>].events = POLLIN;
+<pre lang="cpp" class="notranslate"><code class="notranslate">struct pollfd fds[2];
+// 监听socket的可读事件（比如是否有客户端连接、是否有数据发送过来）
+fds[0].fd = sockfd;
+fds[0].events = POLLIN;
 
-<span class="pl-c"><span class="pl-c">//</span> 监听文件描述符的可写+错误事件</span>
-fds[<span class="pl-c1">1</span>].fd = filefd;
-fds[<span class="pl-c1">1</span>].events = POLLOUT | POLLERR;
+// 监听文件描述符的可写+错误事件
+fds[1].fd = filefd;
+fds[1].events = POLLOUT | POLLERR;
 
-<span class="pl-k">int</span> ret = poll(fds, <span class="pl-c1">2</span>, <span class="pl-c1">5000</span>); <span class="pl-c"><span class="pl-c">//</span> 监听2个fd，超时5秒</span>
-<span class="pl-k">if</span>(ret &gt; <span class="pl-c1">0</span>){
-    <span class="pl-c"><span class="pl-c">//</span> 检查第一个fd是否触发了可读事件</span>
-    <span class="pl-k">if</span>(fds[<span class="pl-c1">0</span>].<span class="pl-smi">revents</span> &amp; POLLIN){
-        <span class="pl-c"><span class="pl-c">//</span> 执行socket读操作，比如accept或者recv</span>
-        <span class="pl-c1">handle_socket_read</span>(fds[<span class="pl-c1">0</span>].<span class="pl-smi">fd</span>);
+int ret = poll(fds, 2, 5000); // 监听2个fd，超时5秒
+if(ret &gt; 0){
+    // 检查第一个fd是否触发了可读事件
+    if(fds[0].revents &amp; POLLIN){
+        // 执行socket读操作，比如accept或者recv
+        handle_socket_read(fds[0].fd);
     }
-    <span class="pl-c"><span class="pl-c">//</span> 检查第二个fd是否触发了可写事件</span>
-    <span class="pl-k">if</span>(fds[<span class="pl-c1">1</span>].<span class="pl-smi">revents</span> &amp; POLLOUT){
-        <span class="pl-c"><span class="pl-c">//</span> 执行文件写操作</span>
-        <span class="pl-c1">handle_file_write</span>(fds[<span class="pl-c1">1</span>].<span class="pl-smi">fd</span>);
+    // 检查第二个fd是否触发了可写事件
+    if(fds[1].revents &amp; POLLOUT){
+        // 执行文件写操作
+        handle_file_write(fds[1].fd);
     }
-    <span class="pl-c"><span class="pl-c">//</span> 检查是否出现错误</span>
-    <span class="pl-k">if</span>(fds[<span class="pl-c1">1</span>].<span class="pl-smi">revents</span> &amp; POLLERR){
-        <span class="pl-c"><span class="pl-c">//</span> 处理错误逻辑</span>
-        <span class="pl-c1">handle_error</span>(fds[<span class="pl-c1">1</span>].<span class="pl-smi">fd</span>);
+    // 检查是否出现错误
+    if(fds[1].revents &amp; POLLERR){
+        // 处理错误逻辑
+        handle_error(fds[1].fd);
     }
-}</pre></div>
+}
+</code></pre>
 <h1>3.epoll系统调用</h1>
 <h2>内核事件表</h2>
 <p>一、 epoll 概述 (epoll Overview)</p>
