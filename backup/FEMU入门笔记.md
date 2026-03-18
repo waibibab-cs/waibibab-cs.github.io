@@ -8,7 +8,6 @@
 <ul>
 <li>NVMe协议</li>
 <li>计算机体系结构</li>
-<li>fio</li>
 </ul>
 <p>注：本文所涉及到的代码分析均以blackbox ssd为例</p>
 <h1 data-heading="环境配置">环境配置</h1>
@@ -19,28 +18,67 @@
 </ol>
 <h1 data-heading="fio测试">fio测试</h1>
 <p>在VM中安装fio之后，推荐采用以下命令进行fio测试：</p>
-<pre><code class="language-bash"># 延迟测试
+<pre><code class="language-bash"># 延迟测试，延迟测得最小
 sudo fio --ioengine=libaio --numjobs=1 --direct=1 --time_based --group_reporting --size=4G --bs=4k --iodepth=1 --filename=/dev/nvme0n1 --name=4krandwrite --rw=randwrite
-# 带宽测试
+# 带宽测试，带宽测得最大
 sudo fio --ioengine=libaio --numjobs=1 --direct=1 --time_based --group_reporting --size=4G --bs=128k --iodepth=128 --filename=/dev/nvme0n1 --name=4krandwrite --rw=randwrite
-# iops测试
+# iops测试，iops测得最大
 sudo fio --ioengine=libaio --numjobs=1 --direct=1 --time_based --group_reporting --size=4G --bs=4k --iodepth=128 --filename=/dev/nvme0n1 --name=4krandwrite --rw=randwrite
+
 </code></pre>
-<p>除了上述基本测试之外，还对其进行了极限带宽测试，首先进行以下修改：</p>
-<ol>
-<li>run-blackbox.sh:修改通道数8--16；三个延迟参数全降低为10ns；虚拟机分配8核（-smp 8）</li>
-<li>fio配置：<code>sudo fio --name=max_bw_test --filename=/dev/nvme0n1 --rw=read --bs=128k --direct=1 --ioengine=libaio --iodepth=32 --numjobs=16 --group_reporting --size=4G</code><br>
-修改fio选项得到以下两组数据：</li>
-</ol>
+<p>为什么按照上面的配置进行测试？</p>
+<ul>
+<li>延迟测试：
+<ul>
+<li>目的：测量一次 I/O 穿透整个软硬件栈的“绝对物理底噪”</li>
+<li>小块数据：4KB 是现代操作系统页大小和闪存页（Page）读写的最小标准单位。数据量越小，花费在“搬运数据”（DMA/<code>memcpy</code>）上的时间就越少，测出来的就纯粹是命令处理的时间 + 闪存介质寻址的物理时间。</li>
+<li>单请求：<code>iodepth=1</code> 保证了整个测试过程中绝对没有排</li>
+</ul>
+</li>
+<li>带宽测试：
+<ul>
+<li>目的：榨干总线（PCIe）传输能力和闪存内部的数据吞吐极限</li>
+<li>大块数据：任何一次 I/O 都有额外开销（比如敲门铃、发中断的 <code>slat</code>）。如果你用 4K 跑，大部分时间都用在了上述额外开销上</li>
+<li>深队列：深队列保证了底层的控制器不会闲着，它会提前准备好下一个 128K</li>
+</ul>
+</li>
+<li>iops测试：
+<ul>
+<li>目的：测试主控芯片的多任务并发调度能力和闪存 LUN（Die）的并行度</li>
+<li>小块数据：因为我们要拼的是“处理次数”，而不是“运送重量”。数据越小，单次执行越快，在一秒内能完成的“笔数”才可能冲到最高</li>
+<li>深队列：果 <code>iodepth=1</code>，每次只有一个 LUN 在工作，其他 LUN 都处于空闲。 当你把 <code>iodepth</code> 瞬间打到 128，这 128 个 4K 小请求会被 FTL 均匀地分配到 SSD 内部的 32 个或 64 个 LUN 上。</li>
+</ul>
+</li>
+</ul>
+<p>首先使用fio进行时延测试<br>
+fio：<code>sudo fio --name=max_bw_test --filename=/dev/nvme0n1 --rw=write --bs=4k --direct=1 --ioengine=libaio --iodepth=1 --numjobs=1 --group_reporting --size=4G</code><br>
+结果：</p>
 
-type | bs | iodepth | numjobs | BW(MiB/s) | IOPS
--- | -- | -- | -- | -- | --
-read | 1M | 128 | 8 | 2251 | 2251
-read | 128k | 32 | 16 | 2276 | 18.2k
+type | pd_wr_lat(纳秒) | BW(MB/s) | IOPS | Lat（msec） | avg_clat(ns) | slat(ns)
+-- | -- | -- | -- | -- | -- | --
+write | 200000 | 18.2 | 4443 | 235974 | 201614 | 21490
+write | 20000 | 87.7 | 21.4k | 48995 | 23763 | 21360
+write | 0 | 135 | 33k | 31730 | 6719 | 21740
+<html>
+<body>
+<!--StartFragment--><!-- obsidian --><p><strong>踩过的坑：</strong> 启动femu时，nvme01还是一个空盘，第一次做fio测试时，一定要先用写操作而不是读操作！否则无论如何修改./run_blackbox.sh的pg_rd_lat都不会看到clat变化！<br>
+具体也可以看ftl.c::ssd_read的代码，当映射表查询不到时，根本不会去使用参数pg_rd_lat去计算时延！</p>
+<p>除了上述时延测试之外，还对其进行了带宽测试<br>
+fio：<code>sudo fio --name=max_bw_test --filename=/dev/nvme0n1 --rw=write --bs=128k --direct=1 --ioengine=libaio --iodepth=32 --numjobs=16 --group_reporting --size=2G</code><br>
+修改fio选项得到以下两组数据：</p>
+
+type | pd_wr_lat(纳秒) | BW(MB/s) | IOPS
+-- | -- | -- | --
+write | 200000 | 1191 | 9083
+write | 0 | 2002 | 15.3k
 
 
-<p>在模拟器（尤其是基于 QEMU 的 FEMU）中，带宽测试往往会碰到一个“天花板”，即使你把虚拟机的通道数加到无限大、延迟调到 1ns，带宽也无法突破某个数值。</p>
-<p>这种“慢设备无法模拟快设备”的现象，本质上受限于软件模拟器的指令集循环开销与宿主机物理时钟的分辨率。在 FEMU 这样的全系统模拟器中，每一个虚拟的 NVMe 寄存器操作或数据拷贝指令，最终都要转化为宿主机物理 CPU 上的多条实际指令。当你在软件中将延迟设定为 <span class="math math-inline">10\text{ns}</span> 时，由于 CPU 逻辑跳转、内存上下文切换以及虚拟化层（KVM/QEMU）的中断拦截开销，宿主机处理这笔请求所需的物理时间往往已经达到了数百纳秒甚至微秒级别。</p>
+<!--EndFragment-->
+</body>
+</html>
+
+<p>从上面两组测试中，我们可以发现，在模拟器（尤其是基于 QEMU 的 FEMU）中，性能测试往往会碰到一个“天花板”，例如，即使把虚拟机的通道数加到无限大、延迟调到 1ns，带宽、时延等结果也无法突破某个数值。</p>
+<p>这种“慢设备无法模拟快设备”的现象，本质上受限于软件模拟器的指令集循环开销与宿主机物理时钟的分辨率。在 FEMU 这样的模拟器中，每一个虚拟的 NVMe 寄存器操作或数据拷贝指令，最终都要转化为宿主机物理 CPU 上的多条实际指令。当你在软件中将延迟设定为 <span class="math math-inline">10\text{ns}</span> 时，由于 CPU 逻辑跳转、内存上下文切换以及虚拟化层（KVM/QEMU）的中断拦截开销，宿主机处理这笔请求所需的物理时间往往已经达到了数百纳秒甚至微秒级别。</p>
 <p>从时钟同步的角度来看，由于宿主机操作系统的调度颗粒度（通常在微秒量级）远粗于你所设定的纳米级延迟，模拟器内部的定时器精度成为了第二道锁。即使模拟逻辑在指令层面“认为”只过去了 <span class="math math-inline">10\text{ns}</span>，但在等待宿主机硬件产生时钟中断来唤醒 IO 线程时，真实的物理时间已经流逝了成千上万个时钟周期。这种“时间膨胀”效应导致模拟器在单位时间内能处理的 IO 数量被锁死在宿主机的单核处理能力上。</p>
 <p>此外，数据通路的序列化瓶颈也限制了带宽的无限增长。虽然物理 SSD 可以通过增加 NAND 通道实现并行加速，但在模拟器内部，即便你配置了 16 个通道，这些通道的逻辑往往仍是在宿主机的少数几个线程中串行或分时竞争执行的。由于 QEMU 存在全局锁机制或单线程 IO 派发限制，多出来的虚拟通道只是增加了软件逻辑的复杂度，并不能真正突破宿主机内存带宽与总线处理的单点物理瓶颈。因此，当你看到的带宽卡在 <span class="math math-inline">2.2\text{GB/s}</span> 左右时，那其实已经触碰到了宿主机 CPU 模拟 NVMe 协议栈并进行内存数据搬运的“物理极限”，再增加模拟侧的并发参数也只是在原地空转。</p>
 <h1 data-heading="代码分析">代码分析</h1>
