@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="原文章链接：https://docs.nvidia.com/cuda/cuda-programming-guide/
+# 编程模型
+## 异构系统
+CUDA编程模型假定了一个异构计算系统，这意味着系统同时包含GPU和CPU。">
+<meta property="og:title" content="CUDA官方文档学习1：CUDA介绍">
+<meta property="og:description" content="原文章链接：https://docs.nvidia.com/cuda/cuda-programming-guide/
+# 编程模型
+## 异构系统
+CUDA编程模型假定了一个异构计算系统，这意味着系统同时包含GPU和CPU。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/CUDA-guan-fang-wen-dang-xue-xi-1%EF%BC%9ACUDA-jie-shao.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>CUDA官方文档学习1：CUDA介绍</title>
+
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">CUDA官方文档学习1：CUDA介绍</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/24" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>原文章链接：<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/" rel="nofollow">https://docs.nvidia.com/cuda/cuda-programming-guide/</a></p>
+<h1>编程模型</h1>
+<h2>异构系统</h2>
+<p>CUDA编程模型假定了一个异构计算系统，这意味着系统同时包含GPU和CPU。CPU及其直接连接的内存分别称为主机（host）和主机内存（host memory）。GPU及其直接连接的内存分别称为设备（device）和设备内存（device memory）。</p>
+<p>CUDA应用程序部分代码在GPU上执行，但应用程序始终在CPU上启动，运行在CPU上的代码（主机代码）可以使用CUDA API在主机内存与设备内存之间复制数据、启动GPU上的代码执行，并等待数据复制或GPU代码完成。应用程序在GPU上执行的代码称为设备代码，在GPU上调用执行的函数被称为内核（kernel）。CPU启动内核运行的操作称为内核启动（launching the kernel）。</p>
+<h2>GPU硬件模型</h2>
+<p>在CUDA编程中，GPU可视为一组流多处理器（SM）的集合，这些SM被组织成图形处理集群（GPC）。每个SM包含一个本地寄存器文件、一个统一数据缓存以及若干执行计算的功能单元。统一数据缓存为共享内存和L1缓存提供物理资源。统一数据缓存分配给L1和共享内存的比例可在运行时配置。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260319145948.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260319145948.png" alt="image.png" style="max-width: 100%;"></a><br>
+当应用程序启动内核时，它会以大量线程（通常达数百万个）启动。这些线程被组织成多个块（thread block）。线程块又被组织成网格（grid）。网格中的所有线程块具有相同的大小和维度。图3展示了一个线程块网格的示意图。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260319150141.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260319150141.png" alt="image.png" style="max-width: 100%;"></a><br>
+一个线程块内的所有线程都在单个流多处理器上执行。这使得线程块内的线程能够高效地相互通信和同步。线程块内的所有线程都可以访问片上共享存储器，该存储器可用于在线程块内的线程之间交换信息。而线程块之间的调度则无法得到保证，因此一个线程块无法依赖其他线程块的结果，图4展示了网格中的线程块如何分配给流多处理器的示例。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260319150628.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260319150628.png" alt="image.png" style="max-width: 100%;"></a><br>
+CUDA编程模型能够实现任意大规模的计算网格在任何大小的GPU上运行，无论GPU只有一个流多处理器（SM）还是拥有数千个SM。为实现这一点，除少数特例外，CUDA编程模型要求不同线程块之间的线程不能存在数据依赖关系。也就是说，一个线程不应依赖于同一网格中不同线程块内其他线程的计算结果，也不应与它们进行同步操作。</p>
+<p>除了线程块之外，具备计算能力9.0及更高版本的GPU还引入了一种可选的分组层级，称为集群（thread block cluster）。集群是一组线程块，就像线程块和网格一样，可以按一维、二维或三维的方式排布。图5展示了一个既被组织成线程块网格，又被进一步划分为集群的示例。指定集群不会改变网格的维度，也不会改变线程块在网格中的索引。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260319150935.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260319150935.png" alt="image.png" style="max-width: 100%;"></a><br>
+集群中的所有线程块在单个GPC内执行如图6展示，这样属于同一集群但不同线程块内的线程可以利用协作组（Cooperative Groups）提供的软件接口相互通信和同步，集群内的线程可以访问该集群中所有线程块的共享内存，这被称为分布式共享内存。集群的最大大小取决于硬件，并且在不同设备间有所差异。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260319151343.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260319151343.png" alt="image.png" style="max-width: 100%;"></a><br>
+线程块内包含称为warp的线程组（每组32个线程）。Warp以<strong>单指令多线程</strong>（SIMT）方式执行，即所有线程执行同一指令序列，但可根据数据条件进入<strong>不同的控制流分支</strong>。当分支条件在warp内不满足一致时，不进入当前分支的线程会被<strong>屏蔽</strong>，只有活跃线程继续执行，这种现象称为<strong>warp发散</strong>。它会降低并行效率，因此<strong>保持warp内的控制流一致性</strong>是最大化GPU利用的关键。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260319152857.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260319152857.png" alt="image.png" style="max-width: 100%;"></a><br>
+在CUDA的SIMT模型中，一个Warp（通常为32个线程）内的所有线程是<strong>同步执行</strong>的，这是编程模型的基础。虽然硬件实现可能有透明优化，但程序若违反此同步假设，将导致<strong>未定义行为</strong>。理解Warp模型对优化<strong>全局内存合并访问</strong>和<strong>共享内存体访问</strong>至关重要。一个关键的最佳实践是：<strong>将线程块的总线程数设置为32的倍数</strong>，以避免最后一个Warp出现未使用的线程通道，从而防止功能单元利用率和内存访问效率的下降。</p>
+<blockquote>
+<p>SIMT 和 SIMD 的核心区别在于<strong>控制流</strong>。SIMD 遵循<strong>单一控制流</strong>，所有数据必须同步执行相同指令；而 SIMT 允许<strong>每个线程拥有独立控制流</strong>，线程间可以执行不同的分支。因此，SIMT 不像 SIMD 那样受限于固定的数据宽度，具有更高的灵活性。</p>
+</blockquote>
+<h2>GPU内存</h2>
+<p>GPU和CPU均配有直连的DRAM芯片，在GPU中被称为“全局内存”（可被GPU内所有流多处理器访问），在CPU中则称为“系统内存”或“主机内存”。两者共享<strong>统一的虚拟内存空间</strong>，但各自拥有独立且唯一的地址范围，使得系统能够精确识别任何虚拟地址所属的物理位置（具体GPU或CPU）。CUDA提供了丰富API，用以灵活分配CPU/GPU内存、在设备间或设备内复制数据，并支持<strong>显式控制数据的本地性</strong>。此外，<strong>统一内存</strong>机制可由运行时或硬件自动管理内存布局，进一步简化编程。</p>
+<p>除了全局内存，GPU的每个流多处理器（SM）都配备有高速的片上内存，包括寄存器文件和共享内存。寄存器文件用于存储线程局部变量，由编译器分配；共享内存则允许同一线程块或集群内的所有线程快速交换数据。这两者的大小都有限，且与SM的L1缓存一起被线程块内所有线程共享。关键限制在于：调度线程块到SM时，<strong>每个线程所需寄存器数乘以线程块总线程数不得超过SM可用寄存器总量</strong>，否则内核将无法启动，必须减少线程块规模。同时，共享内存是<strong>在线程块级别统一分配</strong>的，而不像寄存器那样按线程独立分配（解释：寄存器分配是分别为每个线程开辟空间，不同线程不能访问彼此寄存器；共享内存是给线程块直接分配一个大的空间并被该线程块的所有线程共用）</p>
+<p>GPU 还拥有 L1 和 L2 两级缓存。每个流式多处理器（SM）都配有一个 L1 缓存，它属于统一数据缓存的一部分。而一个更大的 L2 缓存则由 GPU 内的所有 SM 共享，GPU 还拥有 L1 和 L2 两级缓存。每个流式多处理器（SM）都配有一个 L1 缓存，它属于统一数据缓存的一部分。而一个更大的 L2 缓存则由 GPU 内的所有 SM 共享。</p>
+<p>在CUDA编程中，显式分配的GPU或CPU内存只能被运行在对应设备上的代码访问，数据需通过CUDA API在设备间显式复制。虽然统一内存功能允许CPU和GPU共享内存空间，由运行时或硬件自动管理数据位置，但要获得最优性能，仍需尽量减少内存迁移，并尽可能让处理器访问本地内存。系统的硬件特性决定了内存空间间的数据交换机制，而不同类别的统一内存系统及其详细行为将在后面进行阐述。</p>
+<h1>CUDA平台</h1>
+<h2>计算能力（CC）与流处理器版本</h2>
+<p>每款NVIDIA GPU都有一个计算能力（CC）编号，它标识了该GPU支持的功能特性，并规定了该GPU的一些硬件参数。计算能力以主、次版本号的格式X.Y表示，其中X是主版本号，Y是次版本号。例如，CC 12.0的主版本号为12，次版本号为0。计算能力直接对应于SM的版本号。例如，计算能力为12.0的GPU，其内部的SM版本为sm_120。此版本号用于标记二进制文件。（如何查询和确定系统中GPU计算能力见：[<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/compute-capabilities.html" rel="nofollow">计算能力查询</a>](<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/compute-capabilities.html" rel="nofollow">https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/compute-capabilities.html</a>) ；所有NVIDIA GPU及其计算能力列表见：[<a href="https://developer.nvidia.com/cuda/gpus" rel="nofollow">nvidia gpu</a>](<a href="https://developer.nvidia.com/cuda/gpus)%EF%BC%89" rel="nofollow">https://developer.nvidia.com/cuda/gpus)）</a></p>
+<h2>CUDA工具包和官方驱动</h2>
+<p>NVIDIA 驱动程序（driver）是必须安装在主机操作系统上的基础软件，它充当 GPU 的“操作系统”，支持包括 CUDA、Vulkan 和 Direct3D 在内的所有 GPU 使用方式，是实现 GPU 功能的基石。而 CUDA 工具包（Toolkit）则是一个独立的软件产品，它提供库、头文件和工具，用于编写和构建 GPU 计算软件。其中，CUDA 运行时（runtime）作为 CUDA 工具包提供的一个特殊库，通过其 API 和语言扩展，简化了内存管理、数据传输和内核启动等常见任务。不同 GPU、驱动程序与 CUDA 工具包版本之间的具体兼容性细节，则由专门的 [<a href="https://docs.nvidia.com/deploy/cuda-compatibility/index.html" rel="nofollow">CUDA 兼容性文档</a>](<a href="https://docs.nvidia.com/deploy/cuda-compatibility/index.html)%E8%AF%A6%E7%BB%86%E8%AF%B4%E6%98%8E%E3%80%82" rel="nofollow">https://docs.nvidia.com/deploy/cuda-compatibility/index.html)详细说明。</a></p>
+<p>CUDA运行时API构建在一个名为CUDA驱动API的底层API之上，而后者是由NVIDIA驱动程序提供的接口。本文主要聚焦于CUDA运行时API所暴露的接口。如果需要，仅通过驱动API也能实现同样的功能，且部分特性仅能通过驱动API使用。应用程序可以单独或同时使用这两种API，并可实现两者的互操作。相关相互操作内容参见后续内容。</p>
+<p>完整的CUDA运行时API函数参考文档请参阅[<a href="https://docs.nvidia.com/cuda/cuda-runtime-api/index.html" rel="nofollow">《CUDA Runtime API Documentation》</a>](<a href="https://docs.nvidia.com/cuda/cuda-runtime-api/index.html)%E3%80%82" rel="nofollow">https://docs.nvidia.com/cuda/cuda-runtime-api/index.html)。</a></p>
+<p>完整的CUDA驱动API参考文档请参阅[<a href="https://docs.nvidia.com/cuda/cuda-driver-api/index.html" rel="nofollow">《CUDA Driver API Documentation》</a>](<a href="https://docs.nvidia.com/cuda/cuda-driver-api/index.html)%E3%80%82" rel="nofollow">https://docs.nvidia.com/cuda/cuda-driver-api/index.html)。</a></p>
+<h2>并行线程执行（PTX）</h2>
+<p>CUDA平台存在一个基本但有时不易察觉的层面，即并行线程执行（PTX）虚拟指令集架构。PTX是一种用于NVIDIA GPU的高级汇编语言，为实际GPU硬件的物理指令集提供了抽象层。与其他平台类似，应用程序可直接用此汇编语言编写，但这样做可能会给软件开发带来不必要的复杂性和难度。</p>
+<p>领域专用语言和高级语言的编译器可将PTX代码生成作为中间表示，随后利用NVIDIA的离线或即时编译工具（JIT)生成可执行的二进制GPU代码。这使得CUDA平台不仅限于NVIDIA提供的工具（如NVCC：NVIDIA CUDA编译器）所支持的语言，而是可以通过多种语言进行编程。</p>
+<p>随着GPU功能的演进与扩展，PTX虚拟指令集架构规范会进行版本迭代。PTX版本与SM版本相似，均对应特定的计算能力。例如，完全支持计算能力8.0所有特性的PTX版本被称为compute_80。</p>
+<h2>Cubins和Fatbins</h2>
+<p>CUDA应用程序和库通常采用高级语言编写，其编译流程是：首先编译为PTX中间代码，再针对具体GPU的SM架构（如sm_120）生成对应的CUDA二进制文件（cubin）。而实际的可执行文件或库文件中，GPU代码以fatbin容器的形式封装，其中可包含面向多种GPU架构（即不同SM版本）的cubin和PTX代码，从而确保在运行时能为目标GPU自动选择最匹配的二进制版本。Fatbin文件也可以包含一个或多个版本的GPU代码PTX文件，其用途在后续说明。图8展示了一个应用程序或库二进制文件的示例，其中包含多个版本的GPU代码cubin文件以及一个版本的PTX代码。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260319164154.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260319164154.png" alt="image.png" style="max-width: 100%;"></a><br>
+NVIDIA GPU 的二进制兼容性遵循特定规则：在同一计算能力主版本内，次版本号大于或等于 cubin 构建目标版本的 GPU 能够加载并执行该 cubin（例如，为 sm_86 构建的代码可在 8.6 或 8.9 的设备上运行，但无法在 8.0 上运行）；而<strong>不同主版本之间则完全不兼容</strong>（例如 sm_86 代码无法在 9.0 设备上运行）。在表述上，常使用如 "sm_86" 这样的简写来指代针对特定计算能力版本编译的二进制代码。二进制兼容性仅适用于由 NVIDIA 工具（如 nvcc）创建的二进制文件。不支持手动编辑或为 NVIDIA GPU 生成二进制代码。如果二进制文件以任何方式被修改，兼容性承诺将失效。</p>
+<p>GPU代码可以以二进制或PTX形式存储在可执行文件中，它们分别封装在Cubin和Fatbin中。当应用程序存储的是GPU代码的PTX版本时，该PTX代码可以在应用程序运行时，针对计算能力不低于该PTX代码计算能力的任何架构进行即时编译。例如，如果应用程序包含了针对compute_80的PTX代码，那么该代码可以在应用程序运行时，即时编译为更高的SM版本，例如sm_120。这使得应用程序或库无需重新构建，就能实现与未来GPU的前向兼容。</p>
+<p>应用程序运行时加载的PTX代码由设备驱动程序通过即时编译转换为二进制代码，这种机制虽然会增加应用加载时间，但能使应用受益于驱动更新带来的编译器改进，并支持在编译后出现的新设备上运行。设备驱动程序会自动缓存编译生成的二进制代码，此计算缓存会在驱动升级时失效，以确保应用总是使用最新的编译器。随着CUDA的发展，即时编译的时机和方式已变得更加灵活，可通过选项或环境变量进行控制，同时也可选择使用NVRTC在运行时直接将CUDA C++代码编译为PTX。</p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+
+
+</script>
+
+
+</html>
