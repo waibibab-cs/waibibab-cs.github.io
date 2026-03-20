@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="论文名称：Scalable Billion-point Approximate Nearest Neighbor Search Using SmartSSDs
+# 摘要
+高维向量空间中的近似最近邻搜索（ANNS）在数据库和机器学习应用中变得愈发重要。">
+<meta property="og:title" content="【论文阅读；24】SmartANNS：基于SmartSSD的可扩展十亿级向量近似最近邻搜索">
+<meta property="og:description" content="论文名称：Scalable Billion-point Approximate Nearest Neighbor Search Using SmartSSDs
+# 摘要
+高维向量空间中的近似最近邻搜索（ANNS）在数据库和机器学习应用中变得愈发重要。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/%E3%80%90-lun-wen-yue-du-%EF%BC%9B24%E3%80%91SmartANNS%EF%BC%9A-ji-yu-SmartSSD-de-ke-kuo-zhan-shi-yi-ji-xiang-liang-jin-si-zui-jin-lin-sou-suo.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>【论文阅读；24】SmartANNS：基于SmartSSD的可扩展十亿级向量近似最近邻搜索</title>
+
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">【论文阅读；24】SmartANNS：基于SmartSSD的可扩展十亿级向量近似最近邻搜索</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/25" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>论文名称：Scalable Billion-point Approximate Nearest Neighbor Search Using SmartSSDs</p>
+<h1>摘要</h1>
+<p>高维向量空间中的近似最近邻搜索（ANNS）在数据库和机器学习应用中变得愈发重要。以往大多数 ANNS 算法需要 TB 级内存来存储十亿级数据集的索引，这使得它们在高性能搜索场景下的部署成本极高。新兴的智能固态硬盘（SmartSSD）技术为通过近数据处理（NDP）实现可扩展的 ANNS 提供了机遇。然而，在多块智能固态硬盘上直接采用现有 ANNS 算法仍面临诸多挑战。</p>
+<p>在本文中，我们提出了 SmartANNS，这是一种基于分层索引方法论、由智能固态硬盘赋能的十亿级 ANNS 解决方案。我们设计了多项新颖方案，以实现多块智能固态硬盘下的近线性扩展。首先，我们提出了一种结合分层索引的 “主机 CPU + 智能固态硬盘” 协同架构，显著减少了智能固态硬盘上的数据访问与计算量。其次，我们提出了基于优化数据布局的动态任务调度，以实现多块智能固态硬盘的负载均衡与数据复用。第三，我们进一步提出了一种基于学习的分片剪枝算法，以消除智能固态硬盘上的不必要计算。我们基于三星商用智能固态硬盘实现了 SmartANNS。实验结果表明，与当前最先进的基于智能固态硬盘的 ANNS 方案 CSDANNS 相比，SmartANNS 可将每秒查询数（QPS）提升最高达 10.7 倍。此外，SmartANNS 可在多块智能固态硬盘下针对大规模数据集实现近线性的性能可扩展性。</p>
+<h1>一、介绍</h1>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320144133.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320144133.png" alt="image.png" style="max-width: 100%;"></a><br>
+高维空间中的近似最近邻搜索（ANNS）是指查找与给定向量最相似对象的过程。它是算法研究中的一个基础问题，在数据挖掘、信息检索以及人工智能驱动的推荐系统等诸多领域有着广泛应用。特别是在近期大语言模型（LLMs）研究热潮的推动下，依托向量数据库的ANNS服务已成为现代人工智能基础设施的核心组成部分。如图 1 所示，各类数据格式（如文档、图像和语音）中的领域知识会被嵌入至高维向量空间，并以特征向量的形式存储在向量数据库中。当用户在聊天机器人中发起查询时，ANNS引擎会基于查询语义查找相似对象，并将最相关、具备上下文感知的结果交付给大语言模型进行后续处理。</p>
+<p>目前已有大量针对 ANNS 问题设计的算法，例如基于图的方法、基于哈希的方法、基于树的方法以及基于量化的方法，这些算法主要聚焦于索引构建的方法论。大多数 ANNS 算法依赖内存内索引以支持快速且准确的搜索，但这会显著增加内存资源需求。例如，阿里巴巴等许多商业推荐系统通常需要TB级内存空间来容纳十亿级向量。然而，这种庞大的资源需求会大幅提升总拥有成本（TCO）（包括采购与运营成本），使得ANNS服务难以扩展至包含数千亿级向量的大规模数据集。这类算法的可扩展性主要受限于主内存中维护的海量索引数据。</p>
+<p>为降低 ANNS 服务的成本，一种可行的方法是将大部分向量索引存储在固态硬盘（SSD）中，同时使用容量适中的动态随机存取存储器（DRAM）作为工作内存。然而，近期研究表明，在基于 SSD 的 ANNS 方案中，输入输出（I/O）操作约占总执行时间的 70%。受限于 SSD 与主机内存之间有限的 PCIe 带宽，批量查询的性能也无法实现扩展。此外，ANNS 引擎常与其他软件集成以提供协同服务，例如 ANNS 支持的推荐系统、面向大语言模型的 ANNS 赋能检索增强生成（RAG）。这些场景可能会加剧 ANNS 引擎与其他程序之间的 PCIe 带宽竞争，进而显著降低应用性能。</p>
+<p>智能固态硬盘（SmartSSD）（即计算型存储设备）的出现，为平衡 ANNS 服务的性能与成本提供了广阔的优化机遇。与传统基于 SSD 的方案（常导致主机内存与 SSD 之间频繁的数据迁移 ）不同，SmartSSD 采用近数据处理（NDP）范式，利用其板载 DRAM 和现场可编程门阵列（FPGA）在本地处理数据。在该方案中，主机可将 ANNS 查询卸载至 SmartSSD 进行近数据处理。SmartSSD 在本地对 SSD 驻留的索引执行 ANNS 查询，随后将部分结果返回给主机进行聚合。更重要的是，由于每块 SmartSSD 使用其内部 PCIe 总线进行本地数据传输，多块 SmartSSD 可实现 ANNS 查询的近线性加速。该方法还显著降低了主机 PCIe 总线的带宽竞争以及主机 CPU / 内存的资源消耗。</p>
+<p>最近，一项名为 CSDANNS的概念验证研究探索了利用 SmartSSD 来卸载大规模近似最近邻搜索（ANNS）的批处理查询。CSDANNS 在每个 SmartSSD 的 FPGA 中实现了一种经典的基于图的 ANNS 算法——分层导航小世界（HNSW）。它对数据集进行顺序切分，以确保每个分段的 HNSW 索引都能完全容纳在板载 DRAM 中。然而，这种简单的方法必须针对每个查询在所有 SmartSSD 上扫描全部索引，从而在资源受限的 SmartSSD 上产生巨大的计算开销。此外，由于 CSDANNS 将所有 ANNS 查询完全卸载到 SmartSSD，其性能仅达到了亚稳水平。分层索引（如 SPANN）是一种在不损害精度的前提下缩小 ANNS 搜索空间的有效方法。它根据聚类算法将十亿级数据集划分为若干分片（shards）。在查询时，首先咨询所有分片的质心，以找到最可能包含最近邻的分片。这种方法可以显著减少不中心的数据访问和计算，因此适用于 SmartSSD 的 ANNS 卸载。</p>
+<p>然而，将分层索引方法直接应用于多个 SmartSSD 仍面临若干挑战。挑战 1：由于多个 SmartSSD之间缺乏通信通道，每个SmartSSD必须搜索更多的分片才能达到所需的精度水平，这导致了额外的计算开销。因此，需要一个全局协调器通过咨询所有分片的质心来缩小搜索空间。挑战 2：使用分层索引方法时，每个ANNS查询被分发到分片的子集，导致不同分片之间的访问分布不均匀（倾斜）。一批查询如果调度不当，可能会导致SmartSSD之间的负载不均衡，最终损害系统的可扩展性。挑战 3：由于查询的搜索范围可能显著不同，通常很难为每个查询确定最少的分片数量。静态配置可能会导致不必要的计算或精度损失。</p>
+<p>在这篇论文中，我们提出了SmartANNS，这是一种基于分层索引方法、针对十亿级数据集且利用SmartSSD实现的可扩展ANNS解决方案。我们探索了几项优化技术来应对上述挑战：1) 我们提出了一种用于ANNS 的“主机 CPU+SmartSSDs”协同处理架构。SmartANNS在主机主内存中维护每个分片的质心，而仅在SmartSSD中存储每个分片的HNSW索引。在搜索阶段，主机CPU首先遍历内存中的质心，然后将查询任务分发到不同的SmartSSD进行更精细的搜索。通过这种方式，主机CPU作为全局协调器，减少了所有SmartSSD中的搜索空间。2) 我们提出了一种动态任务调度机制，以平衡SmartSSD之间的负载并充分利用查询之间的数据复用。我们首先通过离线采样识别每个分片的热度，并将热点分片均匀分布在不同的SmartSSD中以优化数据布局。然后，我们在考虑数据局部性和SmartSSD负载的情况下，调度具有重叠分片的查询任务。3) 我们进一步利用一种基于学习的分片裁剪算法，以避免 SmartSSD上不必要的计算。我们首先通过离线训练构建每个查询与其搜索范围之间的映射，然后由主机CPU在运行时确定每个查询所需的最少分片数量。总的来说，我们做出了以下贡献：</p>
+<p>针对挑战 1，我们提出了一种用于可扩展 ANNS 服务的“主机CPU+SmartSSDs”协同处理架构。它利用分层索引来减少SmartSSD上海量的数据访问和计算。 针对挑战 2，我们提出了一种基于优化数据布局的动态任务调度机制，以实现负载均衡和数据复用。 针对挑战 3，我们提出了一种轻量级的基于学习的分片裁剪算法，以消除 SmartSSD 上不必要的计算。 我们使用三星的商业化SmartSSD实现了SmartANNS，并利用板载FPGA对HNSW搜索内核进行了优化实现。实验结果表明，与目前最先进的基于SmartSSD的ANNS解决方案CSDANNS相比，SmartANNS 的每秒查询率（QPS）最高可提升10.7倍。SmartANNS 的性能也优于目前最先进的基于SSD的解决方案SPANN以及基于GPU的解决方案CUhnsw和GGNN。更重要的是，SmartANNS在使用多个SmartSSD处理大规模数据集时，能够实现近乎线性的可扩展性。</p>
+<h1>二、背景</h1>
+<p>在本节中，我们首先介绍ANNS和SmartSSD的基本背景。随后，我们提出了基于 SmartSSD的ANNS优化契机，并根据观察结果阐述了设计SmartANNS的动机。</p>
+<h2>2.1 近似最邻近搜索</h2>
+<p>最近邻搜索（NNS）问题是指在数据集中寻找与给定点距离最近的点。在这种情况下，让我们考虑一个由n个点组成的数据集 D，其中每个点由一个d维向量 $(x_1, x_2, ..., x_d)$ 表示。给定一个由 d 维向量 $(q_1, q_2, ..., q_d)$ 表示的查询点 q，NNS 的目标是在数据集 D 中识别出一个点 p，使得距离 $d(p, q)$ 最小。衡量两个点之间相似度的距离可以是欧几里得距离、汉明距离等。对于给定的数据集，距离度量通常由生成向量的嵌入模型决定。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320145947.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320145947.png" alt="image.png" style="max-width: 100%;"></a><br>
+在高维向量空间中，NNS成为一个计算上的难题，因为通过线性扫描在海量数据集中检索精确邻居是不可行的。这一现象被称为“维度之咒” 。为了克服这一挑战，学术界提出了许多近似最近邻搜索（ANNS）算法。其目标是检索出给定数量的、接近最优候选者的邻居。这些算法通过利用各种索引技术，有效地修剪掉数据集中不太可能包含最近邻的区域，从而显著提高搜索效率。在众多的ANNS算法中，基于图的方法近年来备受关注。例如，HNSW、NSG和FANNG在ANNS服务中展现出了出色的性能和精度。如图 2 所示，基于图的方法构建了一个邻近图。特征向量被抽象为图中的节点，边则被视为两个节点之间的距离。对于每个查询向量，算法从给定节点开始在图中导航，并按顺序遍历那些可能是近似最近邻候选者的相邻节点。</p>
+<h2>2.2 计算型存储</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320150402.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320150402.png" alt="image.png" style="max-width: 100%;"></a><br>
+计算存储设备 (CSD) 遵循“靠近数据源计算比传输数据到远程处理更高效”的设计原则。通过在存储设备内部部署计算单元，CSD自然地支持了近数据处理（NDP）。这些设备不仅减少了存储设备与主机CPU之间的数据迁移量，还降低了主机资源的占用。图 3 展示了传统计算架构与受CSD赋能的NDP架构。在传统架构中，所有PCIe设备都竞争PCIe总线，因此系统性能受限于主机PCIe总线的带宽。而在受CSD赋能的NDP架构中，由于每个CSD能够利用其内部 PCIe 交换机局部地访问数据，系统可以随着CSD数量的增加实现近乎线性的扩展。</p>
+<p>商业化 CSD（如三星的 SmartSSD）近期已在市场上推出。图 3 展示了三星 SmartSSD 的内部架构。板载DRAM作为NAND闪存的缓存，可同时被FPGA和主机CPU访问。主机CPU 既可以通过标准I/O接口访问数据，也可以将计算指令直接卸载到SmartSSD。然而，如图 3 所示，NAND闪存与FPGA的DRAM之间的数据迁移是通过内部PCIe交换机以点对点 (P2P) 机制实现的。目前，三星 SmartSSD内部NAND闪存与FPGA之间的带宽仅为3 GB/s。</p>
+<h2>2.3 动机</h2>
+<p><strong>使用SmartSSD进行ANNS的优势</strong>。十亿级ANNS服务通常需要TB级的内存空间来实现高性能查询。在传统计算架构中，由于基于SSD的ANNS算法经常会导致磁盘与主内存之间频繁且昂贵的数据迁移，ANNS的性能主要受限于主机PCIe带宽。我们实现了最先进的基于SSD的 SPANN，实验表明I/O操作约占总执行时间的67%。尽管更快的PCIe 6.0有利于性能提升，但SPANN在I/O操作上花费的时间可能仍超过总时间的20%。SmartSSD可以通过利用其内部通道进行数据访问来放宽这一限制。因此，SmartSSD为部署大规模ANNS服务提供了几个显著优势：</p>
+<ul>
+<li>SmartSSD 巨大的存储容量足以容纳十亿级数据集的ANNS索引。</li>
+<li>受益于近数据处理范式，SmartSSD可以显著减少NAND闪存与主机主内存之间的数据迁移。此外，板载FPGA对于ANNS算法中海量的向量距离计算也非常高效。</li>
+<li>SmartSSD的存内计算能力为缓解主机资源竞争提供了更多机会。当ANNS引擎与推荐系统、基于RAG的大语言模型等其他软件协同部署时，主机可以分配更多的CPU、内存和 I/O资源来服务这些交互式应用。</li>
+<li>由于每个SmartSSD都可以作为一个片上系统（SoC）独立处理数据，如果在不同 SmartSSD之间不存在数据依赖，多个SmartSSD就可以实现近乎线性的性能可扩展性。</li>
+</ul>
+<p><strong>现有基于 CSD的ANNS方案的局限性</strong>。CSDANNS是目前唯一一项利用CSD板载FPGA实现基于图的 ANNS 算法（HNSW）的概念验证工作。通过将原始数据集拆分为多个分片，CSDANNS为每个分片构建基于图的索引。这些分片及其索引被均匀地存储在多个 SmartSSD中。然而，对于每个查询，CSDANNS必须使用板载FPGA内核逐一扫描所有分片，从而产生了巨大的计算开销。这放大了SmartSSD在计算能力有限方面的劣势，甚至抵消了近数据处理（NDP）带来的收益。此外，由于CSDANNS将基于图的ANNS完全卸载到 SmartSSD，它忽略了利用主机CPU进行硬件/软件协同处理的可能性。结果导致 CSDANNS 仅达到了亚优性能。这促使我们探索一种更先进的方法在SmartSSD上部署ANNS服务。</p>
+<p><strong>分层索引的优化契机</strong>。采用基于聚类的分层索引的 ANNS 算法已被证明是降低 ANNS 计算成本且不损害精度的高效方法。该方法将数据集划分为若干分片，其中高相似度的向量被聚类在一起。然后，为每个分片构建基于图的索引以加速遍历。在搜索任务被分发到 SmartSSD之前，我们可以通过比较每个分片的质心与查询向量来裁剪无关分片，仅遍历少数几个质心与查询向量距离较近的分片。因此，分层索引方法可以显著减少 SmartSSD 内部的计算量。</p>
+<p>为了更高效地处理SmartSSD上的 ANNS 查询，我们通过两个实验进一步探索了分层索引的数据访问模式。我们利用分层平衡聚类（HBC）算法将包含1亿个向量的SIFT数据集划分为 90个大小相同的分片，并生成 1 万个查询来寻找最相似的向量。默认情况下，我们将每个查询配置为搜索距离最近的前 10 个分片。首先，我们改变查询的批处理大小（batch size），以衡量不同查询所触及的分片百分比，如图 4a 所示。其次，我们配置了三个探测值（即一个查询应当搜索的前 K 个最近分片），然后测量每个分片的访问频率，如图 4b 所示。我们得到以下两个观察结果：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320152904.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320152904.png" alt="image.png" style="max-width: 100%;"></a><br>
+观察 1：在一段时间内，大部分分片会被不同的查询访问，这意味着良好的数据局部性。由于不同的查询可能会搜索同一个分片，且某些热门分片可能会被一批查询频繁访问。如图 4a 所示，当批处理大小超过 25 时，90% 的全部分片被不同查询访问的次数均超过一次。这暗示任务调度方案应充分利用查询间的数据局部性，以尽可能复用内存中的分片。</p>
+<p>观察 2：不同分片的访问分布呈现高度倾斜。如图 4b 所示，所有分片按其访问频率排序。约 10% 的分片极其热门，而约 10% 的分片访问频率较低。由于最相似的向量聚类在一起并表现出相似的热度等级，我们应当谨慎地将热门分片放置在不同的 SmartSSD 上，以实现负载均衡。</p>
+<h1>三、SmartANNS综述</h1>
+<p>SmartANNS 利用分层索引实现了“主机 CPU + SmartSSDs”的协同 ANNS 处理架构。图 5 展示了 SmartANNS 架构的概览。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320153354.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320153354.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>离线处理：</strong> 与传统的 ANNS 算法类似，SmartANNS 也需要以离线方式构建索引。首先，SmartANNS 采用分层平衡聚类（HBC）算法将数据集划分为多个大小相等且向量相似度高的分片（shards）。随后，为每个分片独立构建 HNSW 索引。这些分片的质心维护在主机主内存中，而分片本身存储在 SmartSSD 中。之后，SmartANNS 采样一部分训练查询来训练梯度提升决策树（GBDT）。该学习模型可用于在运行时确定每个查询的最小搜索范围。此外，SmartANNS还会收集每个分片的热度，以校准多个SmartSSD上的数据布局。</p>
+<p><strong>在线处理：</strong> 当接收到ANNS查询时，SmartANNS会计算查询向量与每个分片质心之间的距离。利用这些距离，梯度提升决策树会预测为找到近邻而需要搜索的分片数量。随后，主机利用第 4.3 节中详细阐述的任务调度机制，将查询任务分发到不同的 SmartSSD。</p>
+<p>当 SmartSSD 收到查询任务时，如果该任务可以复用已随其他任务加载到板载 DRAM 中的分片，则会优先处理该任务。对于每个任务，SmartSSD 利用内部 PCIe 交换机将分片索引从 SSD 传输到 FPGA 的板载 DRAM。接着，SmartSSD 内部的 ANNS 引擎开始迭代搜索，并将结果发送回主机。最后，主机汇总所有从不同 SmartSSD 返回的结果。</p>
+<h1>四、设计</h1>
+<p>在这一部分，我们介绍了SmartANNS的设计。详细阐述了层次化索引的构建、基于学习的分片剪枝以及基于优化数据布局的多SmartSSD任务调度。最后，本文给出了SmartSSDs中向量搜索引擎的FPGA实现。</p>
+<h2>4.1 分层索引</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320154210.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320154210.png" alt="image.png" style="max-width: 100%;"></a><br>
+图 6 展示了如何在 SmartSSD 和主机中构建这些分层索引。为了降低 SmartSSD 的计算成本，SmartANNS 利用 HBC 算法尽可能均匀地将向量数据集划分为多个分片（shards）。我们首先配置能被 SmartSSD 板载 DRAM 容纳的分片最大尺寸。然后，数据集以自顶向下的方式进行迭代划分，直到所有分片都小于配置的最大尺寸。为了解决聚类过程中的边界问题 ，我们还采用了灵活的向量分配策略。如果一个向量位于多个分片 $S_i$ 的边界上，我们根据以下公式放置该向量：<br>
+v ∈ Si ⇔ Dist(v, Si) ≤ (1 + ε) × Dist(v, S1)</p>
+<p>其中 $v$ 表示待放置的向量，$S_1$ 代表距离向量 $v$ 最近的分片，$S_i$ 表示其他分片，$\varepsilon$ 决定了向量是否应同时放置到其他分片的距离阈值。每个向量最多可以放置在两个分片中。在划分阶段之后，我们采用 HNSW 算法为每个分片内的所有向量分别生成基于图的索引。邻近图通过不断向空图中添加新向量来构建。当一个向量作为新顶点添加时，会在当前图中搜索其前 $k$ 个（通常为 64 个）最近邻，并在新添加的顶点与其最近邻之间建立新边。随后，这些邻居顶点需更新其最近邻以保持最大边数。</p>
+<p>然而，将分片及其质心直接放置在不同的 SmartSSD 上是高昂的，因为这种数据布局会导致额外的计算成本。由于缺乏 SmartSSD 间的通信通道，在一个 SmartSSD 上进行的查询无法获知该查询与存储在其他 SmartSSD 上的分片之间的距离。对于给定的查询，某个 SmartSSD 内最近的分片可能并非全局最近的分片。因此，每个 SmartSSD 通常需要扫描更多的本地分片才能达到预期的精度。</p>
+<p>为了解决这个问题，SmartANNS 利用主机 CPU 作为中央协调器。鉴于所有 SmartSSD 均可被主机 CPU 访问，SmartANNS 将所有分片的质心保留在主机内存中。它通过管理键值对（key-value pair）来记录每个分片在 SmartSSD 中的地址。当确定了与查询相关的若干分片后，主机 CPU 会根据这些键值对从 SmartSSD 中检索相应的分片。随后，根据任务调度机制分配给各个 SmartSSD。通过这些分层索引，每个查询都能获知应在 SmartSSD 上进一步搜索的最接近的分片，从而消除了 SmartSSD 内部不必要的计算。</p>
+<h2>4.2 分片剪枝</h2>
+<p>由于查询的难度可能存在显著差异，每个查询的搜索范围可能会动态变化。倒排索引方法通常构建极小的分片（shards）和大量的质心。因此，大部分计算开销源于质心的遍历。相比之下，SmartANNS 专注于在充分发挥 SmartSSD 潜力的同时，最大限度地减少主机资源的消耗。为此，SmartANNS 构建了较大的分片，并相应地减少了质心的数量。遍历质心的成本相对较低，而大部分计算成本集中在搜索分片上。因此，为所有查询配置固定数量的分片是不合理的，因为这可能会导致不必要地扫描无关分片。</p>
+<p>为了解决这一问题，我们利用基于学习的方法来确定每个查询的最佳分片数量。由于梯度提升决策树（GBDT）模型的轻量级和高性能特性，我们选择了该模型。GBDT 是一种集成学习算法，它结合了多个简单的决策树（称为“弱学习器”）来创建一个强大的预测模型。它通过初始预测平均值、计算残差以及使弱决策树拟合这些负梯度来迭代地训练模型。在推理阶段，该模型通过整合所有单个弱模型的加权贡献来生成预测。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320160515.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320160515.png" alt="image.png" style="max-width: 100%;"></a><br>
+该模型的输入参数包括查询向量、其与分片间的空间关系以及分片总数。这些输入特征如表 1 所示。我们使用相对距离作为模型训练的特征。设 $D_1$ 表示查询与第 1 个最近分片之间的距离，$D_k$ 表示查询与第 $k$ 个最近分片之间的距离，我们使用 $D_k$ 与 $D_1$ 的比值作为训练决策树的关键特征。这些抽象特征可以反映查询与数据之间的内在相关性，并提高模型的适应性和鲁棒性。为了准备训练数据，我们从每个十亿级数据集中采样 100 万个训练向量。对于输出值，我们对基准真相（ground truth）最近邻进行穷举搜索，然后确定涵盖这些邻居所需的最少分片数量。使用 NVIDIA V100 GPU，这一过程耗时不到一小时。随后，我们将学习率设置为 0.05，并开始对 GBDT 模型进行 500 次迭代训练，使用 CPU 仅需 3 分钟。</p>
+<p>训练后的模型非常轻量，内存占用仅约 1 MB，推理一次仅需几十微秒。为了将该模型集成到 SmartANNS 中，我们在主机端使用一个 CPU 核心部署该模型。对于每个查询，我们会计算其到每个分片的距离，并按升序对这些距离进行排序。模型能够确定每个查询理想的分片数量，随后这些分片将由 SmartSSD 中的 FPGA 内核进行扫描。</p>
+<h2>4.3 任务调度</h2>
+<p>SmartANNS 利用多个 SmartSSD 并行实现了近数据处理（NDP）功能。一种直观的方法是利用任务并行性，即将数据集复制到每个 SmartSSD，并将查询均匀分发到所有 SmartSSD。然而，这种简单的方法无法充分利用查询之间的数据局部性，并可能导致存储容量的巨大浪费。相比之下，我们通过充分利用多个 SmartSSD 之间的数据并行性来解决这些问题。在这种方法中，数据集被均匀分布在所有 SmartSSD 上，并根据数据分布将查询分发到合适的 SmartSSD。然而，由于分片的数据热度可能不同，这种策略可能会导致 SmartSSD 之间的负载不均衡，如图 7 所示。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320161016.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320161016.png" alt="image.png" style="max-width: 100%;"></a><br>
+为了提高多 SmartSSD 系统的可扩展性，我们首先根据分片及其副本的热度优化数据布局。然后，我们基于优化的数据布局设计了一个任务调度器。在构建 GBDT 的训练数据时，我们会同步记录每个分片的热度。在将分片放置到 SmartSSD 时，我们根据热度对分片进行排序。通过迭代地将热度最高的分片放置在累积热度最低的 SmartSSD 上，我们最终可以使所有 SmartSSD 的热度值趋于一致。此外，我们将分片从一个 SmartSSD 复制到另一个 SmartSSD 一次，如图 8 所示。这种数据复制机制通过将任务从过载的 SmartSSD 动态迁移到另一个 SmartSSD，为负载均衡提供了更大的灵活性。<br>
+（思考补充：为什么这样复制？首先注意一个分片只能复制到除本盘外的其它盘，如图可以发现1、3、8这三个分片的热度为2，其它都是1（注意：这是这个场景下的热度，为了举个例子，实际计算的热度数据来源是从构建GBDT得到的），所以在复制之前三个盘的累积热度分别为：5、3、4；采用如图所示的复制方法，三个盘的累积热度变为9、8、7；还有一种复制方法是将4、5、6全复制到smartssd1，这种方式下，复制后三个盘的累积热度变为8、9、7，这两种方案都在尽可能情况下实现了负载均衡）<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320161258.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320161258.png" alt="image.png" style="max-width: 100%;"></a><br>
+任务调度器背后的核心思想是通过考虑查询之间的数据复用来动态平衡 SmartSSD 的负载。算法 1 列出了任务调度的伪代码。其输入包括 SmartSSD 设备与分片之间的映射，以及待分配的任务（这里的任务指的是单次查询的单个分片）。输出是一个记录分配给每个 SmartSSD 任务的二维数组。我们提出了一个简单的模型来估算任务列表的总负载。一个任务的执行包括将分片加载到 FPGA DRAM 以及进行向量搜索。由于每个分片的大小几乎相同，所有任务的搜索延迟也是相似的。因此，我们可以估算任务的搜索延迟，并根据分片大小和 SmartSSD 的内部带宽估算分片加载的延迟。如果多个任务访问重复的分片，我们的模型仅计算一次分片加载的延迟。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320161917.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320161917.png" alt="image.png" style="max-width: 100%;"></a><br>
+在调度过程中，我们首先识别存储该任务对应分片的 SmartSSD，并将其视为基础设备（第 2 行）。然后，我们检查这些设备上是否已经存在具有相同分片的已分配任务（第 3 行）。如果这些基础设备要么都有、要么都没有此类任务（第 4 行），则与这些设备相关的额外处理开销是相同的。因此，我们从这些基础设备中选择负载最低的设备来分配任务（第 4-6 行）。若某些基础设备有此类任务而其他设备没有（第 8 行），我们需要考虑因数据复用而导致额外处理开销不同的情况。针对这种情形，我们为每个基础设备创建一个临时任务列表，并将给定任务插入列表中。随后，我们使用上述模型估算该临时任务列表的总负载。最后，我们选择预估负载最小的设备作为分配目标（第 8-16 行）。我们记录每个设备的负载，并在每次任务分配后更新目标设备。图 8 展示了一个简单的例子。我们的方法在保证 SmartSSD 之间负载均衡的同时，能充分利用查询之间的数据复用。</p>
+<h2>4.4 向量搜索引擎</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320170725.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320170725.png" alt="image.png" style="max-width: 100%;"></a><br>
+我们在 SmartSSD 内部基于 HNSW 算法实现了一个完全优化的、基于 HLS（高层综合）的向量搜索引擎。如图 9 所示，该引擎由两个核心模块组成：任务重排序模块和搜索内核。正如图 4a 所示，一个分片可能会被不同的任务重复访问。为了消除 SmartSSD 中的这种冗余，我们设计了任务重排序模块。当 SmartSSD 从主机接收任务时，它首先重新排列任务的执行顺序，以便顺序处理与同一分片相关的任务。随后，SmartSSD 将该分片的图索引从 NAND 闪存加载到 FPGA DRAM 中以进行后续搜索。通过这种方式，数据可以在查询之间复用，从而有效分摊数据访问的成本。</p>
+<p>搜索内核的关键组件包括层监控器、距离计算模块、排序模块和数组更新模块。在加载好的图索引上进行搜索时，内核维护三个不同的列表：已访问列表、排序候选列表和排序最终列表。在每一层遍历候选列表中的第一个向量时，会调用距离计算模块来计算该向量的邻居与查询向量之间的距离。随后，距离更近的邻居会被插入到候选列表和最终列表中。该循环持续进行，直到候选列表为空或找不到更近的邻居为止。</p>
+<p>为了提高 FPGA 的效率，我们为搜索内核设计了几项优化。首先，当内核遍历一个候选向量时，它会并行读取所有邻居，并配置独立的接口来并行加载向量数据和相应的链路表。如图 9 所示，我们使用 m_axi 适配器将查询和向量数据封装在 MAXI-A 中，并将链路表和搜索结果封装在 MAXI-B 中。其次，为了节省片上存储空间，我们使用位图（bitmaps）代替原始 HNSW 算法使用的布尔数组来实现已访问列表。第三，为了高效更新候选列表和最终列表，我们实现了针对 FPGA 高度优化的双调排序（bitonic sort）算法。第四，在距离计算模块中，我们利用了 HLS 的循环展开和流水线优化，通过 FPGA 的多个处理单元（PE）实现高维向量之间的并行距离计算。第五，由于每个分片可以独立处理，我们在板载 DRAM 中建立了数据池，并在 FPGA 内部建立了内核池，以提高任务并行性。一旦分片加载到数据池中，内核池中的内核就可以并行处理与该分片相关的任务。同时，SmartSSD 可以在内核搜索一个分片时，将另一个分片加载到数据池中。这种池化机制可以有效重叠分片加载和向量搜索过程，从而隐藏数据访问的延迟。</p>
+<h2>4.5 系统实现</h2>
+<p>我们在由主机 CPU 和 SmartSSD 组成的异构计算架构中实现了 SmartANNS 的原型系统。</p>
+<p><strong>主机端：</strong> 包含第一层索引搜索、分片剪枝和任务调度模块，均使用 C++ 编写。由于这些模块对计算资源的消耗非常轻量，我们仅使用一个 CPU 核心来执行它们，其平均利用率甚至低于 10%。</p>
+<p><strong>SmartSSD 端：</strong> 包含部署在 FPGA 上的基于 HLS 的搜索内核。我们扩展了 BBANN和 hnswlib库的功能以构建分层索引。</p>
+<p><strong>模型与通信：</strong> 对于 GBDT 模型，我们利用 LightGBM框架，并遵循 LAET来配置模型参数。主机与 SmartSSD 之间的通信通过赛灵思运行时（XRT）实现，它负责管理数据准备、内核激活以及从搜索内核收集结果。</p>
+<p><strong>硬件实现：</strong> 我们使用 Xilinx Vitis 2021 对内核进行综合与实现。由于 FPGA 资源有限，我们在每个 SmartSSD 内部例化了两个内核。表 2 展示了 FPGA 上搜索内核的资源利用率情况。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320172301.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320172301.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h1>五、实验</h1>
+<h2>5.1 实验方法</h2>
+<p>我们在配备了 Intel Xeon Gold 5220 2.20GHz 72 核处理器和 128 GB DRAM 的服务器上进行实验。服务器运行 Ubuntu 20.04.4 LTS 操作系统。我们使用三星第一代 SmartSSD 作为计算存储设备，该设备包含赛灵思（Xilinx）UltraScale+ FPGA、4 GB DDR4 和 4 TB NAND Flash。我们使用多块SmartSSD来评估ANNS的性能可扩展性。此外，我们还使用一块 Nvidia Tesla V100 来评估基于GPU的ANNS解决方案。实验中的详细硬件配置如表 3 所示。我们使用s-tui工具和Vitis分析器来监测主机CPU和SmartSSD的静态与动态功耗。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320172744.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320172744.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>数据集：</strong> 在实验中，我们使用 1 万至 10 万个查询对四个十亿级数据集进行评估。所有数据集均源自 BIGANN 基准测试，包括 SIFT1B、SPACEV1B、DEEP1B和 Turing1B。这些数据集的详细信息如表 4 所示。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320172931.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260320172931.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>对比 ANNS 方案：</strong> 我们首先将 SmartANNS 与 CSDANNS 进行对比，后者是目前将 ANNS 卸载到 SmartSSD 的前沿方案。CSDANNS 的 HNSW 搜索引擎同样采用 HLS 实现。在所有实验中，我们均采用 CXL-ANNS 指定的参数来构建基于 HNSW 图的索引。我们还将 SmartANNS 与目前领先的基于 SSD 的方案 SPANN 进行对比，SPANN 在主机内存中搜索由质心组成的图索引，然后从 SSD 加载相关数据。此外，我们还对比了 CUhnsw 和 GGNN，两者均为 GPU 加速的基于图的 ANNS 方案；在这些配置中，CPU 负责数据移动，而 GPU 处理距离计算。</p>
+<p><strong>评估指标：</strong> 为了公平对比，我们在相同的搜索精度水平下通过测量 QPS（每秒查询数）来评估 ANNS 性能。精度由召回率（即 Recall@k）量化，该指标代表搜索过程中检索到的前 k 个近邻包含（至少一个）基准真相（ground-truth）近邻的查询比例。根据 BIGANN 基准标准，除非另有说明，我们展示在 Recall@10 下精度为 90% 时的实验结果。搜索精度由搜索的分片数量以及每个分片内部搜索队列的长度决定。当启用分片剪枝（shard pruning）时，我们通过增加搜索队列的长度来保证相同的搜索精度。</p>
+<h2>5.2-5.5</h2>
+<p>略</p>
+<h1>六、相关工作</h1>
+<p><strong>ANNS 的内存扩展技术</strong><br>
+对于十亿级规模的数据集，现有系统通常难以将其完全容纳在内存中。一些基于 SSD 的方法为主存和磁盘设计了不同的索引结构，以实现高效的索引与查询，并在查询延迟与精度之间取得了良好的平衡。尽管这些方案可以缓解内存资源需求，但 ANNS 查询通常会产生密集的磁盘 I/O 请求，导致磁盘与主存之间频繁的数据交换。HM-ANN利用包括 DRAM 和英特尔傲腾（Intel Optane）持久内存的混合内存系统来扩展 ANNS 的内存容量。它分别在 DRAM 和傲腾内存中存储简化图和详细图，从而减少了 ANNS 过程中对傲腾内存的访问次数。CXL-ANNS基于高速计算链路（CXL）扩展主机内存，并为 CXL 内存设计了缓存和预取技术，从而最大限度地降低 CXL 内存高延迟对系统性能的影响。然而，这些内存扩展方法显著增加了数据中心的硬件成本。相比之下，SmartANNS 通过将 ANNS 查询卸载到 SmartSSD，可以显著降低内存资源需求，并利用多个 SmartSSD 在大规模数据集上实现近乎线性的性能可扩展性。</p>
+<p><strong>ANNS 的计算加速技术</strong><br>
+最近的一些研究利用 GPU 和 FPGA 基于 IVF-PQ 算法来加速向量搜索。由于该算法通常涉及密集的距离计算，GPU 和 FPGA 的高并行计算能力可以被充分利用以提升搜索速度。此外，也有一些工作致力于利用 GPU 和 FPGA来加速基于图的 ANNS 算法。然而，大多数此类方法仅在小规模数据集上表现出色，由于 GPU 和 FPGA 的内存容量有限，无法扩展至大规模数据集。与这些专注于利用 GPU 和高端 FPGA 进行计算加速的方法不同，SmartANNS 在“CPU + SmartSSD”协作架构中充分利用了近数据处理（NDP）范式，为十亿级数据集优化了 ANNS 服务。</p>
+<p><strong>ANNS 的存内处理技术（In-Storage Processing）</strong><br>
+为了提供高性价比且高能效的 ANNS 服务，最近的一些提案基于近数据处理（NDP）范式将 ANNS 卸载到计算存储设备（CSD）中。Vstore是一款集成在 SSD 中的基于图的 ANNS 加速器。它充分利用了 SSD 的多通道特性来并行搜索基于图的索引，并探索了查询之间的数据复用，以减轻数据访问和距离计算的开销。Pyramid利用近内存计算（NMC）加速器和存内处理（ISP）加速器来加速 ANNS。然而，这些提案均基于<strong>架构仿真</strong>，且都没有考虑使用多个计算存储设备时的可扩展性问题。相比之下，SmartANNS 在真实的商用 SmartSSD 上实现，并通过使用多个 SmartSSD 实现了近乎线性的性能可扩展性。</p>
+<p><strong>与 CSDANNS 的对比</strong><br>
+CSDANNS是迄今为止第一项证明将 ANNS 卸载到计算存储设备可行性的工作。它按顺序拆分数据集，并为每个分区构建 HNSW 索引。这种简单的方法要求每个查询扫描所有分区，从而导致 SmartSSD 上极高的计算成本。因此，CSDANNS 仅获得了次优性能。SmartANNS 基于分层索引方法降低了 SmartSSD 上的计算开销，并解决了通过软硬件协作方式将该方法应用于 SmartSSD 的挑战。此外，SmartANNS 利用数据复用、负载均衡和基于学习的分片剪枝，在多个 SmartSSD 上实现了可扩展的 ANNS 性能。</p>
+<h1>七、总结</h1>
+<p>在这项工作中，我们提出了 <strong>SmartANNS</strong>，这是一种利用 <strong>SmartSSD</strong> 支持大规模 ANNS（近似最近邻搜索）服务的软硬件协同设计架构。SmartANNS 构建于分层索引方法之上，通过从架构、数据布局到算法层面的多项优化，解决了“主机 CPU + SmartSSD”平台上的一系列挑战。与现有的前沿方案 CSDANNS 相比，SmartANNS 显著提升了系统的 QPS（每秒查询数）。此外，SmartANNS 的性能随 SmartSSD 数量的增加呈近乎线性增长，这意味着 SmartANNS 能够很好地扩展以应对极大规模的数据集。</p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+
+
+</script>
+<script>MathJax = {tex: {inlineMath: [["$", "$"]]}};</script><script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</html>
