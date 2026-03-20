@@ -259,7 +259,7 @@ int isAsciiDigit(int x)
 <meta property="og:url" content="https://waibibab-cs.github.io/post/CMU15-213%20Lab%EF%BC%9ADataLab-shi-yan-ji-lu.html">
 <meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
 <title>CMU15-213 Lab：DataLab实验记录</title>
-
+<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
 
 
 </head>
@@ -283,7 +283,17 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
     body {padding: 8px;}
     .postTitle{font-size:24px;}
 }
-
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
 </style>
 
 
@@ -321,89 +331,80 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 <p>我运行的时候出现了如下的问题：<br>
 <a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144517.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144517.png" alt="image.png" style="max-width: 100%;"></a></p>
 <p>这是由于环境没有完善造成的，通过执行以下命令来完善编译环境：</p>
-<pre lang="bash" class="notranslate"><code class="notranslate">sudo apt-get update 
-sudo apt-get install gcc-multilib libc6-dev-i386
-</code></pre>
+<div class="highlight highlight-source-shell"><pre class="notranslate">sudo apt-get update 
+sudo apt-get install gcc-multilib libc6-dev-i386</pre></div>
 <h1>puzzles求解</h1>
 <h2>bitXor</h2>
 <p>根据德摩根定律可知：</p>
 <p>$\begin{align*} x \wedge y &amp;amp;= (\neg x \mathbin{\&amp;amp;} y) \mid (x \mathbin{\&amp;amp;} \neg y) \\ &amp;amp;= \neg \bigl( \neg \bigl( (\neg x \mathbin{\&amp;amp;} y) \mid (x \mathbin{\&amp;amp;} \neg y) \bigr) \bigr) \\ &amp;amp;= \neg \bigl( \neg (\neg x \mathbin{\&amp;amp;} y) \mathbin{\&amp;amp;} \neg (x \mathbin{\&amp;amp;} \neg y) \bigr) \end{align*}$<br>
 按照要求，编写代码：</p>
-<pre lang="c" class="notranslate"><code class="notranslate">int bitXor(int x, int y)
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-smi">int</span> <span class="pl-en">bitXor</span>(<span class="pl-smi">int</span> <span class="pl-s1">x</span>, <span class="pl-smi">int</span> <span class="pl-s1">y</span>)
 {
-  int left = ~(~x &amp; y);
-  int right = ~(x &amp; ~y);
-  int res = ~(left &amp; right);
-  return res;
-}
-</code></pre>
+  <span class="pl-smi">int</span> <span class="pl-s1">left</span> <span class="pl-c1">=</span> ~(~<span class="pl-s1">x</span> <span class="pl-c1">&amp;</span> <span class="pl-s1">y</span>);
+  <span class="pl-smi">int</span> <span class="pl-s1">right</span> <span class="pl-c1">=</span> ~(<span class="pl-s1">x</span> <span class="pl-c1">&amp;</span> ~<span class="pl-s1">y</span>);
+  <span class="pl-smi">int</span> <span class="pl-s1">res</span> <span class="pl-c1">=</span> ~(<span class="pl-s1">left</span> <span class="pl-c1">&amp;</span> <span class="pl-s1">right</span>);
+  <span class="pl-k">return</span> <span class="pl-s1">res</span>;
+}</pre></div>
 <p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144553.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144553.png" alt="image.png" style="max-width: 100%;"></a></p>
 <h2>tmin</h2>
 <p>根据补码公式：<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211145247.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211145247.png" alt="image.png" style="max-width: 100%;"></a><br>
 我们知道，32位补码能表示的最小数是<code class="notranslate">1000···(共31个0)000</code>，思路很简单，首先对0进行取反得到<code class="notranslate">all_one = 1111···(共32个1)111</code>然后让这个数左移31位即可</p>
-<pre lang="c" class="notranslate"><code class="notranslate">int tmin(void)
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-smi">int</span> <span class="pl-en">tmin</span>(<span class="pl-smi">void</span>)
 
 {
-  int all_one = ~0;
-  int res = all_one &lt;&lt; 31;
-  return res;
-}
-</code></pre>
+  <span class="pl-smi">int</span> <span class="pl-s1">all_one</span> <span class="pl-c1">=</span> ~<span class="pl-c1">0</span>;
+  <span class="pl-smi">int</span> <span class="pl-s1">res</span> <span class="pl-c1">=</span> <span class="pl-s1">all_one</span> &lt;&lt; <span class="pl-c1">31</span>;
+  <span class="pl-k">return</span> <span class="pl-s1">res</span>;
+}</pre></div>
 <p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144602.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144602.png" alt="image.png" style="max-width: 100%;"></a></p>
 <h2>isTmax</h2>
 <p>我们知道，32位补码能表示的最大数是<code class="notranslate">01111···(共31个1)111</code>，然后我们发现：Tmax的补码的位表示与Tmax+1相同，也就是：<br>
 $$Tmax + 1 == \neg Tmax$$<br>
 在位运算中如何实现当a和b相同时返回一呢？如下所示</p>
-<pre lang="c" class="notranslate"><code class="notranslate">return !(a ^ b);
-</code></pre>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">return</span> !(<span class="pl-s1">a</span> ^ <span class="pl-s1">b</span>);</pre></div>
 <p>接下来思考有没有边界情况？发现当x是<code class="notranslate">111···(共32个1)111</code>时，同样满足上述性质，因此我们需要把这个情况排除，综上，我们编写如下代码：</p>
-<pre lang="c" class="notranslate"><code class="notranslate">int isTmax(int x)
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-smi">int</span> <span class="pl-en">isTmax</span>(<span class="pl-smi">int</span> <span class="pl-s1">x</span>)
 
 {
-  int x_o = ~x;
-  int x_and_one = x + 1;
-  int is_not_all_one = !!(~x);
-  return !(x_o ^ x_and_one) &amp; is_not_all_one;
-}
-</code></pre>
+  <span class="pl-smi">int</span> <span class="pl-s1">x_o</span> <span class="pl-c1">=</span> ~<span class="pl-s1">x</span>;
+  <span class="pl-smi">int</span> <span class="pl-s1">x_and_one</span> <span class="pl-c1">=</span> <span class="pl-s1">x</span> <span class="pl-c1">+</span> <span class="pl-c1">1</span>;
+  <span class="pl-smi">int</span> <span class="pl-s1">is_not_all_one</span> <span class="pl-c1">=</span> !!(~<span class="pl-s1">x</span>);
+  <span class="pl-k">return</span> !(<span class="pl-s1">x_o</span> ^ <span class="pl-s1">x_and_one</span>) <span class="pl-c1">&amp;</span> <span class="pl-s1">is_not_all_one</span>;
+}</pre></div>
 <p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144609.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144609.png" alt="image.png" style="max-width: 100%;"></a></p>
 <h2>allOddBits</h2>
 <p>很容易想到的一个思路是让x与0xAAAAAAAA做与运算，如果结果等于0xAAAAAAAA就返回一，因此这个问题就转换为了如何构造0xAAAAAAAA，由于datalab最大能够使用的整数常量为0xff，因此我们用0xAA去构造0xAAAAAAAA，综上，我们编写如下代码：</p>
-<pre lang="c" class="notranslate"><code class="notranslate">int allOddBits(int x)
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-smi">int</span> <span class="pl-en">allOddBits</span>(<span class="pl-smi">int</span> <span class="pl-s1">x</span>)
 {
-  int two_a = 0xAA;
-  int eight_a = (two_a &lt;&lt; 24) + (two_a &lt;&lt; 16) + (two_a &lt;&lt; 8) + two_a; // 0xAAAAAAAA
-  return !(eight_a ^ (eight_a &amp; x));
-}
-</code></pre>
+  <span class="pl-smi">int</span> <span class="pl-s1">two_a</span> <span class="pl-c1">=</span> <span class="pl-c1">0xAA</span>;
+  <span class="pl-smi">int</span> <span class="pl-s1">eight_a</span> <span class="pl-c1">=</span> (<span class="pl-s1">two_a</span> &lt;&lt; <span class="pl-c1">24</span>) <span class="pl-c1">+</span> (<span class="pl-s1">two_a</span> &lt;&lt; <span class="pl-c1">16</span>) <span class="pl-c1">+</span> (<span class="pl-s1">two_a</span> &lt;&lt; <span class="pl-c1">8</span>) <span class="pl-c1">+</span> <span class="pl-s1">two_a</span>; <span class="pl-c">// 0xAAAAAAAA</span>
+  <span class="pl-k">return</span> !(<span class="pl-s1">eight_a</span> ^ (<span class="pl-s1">eight_a</span> <span class="pl-c1">&amp;</span> <span class="pl-s1">x</span>));
+}</pre></div>
 <p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144616.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144616.png" alt="image.png" style="max-width: 100%;"></a></p>
 <h2>negate</h2>
 <p>刚开始我以为让这个题变一个符号位就行，于是是这样写的：</p>
-<pre lang="c" class="notranslate"><code class="notranslate">int negate(int x) {
-	int tmin = 1 &lt;&lt; 31;
-	return x ^ tmin;
-}
-</code></pre>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-smi">int</span> <span class="pl-en">negate</span>(<span class="pl-smi">int</span> <span class="pl-s1">x</span>) {
+	<span class="pl-smi">int</span> <span class="pl-s1">tmin</span> <span class="pl-c1">=</span> <span class="pl-c1">1</span> &lt;&lt; <span class="pl-c1">31</span>;
+	<span class="pl-k">return</span> <span class="pl-s1">x</span> ^ <span class="pl-s1">tmin</span>;
+}</pre></div>
 <p>但才想起来tmin和0这两个边界没办法处理，想了半天不知道这个边界如何处理？又突然想起来，其实求负数直接用补码定义就行了......取反加一</p>
-<pre lang="c" class="notranslate"><code class="notranslate">int negate(int x) {
-	return ~x + 1;
-}
-</code></pre>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-smi">int</span> <span class="pl-en">negate</span>(<span class="pl-smi">int</span> <span class="pl-s1">x</span>) {
+	<span class="pl-k">return</span> ~<span class="pl-s1">x</span> <span class="pl-c1">+</span> <span class="pl-c1">1</span>;
+}</pre></div>
 <p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144622.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144622.png" alt="image.png" style="max-width: 100%;"></a></p>
 <h2>isAsciiDigit</h2>
 <p>这道题是让我们判断x是否在一个区间范围<code class="notranslate">[0x30, 0x39]</code>之内，因此我们可以让x与0x30作差，让0x39与x作差，然后当两个差的符号均为正，则结果返回1</p>
 <p>然而，这道题是不允许使用减号的，所以可以改成加上对应的负数，如何求负数呢？我们只需要按照上道题的取反加一的方法即可！</p>
-<pre lang="c" class="notranslate"><code class="notranslate">int isAsciiDigit(int x)
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-smi">int</span> <span class="pl-en">isAsciiDigit</span>(<span class="pl-smi">int</span> <span class="pl-s1">x</span>)
 {
-  int low = 0x30;
-  int high = 0x39;
-  int diff1 = x + (~low + 1);
-  int diff2 = high + (~x + 1);
-  int sign1 = diff1 &gt;&gt; 31 &amp; 1;
-  int sign2 = diff2 &gt;&gt; 31 &amp; 1;
-  return !(sign1 | sign2);
-}
-</code></pre>
+  <span class="pl-smi">int</span> <span class="pl-s1">low</span> <span class="pl-c1">=</span> <span class="pl-c1">0x30</span>;
+  <span class="pl-smi">int</span> <span class="pl-s1">high</span> <span class="pl-c1">=</span> <span class="pl-c1">0x39</span>;
+  <span class="pl-smi">int</span> <span class="pl-s1">diff1</span> <span class="pl-c1">=</span> <span class="pl-s1">x</span> <span class="pl-c1">+</span> (~<span class="pl-s1">low</span> <span class="pl-c1">+</span> <span class="pl-c1">1</span>);
+  <span class="pl-smi">int</span> <span class="pl-s1">diff2</span> <span class="pl-c1">=</span> <span class="pl-s1">high</span> <span class="pl-c1">+</span> (~<span class="pl-s1">x</span> <span class="pl-c1">+</span> <span class="pl-c1">1</span>);
+  <span class="pl-smi">int</span> <span class="pl-s1">sign1</span> <span class="pl-c1">=</span> <span class="pl-s1">diff1</span> &gt;&gt; <span class="pl-c1">31</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">1</span>;
+  <span class="pl-smi">int</span> <span class="pl-s1">sign2</span> <span class="pl-c1">=</span> <span class="pl-s1">diff2</span> &gt;&gt; <span class="pl-c1">31</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">1</span>;
+  <span class="pl-k">return</span> !(<span class="pl-s1">sign1</span> | <span class="pl-s1">sign2</span>);
+}</pre></div>
 <p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144629.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144629.png" alt="image.png" style="max-width: 100%;"></a></p>
 <h2>conditional</h2>
 <p>使用位运算模拟条件语句，我们可以使用<strong>掩码mask</strong><br>
@@ -412,14 +413,13 @@ $$Tmax + 1 == \neg Tmax$$<br>
 这样的话，最终就返回：<code class="notranslate">return (mask &amp; a) | (~mask &amp; b)</code><br>
 因为当条件为true时，全1的mask与a进行与运算还是a，而~mask为0，与b进行与运算结果为0，因此最终返回a；同理，条件为false时，最终返回false</p>
 <p>但是，我们在这个题中如何构造mask呢？可以使用：<code class="notranslate">~(!!x)+1</code>，当x不等于0时，也就是条件为true时，<code class="notranslate">!!x</code>为1，取反加一就是-1，位表示刚好是全1，当x等于0时，也就是条件为false时，<code class="notranslate">!!x</code>为0，取反加一还是0，位表示刚好是全0。综上：</p>
-<pre lang="c" class="notranslate"><code class="notranslate">int conditional(int x, int y, int z)
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-smi">int</span> <span class="pl-en">conditional</span>(<span class="pl-smi">int</span> <span class="pl-s1">x</span>, <span class="pl-smi">int</span> <span class="pl-s1">y</span>, <span class="pl-smi">int</span> <span class="pl-s1">z</span>)
 {
-  int mask = ~(!!x) + 1; // 如果x不为0，就转换为全1，否则转换为全0
-  int true_val = y &amp; mask;
-  int false_val = z &amp; ~mask;
-  return true_val | false_val; // true_val和false_val必有一个是0
-}
-</code></pre>
+  <span class="pl-smi">int</span> <span class="pl-s1">mask</span> <span class="pl-c1">=</span> ~(!!<span class="pl-s1">x</span>) <span class="pl-c1">+</span> <span class="pl-c1">1</span>; <span class="pl-c">// 如果x不为0，就转换为全1，否则转换为全0</span>
+  <span class="pl-smi">int</span> <span class="pl-s1">true_val</span> <span class="pl-c1">=</span> <span class="pl-s1">y</span> <span class="pl-c1">&amp;</span> <span class="pl-s1">mask</span>;
+  <span class="pl-smi">int</span> <span class="pl-s1">false_val</span> <span class="pl-c1">=</span> <span class="pl-s1">z</span> <span class="pl-c1">&amp;</span> ~<span class="pl-s1">mask</span>;
+  <span class="pl-k">return</span> <span class="pl-s1">true_val</span> | <span class="pl-s1">false_val</span>; <span class="pl-c">// true_val和false_val必有一个是0</span>
+}</pre></div>
 <p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144636.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144636.png" alt="image.png" style="max-width: 100%;"></a></p>
 <h2>isLessOrEqual</h2>
 <p>这道题目可以直接想到的一种思路是让y减去x(y加上x的取反加一)，如果差值的符号位是0，则返回1，否则返回0，但是直接这样写会出现溢出的情况，什么时候发生溢出？就是当x和y符号位不相同时，因此我们需要分类讨论两种情况，即符号位相同和不同，两种情况的条件转移采用上一题<code class="notranslate">conditional</code>的思路</p>
@@ -427,29 +427,27 @@ $$Tmax + 1 == \neg Tmax$$<br>
 当异号时，我们直接返回x的符号位即可，因此x符号位为1时，x为负，y为正，最后必然返回1，反之同理<br>
 当同号时，直接利用最开始说的方法就可以了</p>
 <p>综上，编写如下代码</p>
-<pre lang="c" class="notranslate"><code class="notranslate">int isLessOrEqual(int x, int y)
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-smi">int</span> <span class="pl-en">isLessOrEqual</span>(<span class="pl-smi">int</span> <span class="pl-s1">x</span>, <span class="pl-smi">int</span> <span class="pl-s1">y</span>)
 {
-  // 假设符号位异号为真，同号为假
-  int sign_x = x &gt;&gt; 31 &amp; 1;
-  int sign_y = y &gt;&gt; 31 &amp; 1;
-  int condition = sign_x ^ sign_y;
-  int mask = ~(!!condition) + 1;
-  int true_val = sign_x &amp; mask;
-  int diff = y + (~x + 1);
-  int sign_diff = diff &gt;&gt; 31 &amp; 1;
-  int false_val = !sign_diff &amp; (~mask);
-  return true_val | false_val;
-}
-</code></pre>
+  <span class="pl-c">// 假设符号位异号为真，同号为假</span>
+  <span class="pl-smi">int</span> <span class="pl-s1">sign_x</span> <span class="pl-c1">=</span> <span class="pl-s1">x</span> &gt;&gt; <span class="pl-c1">31</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">1</span>;
+  <span class="pl-smi">int</span> <span class="pl-s1">sign_y</span> <span class="pl-c1">=</span> <span class="pl-s1">y</span> &gt;&gt; <span class="pl-c1">31</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">1</span>;
+  <span class="pl-smi">int</span> <span class="pl-s1">condition</span> <span class="pl-c1">=</span> <span class="pl-s1">sign_x</span> ^ <span class="pl-s1">sign_y</span>;
+  <span class="pl-smi">int</span> <span class="pl-s1">mask</span> <span class="pl-c1">=</span> ~(!!<span class="pl-s1">condition</span>) <span class="pl-c1">+</span> <span class="pl-c1">1</span>;
+  <span class="pl-smi">int</span> <span class="pl-s1">true_val</span> <span class="pl-c1">=</span> <span class="pl-s1">sign_x</span> <span class="pl-c1">&amp;</span> <span class="pl-s1">mask</span>;
+  <span class="pl-smi">int</span> <span class="pl-s1">diff</span> <span class="pl-c1">=</span> <span class="pl-s1">y</span> <span class="pl-c1">+</span> (~<span class="pl-s1">x</span> <span class="pl-c1">+</span> <span class="pl-c1">1</span>);
+  <span class="pl-smi">int</span> <span class="pl-s1">sign_diff</span> <span class="pl-c1">=</span> <span class="pl-s1">diff</span> &gt;&gt; <span class="pl-c1">31</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">1</span>;
+  <span class="pl-smi">int</span> <span class="pl-s1">false_val</span> <span class="pl-c1">=</span> !<span class="pl-s1">sign_diff</span> <span class="pl-c1">&amp;</span> (~<span class="pl-s1">mask</span>);
+  <span class="pl-k">return</span> <span class="pl-s1">true_val</span> | <span class="pl-s1">false_val</span>;
+}</pre></div>
 <p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144643.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144643.png" alt="image.png" style="max-width: 100%;"></a></p>
 <h2>logicalNeg</h2>
 <p>本题可以利用”0的负数还是0“的性质，也就是说0进行取反加一之后，其最高符号位依然为0，而其它任意的非0数x的最高符号位，和-x的最高符号位必定是异号，利用此性质：</p>
-<pre lang="c" class="notranslate"><code class="notranslate">int logicalNeg(int x) 
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-smi">int</span> <span class="pl-en">logicalNeg</span>(<span class="pl-smi">int</span> <span class="pl-s1">x</span>) 
 {
-	int sign_or = x | (~x + 1);
-	return (sign_or &gt;&gt; 31) + 1;
-}
-</code></pre>
+	<span class="pl-smi">int</span> <span class="pl-s1">sign_or</span> <span class="pl-c1">=</span> <span class="pl-s1">x</span> | (~<span class="pl-s1">x</span> <span class="pl-c1">+</span> <span class="pl-c1">1</span>);
+	<span class="pl-k">return</span> (<span class="pl-s1">sign_or</span> &gt;&gt; <span class="pl-c1">31</span>) <span class="pl-c1">+</span> <span class="pl-c1">1</span>;
+}</pre></div>
 <p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144650.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144650.png" alt="image.png" style="max-width: 100%;"></a></p>
 <h2>howManyBits</h2>
 <p>本puzzle的目的是求一个数如果用补码表示，最少需要多少位，我们分别举一个正数和负数的例子：<br>
@@ -457,64 +455,59 @@ $$Tmax + 1 == \neg Tmax$$<br>
 对于-5，二进制是1011，表示的话最少需要4位，（最高位1为符号位），1011和11011表示的都是-5</p>
 <p>根据上面这个例子，我们找到了一个规律，对于正数，我们需要找到最高位的1的位置，然后再加上一个符号位，就是最少需要的位数，比如1100，最高位1的位置是在从低到高第4个位置，然后再加一就是5；对于负数，我们需要找到最高位的0的位置，然后再加上一个符号位，比如1011，最高位0的位置在从低到高第3个位置，然后再加上就是4</p>
 <p>为了统一，我们使用以下代码先对x处理，当x为正数时，保持x不变，当x为负数时，将x取反，这样做的好处是，不管是正数还是负数，我们都去找最高位1的位置即可：</p>
-<pre lang="c" class="notranslate"><code class="notranslate">int sign = x &gt;&gt; 31;
-x = (sign &amp; ~x) | (~sign &amp; x); // 如果x为正数的话，不变，如果x为负数的话，x取反
-</code></pre>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-smi">int</span> <span class="pl-s1">sign</span> <span class="pl-c1">=</span> <span class="pl-s1">x</span> &gt;&gt; <span class="pl-c1">31</span>;
+<span class="pl-s1">x</span> <span class="pl-c1">=</span> (<span class="pl-s1">sign</span> <span class="pl-c1">&amp;</span> ~<span class="pl-s1">x</span>) | (~<span class="pl-s1">sign</span> <span class="pl-c1">&amp;</span> <span class="pl-s1">x</span>); <span class="pl-c">// 如果x为正数的话，不变，如果x为负数的话，x取反</span></pre></div>
 <p>接下来就可以按位依次寻找最高位的1，一种直接的想法是依次判断当前的数是不是全0，如果不是就让sum加一反之sum不变，并让x右移，共循环31次，如下所示：</p>
-<pre lang="c" class="notranslate"><code class="notranslate">int howManyBits(int x)
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-smi">int</span> <span class="pl-en">howManyBits</span>(<span class="pl-smi">int</span> <span class="pl-s1">x</span>)
 
 {
-  int sign = x &gt;&gt; 31;
-  x = (sign &amp; ~x) | (~sign &amp; x); // 如果x为正数的话，不变，如果x为负数的话，x取反
-  int sum = 0;
-  sum = sum + !!x;
-  x = x &gt;&gt; 1;
-  sum = sum + !!x;
-  x = x &gt;&gt; 1;
-  //......共重复31次
-  sum = sum + !!x;
-  x = x &gt;&gt; 1;
-  return sum + 1;//加上一个符号位
-}
-</code></pre>
+  <span class="pl-smi">int</span> <span class="pl-s1">sign</span> <span class="pl-c1">=</span> <span class="pl-s1">x</span> &gt;&gt; <span class="pl-c1">31</span>;
+  <span class="pl-s1">x</span> <span class="pl-c1">=</span> (<span class="pl-s1">sign</span> <span class="pl-c1">&amp;</span> ~<span class="pl-s1">x</span>) | (~<span class="pl-s1">sign</span> <span class="pl-c1">&amp;</span> <span class="pl-s1">x</span>); <span class="pl-c">// 如果x为正数的话，不变，如果x为负数的话，x取反</span>
+  <span class="pl-smi">int</span> <span class="pl-s1">sum</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>;
+  <span class="pl-s1">sum</span> <span class="pl-c1">=</span> <span class="pl-s1">sum</span> <span class="pl-c1">+</span> !!<span class="pl-s1">x</span>;
+  <span class="pl-s1">x</span> <span class="pl-c1">=</span> <span class="pl-s1">x</span> &gt;&gt; <span class="pl-c1">1</span>;
+  <span class="pl-s1">sum</span> <span class="pl-c1">=</span> <span class="pl-s1">sum</span> <span class="pl-c1">+</span> !!<span class="pl-s1">x</span>;
+  <span class="pl-s1">x</span> <span class="pl-c1">=</span> <span class="pl-s1">x</span> &gt;&gt; <span class="pl-c1">1</span>;
+  <span class="pl-c">//......共重复31次</span>
+  <span class="pl-s1">sum</span> <span class="pl-c1">=</span> <span class="pl-s1">sum</span> <span class="pl-c1">+</span> !!<span class="pl-s1">x</span>;
+  <span class="pl-s1">x</span> <span class="pl-c1">=</span> <span class="pl-s1">x</span> &gt;&gt; <span class="pl-c1">1</span>;
+  <span class="pl-k">return</span> <span class="pl-s1">sum</span> <span class="pl-c1">+</span> <span class="pl-c1">1</span>;<span class="pl-c">//加上一个符号位</span>
+}</pre></div>
 <p>这样做答案是没问题的，可以通过btest的正确性测试，但是不能通过dlc的测试，因为operator共使用了131个，超过了上限90个</p>
 <p>因此，在这里参考网上的做法，使用二分法，依次缩小最高位1的所在范围，从而减少operator的数量，如下所示：</p>
-<pre lang="c" class="notranslate"><code class="notranslate">int howManyBits(int x)
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-smi">int</span> <span class="pl-en">howManyBits</span>(<span class="pl-smi">int</span> <span class="pl-s1">x</span>)
 {
-  int sign = x &gt;&gt; 31;
-  int b16, b8, b4, b2, b1, b0;
-  x = (sign &amp; ~x) | (~sign &amp; x); // 如果x为正数的话，不变，如果x为负数的话，x取反
-  // 判断最高16位是否有1，如果有，则让x右移，以判断最高16位具体最高1在哪里
-  // 如果没有，x不右移，以判断8-16位中是否有1，以此类推.....
-  b16 = !!(x &gt;&gt; 16) &lt;&lt; 4;
-  x = x &gt;&gt; b16;
-  b8 = !!(x &gt;&gt; 8) &lt;&lt; 3;
-  x = x &gt;&gt; b8;
-  b4 = !!(x &gt;&gt; 4) &lt;&lt; 2;
-  x = x &gt;&gt; b4;
-  b2 = !!(x &gt;&gt; 2) &lt;&lt; 1;
-  x = x &gt;&gt; b2;
-  b1 = !!(x &gt;&gt; 1);
-  x &gt;&gt; b1;
-  b0 = !!x;
-  return b16 + b8 + b4 + b2 + b1 + b0 + 1;
-}
-</code></pre>
+  <span class="pl-smi">int</span> <span class="pl-s1">sign</span> <span class="pl-c1">=</span> <span class="pl-s1">x</span> &gt;&gt; <span class="pl-c1">31</span>;
+  <span class="pl-smi">int</span> <span class="pl-s1">b16</span>, <span class="pl-s1">b8</span>, <span class="pl-s1">b4</span>, <span class="pl-s1">b2</span>, <span class="pl-s1">b1</span>, <span class="pl-s1">b0</span>;
+  <span class="pl-s1">x</span> <span class="pl-c1">=</span> (<span class="pl-s1">sign</span> <span class="pl-c1">&amp;</span> ~<span class="pl-s1">x</span>) | (~<span class="pl-s1">sign</span> <span class="pl-c1">&amp;</span> <span class="pl-s1">x</span>); <span class="pl-c">// 如果x为正数的话，不变，如果x为负数的话，x取反</span>
+  <span class="pl-c">// 判断最高16位是否有1，如果有，则让x右移，以判断最高16位具体最高1在哪里</span>
+  <span class="pl-c">// 如果没有，x不右移，以判断8-16位中是否有1，以此类推.....</span>
+  <span class="pl-s1">b16</span> <span class="pl-c1">=</span> !!(<span class="pl-s1">x</span> &gt;&gt; <span class="pl-c1">16</span>) &lt;&lt; <span class="pl-c1">4</span>;
+  <span class="pl-s1">x</span> <span class="pl-c1">=</span> <span class="pl-s1">x</span> &gt;&gt; <span class="pl-s1">b16</span>;
+  <span class="pl-s1">b8</span> <span class="pl-c1">=</span> !!(<span class="pl-s1">x</span> &gt;&gt; <span class="pl-c1">8</span>) &lt;&lt; <span class="pl-c1">3</span>;
+  <span class="pl-s1">x</span> <span class="pl-c1">=</span> <span class="pl-s1">x</span> &gt;&gt; <span class="pl-s1">b8</span>;
+  <span class="pl-s1">b4</span> <span class="pl-c1">=</span> !!(<span class="pl-s1">x</span> &gt;&gt; <span class="pl-c1">4</span>) &lt;&lt; <span class="pl-c1">2</span>;
+  <span class="pl-s1">x</span> <span class="pl-c1">=</span> <span class="pl-s1">x</span> &gt;&gt; <span class="pl-s1">b4</span>;
+  <span class="pl-s1">b2</span> <span class="pl-c1">=</span> !!(<span class="pl-s1">x</span> &gt;&gt; <span class="pl-c1">2</span>) &lt;&lt; <span class="pl-c1">1</span>;
+  <span class="pl-s1">x</span> <span class="pl-c1">=</span> <span class="pl-s1">x</span> &gt;&gt; <span class="pl-s1">b2</span>;
+  <span class="pl-s1">b1</span> <span class="pl-c1">=</span> !!(<span class="pl-s1">x</span> &gt;&gt; <span class="pl-c1">1</span>);
+  <span class="pl-s1">x</span> &gt;&gt; <span class="pl-s1">b1</span>;
+  <span class="pl-s1">b0</span> <span class="pl-c1">=</span> !!<span class="pl-s1">x</span>;
+  <span class="pl-k">return</span> <span class="pl-s1">b16</span> <span class="pl-c1">+</span> <span class="pl-s1">b8</span> <span class="pl-c1">+</span> <span class="pl-s1">b4</span> <span class="pl-c1">+</span> <span class="pl-s1">b2</span> <span class="pl-c1">+</span> <span class="pl-s1">b1</span> <span class="pl-c1">+</span> <span class="pl-s1">b0</span> <span class="pl-c1">+</span> <span class="pl-c1">1</span>;
+}</pre></div>
 <p>这种情况下，共使用了38个operators<br>
 <a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144707.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144707.png" alt="image.png" style="max-width: 100%;"></a></p>
 <h2>floatScale2</h2>
 <p>本puzzle的目的是给定一个无符号数uf，把它看成是一个浮点数的位模式，计算其乘以二后的结果并返回，我们先复习一下IEEE浮点数的表示：<br>
 <a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144719.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144719.png" alt="image.png" style="max-width: 100%;"></a></p>
 <p>我们首先根据单精度IEEE浮点数的格式分别拆分出uf的sign、exp和frac：</p>
-<pre lang="c" class="notranslate"><code class="notranslate">int sign = uf &amp; 0x80000000;
-int exp = uf &amp; 0x7f800000;
-int frac = uf &amp; 0x007fffff;
-</code></pre>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-smi">int</span> <span class="pl-s1">sign</span> <span class="pl-c1">=</span> <span class="pl-s1">uf</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">0x80000000</span>;
+<span class="pl-smi">int</span> <span class="pl-s1">exp</span> <span class="pl-c1">=</span> <span class="pl-s1">uf</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">0x7f800000</span>;
+<span class="pl-smi">int</span> <span class="pl-s1">frac</span> <span class="pl-c1">=</span> <span class="pl-s1">uf</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">0x007fffff</span>;</pre></div>
 <p>然后我们分三种情况进行讨论：</p>
 <p><strong>情况一：无穷大或者NaN</strong><br>
 当exp全1时，uf为无穷大或者NaN，此时直接返回uf即可：</p>
-<pre lang="c" class="notranslate"><code class="notranslate">if (exp == 0x7f800000) return uf;
-</code></pre>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">if</span> (<span class="pl-s1">exp</span> <span class="pl-c1">==</span> <span class="pl-c1">0x7f800000</span>) <span class="pl-k">return</span> <span class="pl-s1">uf</span>;</pre></div>
 <p><strong>情况二：非规格化数</strong><br>
 当exp全0，uf为非规格化数，此时如果frac全0，那么uf为0，乘以2还是0，因此直接返回uf；如果frac不为0，只需要将frac左移1即可，这里，我们举两个例子说明：<br>
 假设exp的位数是4，frac的位数是3：<br>
@@ -523,81 +516,74 @@ int frac = uf &amp; 0x007fffff;
 <p>例子二：0 0000 111，E是1/64，M是7/8，最终的值是：7/512<br>
 将这个非规格化数的尾数部分左移1位，得到0 0001 110，变为了规格化数，E不变，M变为1+6/8=14/8，最终的值是：14/512<br>
 因此，这部分代码为：</p>
-<pre lang="c" class="notranslate"><code class="notranslate">if (exp == 0) {
-	if (frac == 0) return uf;
-	frac = frac &lt;&lt; 1;
-}
-</code></pre>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">if</span> (<span class="pl-s1">exp</span> <span class="pl-c1">==</span> <span class="pl-c1">0</span>) {
+	<span class="pl-k">if</span> (<span class="pl-s1">frac</span> <span class="pl-c1">==</span> <span class="pl-c1">0</span>) <span class="pl-k">return</span> <span class="pl-s1">uf</span>;
+	<span class="pl-s1">frac</span> <span class="pl-c1">=</span> <span class="pl-s1">frac</span> &lt;&lt; <span class="pl-c1">1</span>;
+}</pre></div>
 <p><strong>情况三：规格化数</strong><br>
 这种情况下，我们直接让阶码exp加一即可，但是如果加一之后，exp变成全1的数，说明uf表示的浮点数乘以2之后溢出为正无穷了，所以，我们需要将frac置零</p>
-<pre lang="c" class="notranslate"><code class="notranslate">exp += 0x00800000;
-if (exp == 0x7f800000) frac = 0;
-</code></pre>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-s1">exp</span> <span class="pl-c1">+=</span> <span class="pl-c1">0x00800000</span>;
+<span class="pl-k">if</span> (<span class="pl-s1">exp</span> <span class="pl-c1">==</span> <span class="pl-c1">0x7f800000</span>) <span class="pl-s1">frac</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>;</pre></div>
 <p>最后，我们将三种情况的结果进行合并：<code class="notranslate">return sign | exp | frac</code></p>
 <p>综上：</p>
-<pre lang="c" class="notranslate"><code class="notranslate">unsigned floatScale2(unsigned uf)
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-smi">unsigned</span> <span class="pl-en">floatScale2</span>(<span class="pl-smi">unsigned</span> <span class="pl-s1">uf</span>)
 {
-  int sign = uf &amp; 0x80000000;
-  int exp = uf &amp; 0x7f800000;
-  int frac = uf &amp; 0x007fffff;
-  if (exp == 0x7f800000) // 无穷大或NaN
-    return uf;
-  if (exp == 0) // 非规格化数
+  <span class="pl-smi">int</span> <span class="pl-s1">sign</span> <span class="pl-c1">=</span> <span class="pl-s1">uf</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">0x80000000</span>;
+  <span class="pl-smi">int</span> <span class="pl-s1">exp</span> <span class="pl-c1">=</span> <span class="pl-s1">uf</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">0x7f800000</span>;
+  <span class="pl-smi">int</span> <span class="pl-s1">frac</span> <span class="pl-c1">=</span> <span class="pl-s1">uf</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">0x007fffff</span>;
+  <span class="pl-k">if</span> (<span class="pl-s1">exp</span> <span class="pl-c1">==</span> <span class="pl-c1">0x7f800000</span>) <span class="pl-c">// 无穷大或NaN</span>
+    <span class="pl-k">return</span> <span class="pl-s1">uf</span>;
+  <span class="pl-k">if</span> (<span class="pl-s1">exp</span> <span class="pl-c1">==</span> <span class="pl-c1">0</span>) <span class="pl-c">// 非规格化数</span>
   {
-    if (frac == 0)
-      return uf;
-    frac = frac &lt;&lt; 1;
+    <span class="pl-k">if</span> (<span class="pl-s1">frac</span> <span class="pl-c1">==</span> <span class="pl-c1">0</span>)
+      <span class="pl-k">return</span> <span class="pl-s1">uf</span>;
+    <span class="pl-s1">frac</span> <span class="pl-c1">=</span> <span class="pl-s1">frac</span> &lt;&lt; <span class="pl-c1">1</span>;
   }
-  else // 规格化数
+  <span class="pl-k">else</span> <span class="pl-c">// 规格化数</span>
   {
-    exp += 0x00800000;
-    if (exp == 0x7f800000)
-      frac = 0;
+    <span class="pl-s1">exp</span> <span class="pl-c1">+=</span> <span class="pl-c1">0x00800000</span>;
+    <span class="pl-k">if</span> (<span class="pl-s1">exp</span> <span class="pl-c1">==</span> <span class="pl-c1">0x7f800000</span>)
+      <span class="pl-s1">frac</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>;
   }
-  return sign | exp | frac;
-}
-</code></pre>
+  <span class="pl-k">return</span> <span class="pl-s1">sign</span> | <span class="pl-s1">exp</span> | <span class="pl-s1">frac</span>;
+}</pre></div>
 <p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144732.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144732.png" alt="image.png" style="max-width: 100%;"></a></p>
 <h2>floatFloat2Int</h2>
 <p>本puzzle的目的是给定一个无符号数uf，将其转换成整数，如果uf表示的数值超过了int的范围就返回0x80000000，我们首先回顾一下如何根据IEEE754的标准进行位模式和其对应的数据值的转换，如下图所示：<br>
 <a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144745.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144745.png" alt="image.png" style="max-width: 100%;"></a></p>
 <p>对于uf，我们依次获得sign、E和M，其中exp需要减去偏置Bias=127得到最终的幂E，而frac需要补上最前面隐含的1，以进行规格化数处理得到最终的M</p>
-<pre lang="c" class="notranslate"><code class="notranslate">int sign = uf &gt;&gt; 31 &amp; 1;
-int E = ((uf &gt;&gt; 23) &amp; 0xff) - 127;
-int M = (uf &amp; 0x007fffff) | 0x00800000;
-</code></pre>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-smi">int</span> <span class="pl-s1">sign</span> <span class="pl-c1">=</span> <span class="pl-s1">uf</span> &gt;&gt; <span class="pl-c1">31</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">1</span>;
+<span class="pl-smi">int</span> <span class="pl-c1">E</span> <span class="pl-c1">=</span> ((<span class="pl-s1">uf</span> &gt;&gt; <span class="pl-c1">23</span>) <span class="pl-c1">&amp;</span> <span class="pl-c1">0xff</span>) <span class="pl-c1">-</span> <span class="pl-c1">127</span>;
+<span class="pl-smi">int</span> <span class="pl-c1">M</span> <span class="pl-c1">=</span> (<span class="pl-s1">uf</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">0x007fffff</span>) | <span class="pl-c1">0x00800000</span>;</pre></div>
 <p>我们发现当E&lt;0时，最后的十进制数都是小于1的，对于这部分的数，我们直接返回0即可：</p>
-<pre lang="c" class="notranslate"><code class="notranslate">if (E &lt; 0) return 0;
-</code></pre>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">if</span> (<span class="pl-c1">E</span> <span class="pl-c1">&lt;</span> <span class="pl-c1">0</span>) <span class="pl-k">return</span> <span class="pl-c1">0</span>;</pre></div>
 <p>接下来，我们举一个例子来探究如何通过E和M推出最终的结果，我们以十进制数3为例， 它的二进制表示是11，可以表示为：$1.1 * 2^1$，由此frac为<code class="notranslate">1000···（共22个0）000</code>，M为<code class="notranslate">1100···(共22个0）000</code>，E为<code class="notranslate">1</code>，如何从M变为我们想要的“11”？方法是将M右移22位，这个22位是怎么计算的，其实就是23-E；当E&gt;23时怎么办呢？比如$1.1 * 2^{24}$，它其实表示的是整数<code class="notranslate">11000···（共23个0）···</code>，是M左移1位得到的，这个1恰好是通过E-23算出的；因此</p>
-<pre lang="c" class="notranslate"><code class="notranslate">if (E &gt; 23) res = M &lt;&lt; (E - 23);
-else res = M &gt;&gt; (23 - E);
-</code></pre>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-k">if</span> (<span class="pl-c1">E</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">23</span>) <span class="pl-s1">res</span> <span class="pl-c1">=</span> <span class="pl-c1">M</span> &lt;&lt; (<span class="pl-c1">E</span> <span class="pl-c1">-</span> <span class="pl-c1">23</span>);
+<span class="pl-k">else</span> <span class="pl-s1">res</span> <span class="pl-c1">=</span> <span class="pl-c1">M</span> &gt;&gt; (<span class="pl-c1">23</span> <span class="pl-c1">-</span> <span class="pl-c1">E</span>);</pre></div>
 <p>上面说到E是下边界的，当小于0的时候，最终得到的十进制数一定小于1，那么E大于多少的时候得到的十进制数会爆int呢？还以上述这个例子，$1.1 * 2^E$表示的十进制数是：<code class="notranslate">11000···（E-1个0）00</code>总共有E+1位数，int是32位的，去掉符号位还剩31位，因此需要满足：<br>
 $$E + 1&amp;lt;= 31$$<br>
 因此当E大于30时，会爆int，此时返回题目中要求的<code class="notranslate">0x80000000u</code>即可</p>
 <p>最后，我们判断符号位，如果符号位为1，我们将res取反加一，也就是变成负数</p>
 <p>综上：</p>
-<pre lang="c" class="notranslate"><code class="notranslate">int floatFloat2Int(unsigned uf)
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-smi">int</span> <span class="pl-en">floatFloat2Int</span>(<span class="pl-smi">unsigned</span> <span class="pl-s1">uf</span>)
 {
-  int sign = uf &gt;&gt; 31 &amp; 1;
-  int E = ((uf &gt;&gt; 23) &amp; 0xff) - 127;
-  int M = (uf &amp; 0x007fffff) | 0x00800000;
-  int res;
-  if (E &lt; 0)
-    return 0;
-  if (E &gt; 30)
-    return 0x80000000u;
-  if (E &gt; 23)
-    res = M &lt;&lt; (E - 23);
-  else
-    res = M &gt;&gt; (23 - E);
-  if (sign)
-    return ~res + 1;
-  else
-    return res;
-}
-</code></pre>
+  <span class="pl-smi">int</span> <span class="pl-s1">sign</span> <span class="pl-c1">=</span> <span class="pl-s1">uf</span> &gt;&gt; <span class="pl-c1">31</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">1</span>;
+  <span class="pl-smi">int</span> <span class="pl-c1">E</span> <span class="pl-c1">=</span> ((<span class="pl-s1">uf</span> &gt;&gt; <span class="pl-c1">23</span>) <span class="pl-c1">&amp;</span> <span class="pl-c1">0xff</span>) <span class="pl-c1">-</span> <span class="pl-c1">127</span>;
+  <span class="pl-smi">int</span> <span class="pl-c1">M</span> <span class="pl-c1">=</span> (<span class="pl-s1">uf</span> <span class="pl-c1">&amp;</span> <span class="pl-c1">0x007fffff</span>) | <span class="pl-c1">0x00800000</span>;
+  <span class="pl-smi">int</span> <span class="pl-s1">res</span>;
+  <span class="pl-k">if</span> (<span class="pl-c1">E</span> <span class="pl-c1">&lt;</span> <span class="pl-c1">0</span>)
+    <span class="pl-k">return</span> <span class="pl-c1">0</span>;
+  <span class="pl-k">if</span> (<span class="pl-c1">E</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">30</span>)
+    <span class="pl-k">return</span> <span class="pl-c1">0x80000000u</span>;
+  <span class="pl-k">if</span> (<span class="pl-c1">E</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">23</span>)
+    <span class="pl-s1">res</span> <span class="pl-c1">=</span> <span class="pl-c1">M</span> &lt;&lt; (<span class="pl-c1">E</span> <span class="pl-c1">-</span> <span class="pl-c1">23</span>);
+  <span class="pl-k">else</span>
+    <span class="pl-s1">res</span> <span class="pl-c1">=</span> <span class="pl-c1">M</span> &gt;&gt; (<span class="pl-c1">23</span> <span class="pl-c1">-</span> <span class="pl-c1">E</span>);
+  <span class="pl-k">if</span> (<span class="pl-s1">sign</span>)
+    <span class="pl-k">return</span> ~<span class="pl-s1">res</span> <span class="pl-c1">+</span> <span class="pl-c1">1</span>;
+  <span class="pl-k">else</span>
+    <span class="pl-k">return</span> <span class="pl-s1">res</span>;
+}</pre></div>
 <p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144802.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144802.png" alt="image.png" style="max-width: 100%;"></a></p>
 <h2>floatPower2</h2>
 <p>本puzzle的目的是给定一个整数x，让我们求解$2^x$并以无符号数形式返回IEEE754的单精度浮点数格式，当x过大的时候，返回正无穷的表示，当x过小的时候，返回0，我们分类讨论：<br>
@@ -615,18 +601,17 @@ $$E + 1&amp;lt;= 31$$<br>
 其中E=x=exp-Bias=exp-127，推出exp=x+127<br>
 最终的位模式是让exp左移23位，即exp&lt;&lt;23</p>
 <p>综上：</p>
-<pre lang="c" class="notranslate"><code class="notranslate">unsigned floatPower2(int x)
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-smi">unsigned</span> <span class="pl-en">floatPower2</span>(<span class="pl-smi">int</span> <span class="pl-s1">x</span>)
 {
-  if (x &gt; 127)
-    return 0x7f800000;
-  else if (x &lt; -126)
-    return 0;
-  else if (x &lt;= -127)
-    return 1 &lt;&lt; (x + 149);
-  else
-    return (x + 127) &lt;&lt; 23;
-}
-</code></pre>
+  <span class="pl-k">if</span> (<span class="pl-s1">x</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">127</span>)
+    <span class="pl-k">return</span> <span class="pl-c1">0x7f800000</span>;
+  <span class="pl-k">else</span> <span class="pl-k">if</span> (<span class="pl-s1">x</span> <span class="pl-c1">&lt;</span> <span class="pl-c1">-126</span>)
+    <span class="pl-k">return</span> <span class="pl-c1">0</span>;
+  <span class="pl-k">else</span> <span class="pl-k">if</span> (<span class="pl-s1">x</span> &lt;= <span class="pl-c1">-127</span>)
+    <span class="pl-k">return</span> <span class="pl-c1">1</span> &lt;&lt; (<span class="pl-s1">x</span> <span class="pl-c1">+</span> <span class="pl-c1">149</span>);
+  <span class="pl-k">else</span>
+    <span class="pl-k">return</span> (<span class="pl-s1">x</span> <span class="pl-c1">+</span> <span class="pl-c1">127</span>) &lt;&lt; <span class="pl-c1">23</span>;
+}</pre></div>
 <p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144812.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144812.png" alt="image.png" style="max-width: 100%;"></a></p>
 <h1>总结与思考</h1>
 <p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144819.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20251211144819.png" alt="image.png" style="max-width: 100%;"></a></p>
@@ -665,7 +650,7 @@ if(""!=""){
 </script></div>
 </body>
 <script>
-var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'};
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
 var utterancesLoad=0;
 
 let themeSettings={
@@ -739,7 +724,70 @@ function iFrameLoading(){
     }
 }
 
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
 
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
 
 </script>
 <script>MathJax = {tex: {inlineMath: [["$", "$"]]}};</script><script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
