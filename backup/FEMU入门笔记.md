@@ -51,32 +51,49 @@ sudo fio --ioengine=libaio --numjobs=1 --direct=1 --time_based --group_reporting
 </li>
 </ul>
 <p>首先使用fio进行时延测试<br>
-fio：<code>sudo fio --name=max_bw_test --filename=/dev/nvme0n1 --rw=write --bs=4k --direct=1 --ioengine=libaio --iodepth=1 --numjobs=1 --group_reporting --size=4G</code><br>
+fio：<code>sudo fio --name=max_bw_test --filename=/dev/nvme0n1 --rw=write --bs=4k --direct=1 --ioengine=libaio --iodepth=1 --numjobs=16 --group_reporting --size=256M --offset_increment=128M</code><br>
 结果：</p>
 
-type | pd_wr_lat(纳秒) | BW(MB/s) | IOPS | Lat（msec） | avg_clat(ns) | slat(ns)
+type | pd_wr_lat(纳秒) | BW(MB/s) | IOPS | Lat（ns） | avg_clat(ns) | slat(ns)
 -- | -- | -- | -- | -- | -- | --
 write | 200000 | 18.2 | 4443 | 235974 | 201614 | 21490
 write | 20000 | 87.7 | 21.4k | 48995 | 23763 | 21360
 write | 0 | 135 | 33k | 31730 | 6719 | 21740
+
+
 <html>
 <body>
 <!--StartFragment--><!-- obsidian --><p><strong>踩过的坑：</strong> 启动femu时，nvme01还是一个空盘，第一次做fio测试时，一定要先用写操作而不是读操作！否则无论如何修改./run_blackbox.sh的pg_rd_lat都不会看到clat变化！<br>
 具体也可以看ftl.c::ssd_read的代码，当映射表查询不到时，根本不会去使用参数pg_rd_lat去计算时延！</p>
 <p>除了上述时延测试之外，还对其进行了带宽测试<br>
-fio：<code>sudo fio --name=max_bw_test --filename=/dev/nvme0n1 --rw=write --bs=128k --direct=1 --ioengine=libaio --iodepth=32 --numjobs=16 --group_reporting --size=2G</code><br>
-修改fio选项得到以下两组数据：</p>
+先读预热：<code>sudo fio --name=warmup --filename=/dev/nvme0n1 --rw=write --bs=1M --size=4G --direct=1</code><br>
+fio：<code>sudo fio --name=max_bw_test --filename=/dev/nvme0n1 --rw=read --bs=128k --direct=1 --ioengine=libaio --iodepth=128 --numjobs=16 --group_reporting --size=4G</code><br>
+修改fio选项得到以下三组数据：</p>
 
-type | pd_wr_lat(纳秒) | BW(MB/s) | IOPS
--- | -- | -- | --
-write | 200000 | 1191 | 9083
-write | 0 | 2002 | 15.3k
+pd_rd_lat(ns) | size | Lat(ms) | BW(MB/s) | avgslat(ms) | avgclat(ms)
+-- | -- | -- | -- | -- | --
+800000 | 4G×16 | 209711 | 328 | 0.071 | 818
+40000 | 4G×16 | 47688 | 1441 | 0.034 | 175
+0 | 4G×16 | 37428 | 1836 | 0.031 | 136
 
 
-<!--EndFragment-->
+<p>备注：带宽=总数据量除以总时延<br>
+slat：提交时延-从用户态程序（如 <code>fio</code>）发起 IO 系统调用开始，到该请求成功提交给 Guest 内核驱动，并通知到模拟硬件（FEMU）为止的时间。包含</p>
+<ul>
+<li><strong>Guest 内核开销</strong>：NVMe 驱动封装指令、管理队列。</li>
+<li><strong>虚拟化陷阱 (VM-Exit)</strong>：Guest CPU 切换到 Host CPU 的物理损耗。</li>
+<li><strong>上下文切换</strong>：KVM 模块通知 QEMU 进程，FEMU 轮询线程被唤醒。<br>
+<strong>决定因素</strong>：<strong>宿主机的 CPU 性能</strong>。</li>
+</ul>
+<p>clat：完成时延-请求成功提交给硬件开始，到硬件处理完数据并向 CPU 发送“任务完成”中断为止的时间。包含</p>
+<ul>
+<li><strong>物理搬运时间</strong>：我们讨论过的 <code>backend_rw</code> 执行 <code>memcpy</code> 的时间。</li>
+<li><strong>FTL 逻辑计算</strong>：地址映射、垃圾回收逻辑执行。</li>
+<li><strong>时延拦截 (Timing)</strong>：FEMU 故意“憋”着请求，直到达到你配置的 <code>pg_rd_lat</code>。<br>
+<strong>决定因素</strong>：<strong>你的 SSD 配置参数</strong> 和 <strong>宿主机内存带宽</strong>。</li>
+</ul><!--EndFragment-->
 </body>
 </html>
-
 <p>从上面两组测试中，我们可以发现，在模拟器（尤其是基于 QEMU 的 FEMU）中，性能测试往往会碰到一个“天花板”，例如，即使把虚拟机的通道数加到无限大、延迟调到 1ns，带宽、时延等结果也无法突破某个数值。</p>
 <p>这种“慢设备无法模拟快设备”的现象，本质上受限于软件模拟器的指令集循环开销与宿主机物理时钟的分辨率。在 FEMU 这样的模拟器中，每一个虚拟的 NVMe 寄存器操作或数据拷贝指令，最终都要转化为宿主机物理 CPU 上的多条实际指令。当你在软件中将延迟设定为 <span class="math math-inline">10\text{ns}</span> 时，由于 CPU 逻辑跳转、内存上下文切换以及虚拟化层（KVM/QEMU）的中断拦截开销，宿主机处理这笔请求所需的物理时间往往已经达到了数百纳秒甚至微秒级别。</p>
 <p>从时钟同步的角度来看，由于宿主机操作系统的调度颗粒度（通常在微秒量级）远粗于你所设定的纳米级延迟，模拟器内部的定时器精度成为了第二道锁。即使模拟逻辑在指令层面“认为”只过去了 <span class="math math-inline">10\text{ns}</span>，但在等待宿主机硬件产生时钟中断来唤醒 IO 线程时，真实的物理时间已经流逝了成千上万个时钟周期。这种“时间膨胀”效应导致模拟器在单位时间内能处理的 IO 数量被锁死在宿主机的单核处理能力上。</p>
