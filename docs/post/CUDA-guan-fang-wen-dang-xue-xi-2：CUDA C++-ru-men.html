@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="原文章链接：https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/intro-to-cuda-cpp.html
+本章通过展示如何在C++中体现这些概念，介绍了CUDA编程模型的一些基本概念。">
+<meta property="og:title" content="CUDA官方文档学习2：CUDA C++入门">
+<meta property="og:description" content="原文章链接：https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/intro-to-cuda-cpp.html
+本章通过展示如何在C++中体现这些概念，介绍了CUDA编程模型的一些基本概念。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/CUDA-guan-fang-wen-dang-xue-xi-2%EF%BC%9ACUDA%20C%2B%2B-ru-men.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>CUDA官方文档学习2：CUDA C++入门</title>
+<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">CUDA官方文档学习2：CUDA C++入门</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/28" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>原文章链接：<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/intro-to-cuda-cpp.html" rel="nofollow">https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/intro-to-cuda-cpp.html</a><br>
+本章通过展示如何在C++中体现这些概念，介绍了CUDA编程模型的一些基本概念。本编程指南重点介绍CUDA运行时API。CUDA运行时API是在C++中使用CUDA最常用的方式，它构建在底层的CUDA驱动程序API之上。</p>
+<h1>1.核函数</h1>
+<p>在 GPU 上执行且可以从主机端（Host）调用的函数被称为 <strong>核函数（Kernels）</strong>。核函数的编写逻辑旨在由许多并行线程同时执行。</p>
+<h2>1.1 指定核函数</h2>
+<p>核函数的代码是通过 <code class="notranslate">__global__</code> 声明限定符来指定的。这会告知编译器，该函数将以一种允许通过“核函数启动（Kernel Launch）”来调用的方式被编译为 GPU 代码。核函数启动是指启动核函数运行的操作，通常由 CPU 发起。核函数是返回类型为 <code class="notranslate">void</code> 的函数。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> Kernel definition</span>
+__global__ <span class="pl-k">void</span> <span class="pl-en">vecAdd</span>(<span class="pl-k">float</span>* A, <span class="pl-k">float</span>* B, <span class="pl-k">float</span>* C)
+{
+
+}</pre></div>
+<h2>1.2 启动核函数</h2>
+<p>执行核函数的并行线程数量是在核函数启动时指定的，这被称为<strong>执行配置（Execution Configuration）</strong>。同一个核函数的不同调用可以使用不同的执行配置，例如使用不同数量的线程或线程块。从 CPU 代码启动核函数有两种方式：<strong>三括号记法（Triple Chevron Notation）</strong> 和 <code class="notranslate">cudaLaunchKernelEx</code>。这里介绍最常用的启动方式——三括号记法。</p>
+<p>三括号记法： <code class="notranslate">&lt;&lt;&lt;gridDim, blockDim&gt;&gt;&gt;</code> 指定<strong>执行配置</strong>。其中 <code class="notranslate">gridDim</code> 定义网格中线程块的数量，<code class="notranslate">blockDim</code> 定义每个线程块中的线程数。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__global__ <span class="pl-k">void</span> <span class="pl-en">vecAdd</span>(<span class="pl-k">float</span>* A, <span class="pl-k">float</span>* B, <span class="pl-k">float</span>* C)
+ {
+
+ }
+
+<span class="pl-k">int</span> <span class="pl-en">main</span>()
+{
+    ...
+    <span class="pl-c"><span class="pl-c">//</span> Kernel invocation</span>
+    vecAdd&lt;&lt;&lt;<span class="pl-c1">1</span>, <span class="pl-c1">256</span>&gt;&gt;&gt;(A, B, C);
+    ...
+}</pre></div>
+<p>内核会被配置在 GPU 上执行，但主机代码在继续执行之前不会等待内核在 GPU 上完成（甚至开始）执行。必须通过某种形式的 GPU 与 CPU 同步机制来确定内核是否已完成执行。</p>
+<p>对于多维结构，需使用 <code class="notranslate">dim3</code> 类型进行定义。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">int</span> <span class="pl-en">main</span>()
+{
+    ...
+    dim3 <span class="pl-smi">grid</span>(<span class="pl-c1">16</span>,<span class="pl-c1">16</span>);
+    dim3 <span class="pl-smi">block</span>(<span class="pl-c1">8</span>,<span class="pl-c1">8</span>);
+    MatAdd&lt;&lt;&lt;grid, block&gt;&gt;&gt;(A, B, C);
+    ...
+}</pre></div>
+<p>在核函数内部，CUDA 提供了四个核心内建变量（Intrinsics），用于定位线程在并行结构中的位置。每个变量都是包含 <code class="notranslate">.x</code>, <code class="notranslate">.y</code>, <code class="notranslate">.z</code> 三个分量的向量：</p>
+<ul>
+<li><strong><code class="notranslate">threadIdx</code></strong>：当前线程在所属线程块（Block）内的索引。</li>
+<li><strong><code class="notranslate">blockIdx</code></strong>：当前线程块在整个网格（Grid）中的索引。</li>
+<li><strong><code class="notranslate">blockDim</code></strong>：执行配置中指定的线程块维度（即每个块包含多少线程）。</li>
+<li><strong><code class="notranslate">gridDim</code></strong>：执行配置中指定的网格维度（即整个网格包含多少块）。</li>
+</ul>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__global__ <span class="pl-k">void</span> <span class="pl-en">vecAdd</span>(<span class="pl-k">float</span>* A, <span class="pl-k">float</span>* B, <span class="pl-k">float</span>* C)
+{
+   <span class="pl-c"><span class="pl-c">//</span> calculate which element this thread is responsible for computing</span>
+   <span class="pl-k">int</span> workIndex = threadIdx.<span class="pl-smi">x</span> + blockDim.<span class="pl-smi">x</span> * blockIdx.<span class="pl-smi">x</span>
+   <span class="pl-c"><span class="pl-c">//</span> Perform computation</span>
+   C[workIndex] = A[workIndex] + B[workIndex];
+}
+<span class="pl-k">int</span> <span class="pl-en">main</span>()
+{
+    ...
+    <span class="pl-c"><span class="pl-c">//</span> A, B, and C are vectors of 1024 elements</span>
+    vecAdd&lt;&lt;&lt;<span class="pl-c1">4</span>, <span class="pl-c1">256</span>&gt;&gt;&gt;(A, B, C);
+    ...
+}</pre></div>
+<p>上述示例假设向量的长度是线程块大小（在本例中为 256 个线程）的整数倍。为了使核函数能够处理任意长度的向量，我们可以添加检查机制，以确保内存访问不会超出数组的边界（如下所示），然后启动一个包含部分非活动线程（Inactive Threads）的线程块。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__global__ <span class="pl-k">void</span> <span class="pl-en">vecAdd</span>(<span class="pl-k">float</span>* A, <span class="pl-k">float</span>* B, <span class="pl-k">float</span>* C, <span class="pl-k">int</span> vectorLength)
+{
+     <span class="pl-c"><span class="pl-c">//</span> calculate which element this thread is responsible for computing</span>
+     <span class="pl-k">int</span> workIndex = threadIdx.<span class="pl-smi">x</span> + blockDim.<span class="pl-smi">x</span> * blockIdx.<span class="pl-smi">x</span>
+
+     <span class="pl-k">if</span>(workIndex &lt; vectorLength)
+     {
+         <span class="pl-c"><span class="pl-c">//</span> Perform computation</span>
+         C[workIndex] = A[workIndex] + B[workIndex];
+     }
+}</pre></div>
+<p>在线程块中启动不工作的额外线程并不会产生巨大的开销成本，但应当尽量避免启动那些“没有任何线程在工作”的线程块。</p>
+<p>所需的线程块数量可以通过“所需线程数（本例中为向量长度）除以每个块的线程数”并<strong>向上取整（Ceiling）</strong> 来计算。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> vectorLength is an integer storing number of elements in the vector</span>
+<span class="pl-k">int</span> threads = <span class="pl-c1">256</span>;
+<span class="pl-k">int</span> blocks = (vectorLength + threads-<span class="pl-c1">1</span>)/threads;
+vecAdd&lt;&lt;&lt;blocks, threads&gt;&gt;&gt;(devA, devB, devC, vectorLength);</pre></div>
+<p><strong>CUDA 核心计算库 (CCCL)</strong> 提供了一个便捷的实用程序 <code class="notranslate">cuda::ceil_div</code>，用于执行这种向上取整除法，以计算核函数启动所需的线程块数量。该实用程序可以通过包含头文件 <code class="notranslate">&lt;cuda/cmath&gt;</code> 来使用。注意：经过查询cuda c++ core libraries文档，ceil_div 需要cuda12.8以上版本。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> vectorLength is an integer storing number of elements in the vector</span>
+<span class="pl-k">int</span> threads = <span class="pl-c1">256</span>;
+<span class="pl-k">int</span> blocks = cuda::ceil_div(vectorLength, threads);
+vecAdd&lt;&lt;&lt;blocks, threads&gt;&gt;&gt;(devA, devB, devC, vectorLength);</pre></div>
+<h1>2.内存访问</h1>
+<p>为了使用上面所示的 vecAdd 内核，数组 A、B 和 C 必须位于 GPU 可访问的内存中。实现这一点有几种不同的方法，这里将介绍其中两种</p>
+<h2>2.1 统一内存</h2>
+<p><strong>统一内存（Unified Memory）</strong> 是 CUDA 运行时的一项核心特性，它建立了一个在 CPU（主机）和 GPU（设备）之间共享的单一逻辑地址空间。通过使用 <code class="notranslate">cudaMallocManaged</code> API 或 <code class="notranslate">__managed__</code> 限定符，NVIDIA 驱动程序会自动监控数据访问需求，并在硬件底层透明地按需迁移数据。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">void</span> <span class="pl-en">unifiedMemExample</span>(<span class="pl-k">int</span> vectorLength)
+{
+    <span class="pl-c"><span class="pl-c">//</span> Pointers to memory vectors</span>
+    <span class="pl-k">float</span>* A = <span class="pl-c1">nullptr</span>;
+    <span class="pl-k">float</span>* B = <span class="pl-c1">nullptr</span>;
+    <span class="pl-k">float</span>* C = <span class="pl-c1">nullptr</span>;
+    <span class="pl-k">float</span>* comparisonResult = (<span class="pl-k">float</span>*)<span class="pl-c1">malloc</span>(vectorLength*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+
+    <span class="pl-c"><span class="pl-c">//</span> Use unified memory to allocate buffers</span>
+    <span class="pl-c1">cudaMallocManaged</span>(&amp;A, vectorLength*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+    <span class="pl-c1">cudaMallocManaged</span>(&amp;B, vectorLength*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+    <span class="pl-c1">cudaMallocManaged</span>(&amp;C, vectorLength*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+
+    <span class="pl-c"><span class="pl-c">//</span> Initialize vectors on the host</span>
+    <span class="pl-c1">initArray</span>(A, vectorLength);
+    <span class="pl-c1">initArray</span>(B, vectorLength);
+
+    <span class="pl-c"><span class="pl-c">//</span> Launch the kernel. Unified memory will make sure A, B, and C are</span>
+    <span class="pl-c"><span class="pl-c">//</span> accessible to the GPU</span>
+    <span class="pl-k">int</span> threads = <span class="pl-c1">256</span>;
+    <span class="pl-k">int</span> blocks = <span class="pl-c1">cuda::ceil_div</span>(vectorLength, threads);
+    vecAdd&lt;&lt;&lt;blocks, threads&gt;&gt;&gt;(A, B, C, vectorLength);
+    <span class="pl-c"><span class="pl-c">//</span> Wait for the kernel to complete execution</span>
+    <span class="pl-c1">cudaDeviceSynchronize</span>();
+
+    <span class="pl-c"><span class="pl-c">//</span> Perform computation serially on CPU for comparison</span>
+    <span class="pl-c1">serialVecAdd</span>(A, B, comparisonResult, vectorLength);
+
+    <span class="pl-c"><span class="pl-c">//</span> Confirm that CPU and GPU got the same answer</span>
+    <span class="pl-k">if</span>(<span class="pl-c1">vectorApproximatelyEqual</span>(C, comparisonResult, vectorLength))
+    {
+        <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Unified Memory: CPU and GPU answers match<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>);
+    }
+    <span class="pl-k">else</span>
+    {
+        <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Unified Memory: Error - CPU and GPU answers do not match<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>);
+    }
+
+    <span class="pl-c"><span class="pl-c">//</span> Clean Up</span>
+    <span class="pl-c1">cudaFree</span>(A);
+    <span class="pl-c1">cudaFree</span>(B);
+    <span class="pl-c1">cudaFree</span>(C);
+    <span class="pl-c1">free</span>(comparisonResult);
+}</pre></div>
+<h2>2.2 显式内存管理</h2>
+<p>通过手动控制数据迁移实现更高的性能。其核心流程包括：使用 <code class="notranslate">cudaMalloc</code> 在 GPU 上开辟空间，并通过同步的 <code class="notranslate">cudaMemcpy</code> API 在主机与设备间传输数据（其中 <code class="notranslate">cudaMemcpyDefault</code> 可根据指针地址自动判定传输方向）。为了优化传输效率，最佳实践是使用 <code class="notranslate">cudaMallocHost</code> 分配<strong>页锁定内存（Page-locked/Pinned Memory）</strong>，这种内存可以防止操作系统将其交换至磁盘，从而显著提升带宽表现，并为后续的异步流传输奠定基础；但需注意，过度锁定主机内存可能会导致系统整体性能下降，应仅针对需频繁与 GPU 交换数据的缓冲区使用。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">void</span> <span class="pl-en">explicitMemExample</span>(<span class="pl-k">int</span> vectorLength)
+{
+    <span class="pl-c"><span class="pl-c">//</span> Pointers for host memory</span>
+    <span class="pl-k">float</span>* A = <span class="pl-c1">nullptr</span>;
+    <span class="pl-k">float</span>* B = <span class="pl-c1">nullptr</span>;
+    <span class="pl-k">float</span>* C = <span class="pl-c1">nullptr</span>;
+    <span class="pl-k">float</span>* comparisonResult = (<span class="pl-k">float</span>*)<span class="pl-c1">malloc</span>(vectorLength*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+    
+    <span class="pl-c"><span class="pl-c">//</span> Pointers for device memory</span>
+    <span class="pl-k">float</span>* devA = <span class="pl-c1">nullptr</span>;
+    <span class="pl-k">float</span>* devB = <span class="pl-c1">nullptr</span>;
+    <span class="pl-k">float</span>* devC = <span class="pl-c1">nullptr</span>;
+
+    <span class="pl-c"><span class="pl-c">//</span>Allocate Host Memory using cudaMallocHost API. This is best practice</span>
+    <span class="pl-c"><span class="pl-c">//</span> when buffers will be used for copies between CPU and GPU memory</span>
+    <span class="pl-c1">cudaMallocHost</span>(&amp;A, vectorLength*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+    <span class="pl-c1">cudaMallocHost</span>(&amp;B, vectorLength*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+    <span class="pl-c1">cudaMallocHost</span>(&amp;C, vectorLength*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+
+    <span class="pl-c"><span class="pl-c">//</span> Initialize vectors on the host</span>
+    <span class="pl-c1">initArray</span>(A, vectorLength);
+    <span class="pl-c1">initArray</span>(B, vectorLength);
+
+    <span class="pl-c"><span class="pl-c">//</span> start-allocate-and-copy</span>
+    <span class="pl-c"><span class="pl-c">//</span> Allocate memory on the GPU</span>
+    <span class="pl-c1">cudaMalloc</span>(&amp;devA, vectorLength*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+    <span class="pl-c1">cudaMalloc</span>(&amp;devB, vectorLength*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+    <span class="pl-c1">cudaMalloc</span>(&amp;devC, vectorLength*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+
+    <span class="pl-c"><span class="pl-c">//</span> Copy data to the GPU</span>
+    <span class="pl-c1">cudaMemcpy</span>(devA, A, vectorLength*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>), cudaMemcpyDefault);
+    <span class="pl-c1">cudaMemcpy</span>(devB, B, vectorLength*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>), cudaMemcpyDefault);
+    <span class="pl-c1">cudaMemset</span>(devC, <span class="pl-c1">0</span>, vectorLength*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+    <span class="pl-c"><span class="pl-c">//</span> end-allocate-and-copy</span>
+
+    <span class="pl-c"><span class="pl-c">//</span> Launch the kernel</span>
+    <span class="pl-k">int</span> threads = <span class="pl-c1">256</span>;
+    <span class="pl-k">int</span> blocks = <span class="pl-c1">cuda::ceil_div</span>(vectorLength, threads);
+    vecAdd&lt;&lt;&lt;blocks, threads&gt;&gt;&gt;(devA, devB, devC, vectorLength);
+    <span class="pl-c"><span class="pl-c">//</span> wait for kernel execution to complete</span>
+    <span class="pl-c1">cudaDeviceSynchronize</span>();
+
+    <span class="pl-c"><span class="pl-c">//</span> Copy results back to host</span>
+    <span class="pl-c1">cudaMemcpy</span>(C, devC, vectorLength*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>), cudaMemcpyDefault);
+
+    <span class="pl-c"><span class="pl-c">//</span> Perform computation serially on CPU for comparison</span>
+    <span class="pl-c1">serialVecAdd</span>(A, B, comparisonResult, vectorLength);
+
+    <span class="pl-c"><span class="pl-c">//</span> Confirm that CPU and GPU got the same answer</span>
+    <span class="pl-k">if</span>(<span class="pl-c1">vectorApproximatelyEqual</span>(C, comparisonResult, vectorLength))
+    {
+        <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Explicit Memory: CPU and GPU answers match<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>);
+    }
+    <span class="pl-k">else</span>
+    {
+        <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Explicit Memory: Error - CPU and GPU answers to not match<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>);
+    }
+
+    <span class="pl-c"><span class="pl-c">//</span> clean up</span>
+    <span class="pl-c1">cudaFree</span>(devA);
+    <span class="pl-c1">cudaFree</span>(devB);
+    <span class="pl-c1">cudaFree</span>(devC);
+    <span class="pl-c1">cudaFreeHost</span>(A);
+    <span class="pl-c1">cudaFreeHost</span>(B);
+    <span class="pl-c1">cudaFreeHost</span>(C);
+    <span class="pl-c1">free</span>(comparisonResult);
+}</pre></div>
+<h1>3.完整实例</h1>
+<p>以“统一内存”为例：</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>cuda_runtime_api.h<span class="pl-pds">&gt;</span></span>
+#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>memory.h<span class="pl-pds">&gt;</span></span>
+#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>cstdlib<span class="pl-pds">&gt;</span></span>
+#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>ctime<span class="pl-pds">&gt;</span></span>
+#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>stdio.h<span class="pl-pds">&gt;</span></span>
+#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>cuda/cmath<span class="pl-pds">&gt;</span></span>
+
+__global__ <span class="pl-k">void</span> <span class="pl-en">vecAdd</span>(<span class="pl-k">float</span>* A, <span class="pl-k">float</span>* B, <span class="pl-k">float</span>* C, <span class="pl-k">int</span> vectorLength)
+{
+    <span class="pl-k">int</span> workIndex = threadIdx.<span class="pl-smi">x</span> + blockIdx.<span class="pl-smi">x</span>*blockDim.<span class="pl-smi">x</span>;
+    <span class="pl-k">if</span>(workIndex &lt; vectorLength)
+    {
+        C[workIndex] = A[workIndex] + B[workIndex];
+    }
+}
+
+<span class="pl-k">void</span> <span class="pl-en">initArray</span>(<span class="pl-k">float</span>* A, <span class="pl-k">int</span> length)
+{
+     <span class="pl-c1">std::srand</span>(<span class="pl-c1">std::time</span>({}));
+    <span class="pl-k">for</span>(<span class="pl-k">int</span> i=<span class="pl-c1">0</span>; i&lt;length; i++)
+    {
+        A[i] = <span class="pl-c1">rand</span>() / (<span class="pl-k">float</span>)RAND_MAX;
+    }
+}
+
+<span class="pl-k">void</span> <span class="pl-en">serialVecAdd</span>(<span class="pl-k">float</span>* A, <span class="pl-k">float</span>* B, <span class="pl-k">float</span>* C,  <span class="pl-k">int</span> length)
+{
+    <span class="pl-k">for</span>(<span class="pl-k">int</span> i=<span class="pl-c1">0</span>; i&lt;length; i++)
+    {
+        C[i] = A[i] + B[i];
+    }
+}
+
+<span class="pl-k">bool</span> <span class="pl-en">vectorApproximatelyEqual</span>(<span class="pl-k">float</span>* A, <span class="pl-k">float</span>* B, <span class="pl-k">int</span> length, <span class="pl-k">float</span> epsilon=<span class="pl-c1">0.00001</span>)
+{
+    <span class="pl-k">for</span>(<span class="pl-k">int</span> i=<span class="pl-c1">0</span>; i&lt;length; i++)
+    {
+        <span class="pl-k">if</span>(<span class="pl-c1">fabs</span>(A[i] -B[i]) &gt; epsilon)
+        {
+            <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Index %d mismatch: %f != %f<span class="pl-pds">"</span></span>, i, A[i], B[i]);
+            <span class="pl-k">return</span> <span class="pl-c1">false</span>;
+        }
+    }
+    <span class="pl-k">return</span> <span class="pl-c1">true</span>;
+}
+
+<span class="pl-c"><span class="pl-c">//</span>unified-memory-begin</span>
+<span class="pl-k">void</span> <span class="pl-en">unifiedMemExample</span>(<span class="pl-k">int</span> vectorLength)
+{
+    <span class="pl-c"><span class="pl-c">//</span> Pointers to memory vectors</span>
+    <span class="pl-k">float</span>* A = <span class="pl-c1">nullptr</span>;
+    <span class="pl-k">float</span>* B = <span class="pl-c1">nullptr</span>;
+    <span class="pl-k">float</span>* C = <span class="pl-c1">nullptr</span>;
+    <span class="pl-k">float</span>* comparisonResult = (<span class="pl-k">float</span>*)<span class="pl-c1">malloc</span>(vectorLength*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+
+    <span class="pl-c"><span class="pl-c">//</span> Use unified memory to allocate buffers</span>
+    <span class="pl-c1">cudaMallocManaged</span>(&amp;A, vectorLength*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+    <span class="pl-c1">cudaMallocManaged</span>(&amp;B, vectorLength*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+    <span class="pl-c1">cudaMallocManaged</span>(&amp;C, vectorLength*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+
+    <span class="pl-c"><span class="pl-c">//</span> Initialize vectors on the host</span>
+    <span class="pl-c1">initArray</span>(A, vectorLength);
+    <span class="pl-c1">initArray</span>(B, vectorLength);
+
+    <span class="pl-c"><span class="pl-c">//</span> Launch the kernel. Unified memory will make sure A, B, and C are</span>
+    <span class="pl-c"><span class="pl-c">//</span> accessible to the GPU</span>
+    <span class="pl-k">int</span> threads = <span class="pl-c1">256</span>;
+    <span class="pl-k">int</span> blocks = <span class="pl-c1">cuda::ceil_div</span>(vectorLength, threads);
+    vecAdd&lt;&lt;&lt;blocks, threads&gt;&gt;&gt;(A, B, C, vectorLength);
+    <span class="pl-c"><span class="pl-c">//</span> Wait for the kernel to complete execution</span>
+    <span class="pl-c1">cudaDeviceSynchronize</span>();
+
+    <span class="pl-c"><span class="pl-c">//</span> Perform computation serially on CPU for comparison</span>
+    <span class="pl-c1">serialVecAdd</span>(A, B, comparisonResult, vectorLength);
+
+    <span class="pl-c"><span class="pl-c">//</span> Confirm that CPU and GPU got the same answer</span>
+    <span class="pl-k">if</span>(<span class="pl-c1">vectorApproximatelyEqual</span>(C, comparisonResult, vectorLength))
+    {
+        <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Unified Memory: CPU and GPU answers match<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>);
+    }
+    <span class="pl-k">else</span>
+    {
+        <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Unified Memory: Error - CPU and GPU answers do not match<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>);
+    }
+
+    <span class="pl-c"><span class="pl-c">//</span> Clean Up</span>
+    <span class="pl-c1">cudaFree</span>(A);
+    <span class="pl-c1">cudaFree</span>(B);
+    <span class="pl-c1">cudaFree</span>(C);
+    <span class="pl-c1">free</span>(comparisonResult);
+
+}
+<span class="pl-c"><span class="pl-c">//</span>unified-memory-end</span>
+
+
+<span class="pl-k">int</span> <span class="pl-en">main</span>(<span class="pl-k">int</span> argc, <span class="pl-k">char</span>** argv)
+{
+    <span class="pl-k">int</span> vectorLength = <span class="pl-c1">1024</span>;
+    <span class="pl-k">if</span>(argc &gt;=<span class="pl-c1">2</span>)
+    {
+        vectorLength = <span class="pl-c1">std::atoi</span>(argv[<span class="pl-c1">1</span>]);
+    }
+    <span class="pl-c1">unifiedMemExample</span>(vectorLength);		
+    <span class="pl-k">return</span> <span class="pl-c1">0</span>;
+}</pre></div>
+<p>核函数的启动相对于调用它们的 CPU 线程是异步的。这意味着 CPU 线程的控制流将在核函数完成执行之前、甚至可能在核函数正式启动之前就继续向下执行。为了确保在执行后续主机端代码前核函数已完成运行，必须使用某种同步机制。同步 GPU 与主机线程最简单的方法是使用 cudaDeviceSynchronize，它会阻塞主机线程，直到此前发布到 GPU 上的所有工作全部完成。在上述示例中，这种方法是足够的，因为 GPU 上每次只执行单个操作。但在更大规模的应用中，可能会有多个 <strong>流（Streams）</strong> 在 GPU 上并行执行任务，此时 cudaDeviceSynchronize 会等待所有流中的工作全部完成，此时建议使用“流同步（Stream Synchronization）”API 来仅与特定流进行同步</p>
+<h1>4.设备函数与主机函数</h1>
+<p><code class="notranslate">__global__</code> 限定符用于指明核函数（Kernel）的入口点。也就是说，该函数将被调用并在 GPU 上进行并行执行。核函数通常从主机端（Host）启动，但也可以利用<strong>动态并行（Dynamic Parallelism）</strong> 机制从一个核函数内部启动另一个核函数。</p>
+<p><code class="notranslate">__device__</code> 限定符表示该函数应被编译为 GPU 代码，并能被其他 <code class="notranslate">__device__</code> 或 <code class="notranslate">__global__</code> 函数调用。一个函数（包括类成员函数、仿函数和 Lambda 表达式）可以同时指定为 <code class="notranslate">__device__</code> 和 <code class="notranslate">__host__</code></p>
+<p>当一个函数被指定为 <code class="notranslate">__host__ __device__</code> 时，编译器会被指示为该函数同时生成 GPU 和 CPU 两套代码。在这种函数中，可能需要使用预处理器（宏）来分别为函数的 GPU 副本或 CPU 副本指定特定的代码。</p>
+<h1>5.静态变量声明</h1>
+<p>CUDA 限定符（Specifiers）可用于静态变量声明，以控制变量的物理存储位置，具体见下一节对GPU设备内存空间的介绍</p>
+<ul>
+<li><strong><code class="notranslate">__device__</code></strong>：指定变量存储在<strong>全局内存（Global Memory）</strong> 中。</li>
+<li><strong><code class="notranslate">__constant__</code></strong>：指定变量存储在<strong>常量内存（Constant Memory）</strong> 中。</li>
+<li><strong><code class="notranslate">__managed__</code></strong>：指定变量存储为<strong>统一内存（Unified Memory）</strong>。</li>
+<li><strong><code class="notranslate">__shared__</code></strong>：指定变量存储在<strong>共享内存（Shared Memory）</strong> 中。</li>
+</ul>
+<p>当在 <code class="notranslate">__device__</code> 或 <code class="notranslate">__global__</code> 函数内部声明一个没有任何限定符的变量时，如果可能，它会被分配到<strong>寄存器（Registers）</strong> 中；而在必要时（如寄存器溢出），则会被分配到<strong>局部内存（Local Memory）</strong> 中。任何在 <code class="notranslate">__device__</code> 或 <code class="notranslate">__global__</code> 函数外部声明的、且没有任何限定符的变量，都将被分配在<strong>系统内存（System Memory，即主机端内存）</strong> 中</p>
+<h1>6.线程块集群</h1>
+<p>CUDA 在线程块（Thread Block）与网格（Grid）之间引入了可选的“集群”层级。类似于线程块内的线程被保证调度到同一个流式多处理器（SM），集群内的所有线程块被保证共同调度到同一个 GPU 处理集群（GPC）中。这种硬件级的协同调度确保了块与块之间能够进行更紧密的通信与同步。</p>
+<p>集群的核心优势在于<strong>分布式共享内存（Distributed Shared Memory）</strong>。集群内的线程块不仅可以访问自身的共享内存，还可以对集群内其他线程块的共享内存进行读、写和原子操作。这打破了传统模型中“共享内存仅限块内私有”的限制，极大提升了数据交换效率。</p>
+<p>通过 Cooperative Groups API，集群内的线程块可以执行硬件支持的同步操作（如 <code class="notranslate">cluster.sync()</code>）。此外，API 还提供了 <code class="notranslate">num_threads()</code> 和 <code class="notranslate">num_blocks()</code> 等函数来查询集群规模，以及 <code class="notranslate">dim_threads()</code> 和 <code class="notranslate">dim_blocks()</code> 来获取线程或块在集群内的秩（Rank/坐标）</p>
+<p>集群可以通过两种方式启用：</p>
+<ul>
+<li><strong>编译时固定</strong>：使用 <code class="notranslate">__cluster_dims__(X, Y, Z)</code> 属性，随后通过传统的三括号 <code class="notranslate">&lt;&lt;&lt; &gt;&gt;&gt;</code> 启动，大小不可更改。</li>
+<li><strong>运行时动态</strong>：使用 <code class="notranslate">cudaLaunchKernelEx</code> API 进行配置。 需要注意的是，为了保持兼容性，即使启用了集群，<code class="notranslate">gridDim</code> 变量在内核中依然表示<strong>线程块的总数</strong>，而非集群的总数。</li>
+</ul>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> Kernel definition</span>
+<span class="pl-c"><span class="pl-c">//</span> Compile time cluster size 2 in X-dimension and 1 in Y and Z dimension</span>
+__global__ <span class="pl-k">void</span> <span class="pl-en">__cluster_dims__</span>(<span class="pl-c1">2</span>, <span class="pl-c1">1</span>, <span class="pl-c1">1</span>) cluster_kernel(<span class="pl-k">float</span> *input, <span class="pl-k">float</span>* output)
+{
+
+}
+<span class="pl-k">int</span> <span class="pl-en">main</span>()
+{
+    <span class="pl-k">float</span> *input, *output;
+    <span class="pl-c"><span class="pl-c">//</span> Kernel invocation with compile time cluster size</span>
+    dim3 <span class="pl-smi">threadsPerBlock</span>(<span class="pl-c1">16</span>, <span class="pl-c1">16</span>);
+    dim3 <span class="pl-smi">numBlocks</span>(N / threadsPerBlock.<span class="pl-smi">x</span>, N / threadsPerBlock.<span class="pl-smi">y</span>);
+
+    <span class="pl-c"><span class="pl-c">//</span> The grid dimension is not affected by cluster launch, and is still enumerated</span>
+    <span class="pl-c"><span class="pl-c">//</span> using number of blocks.</span>
+    <span class="pl-c"><span class="pl-c">//</span> The grid dimension must be a multiple of cluster size.</span>
+    cluster_kernel&lt;&lt;&lt;numBlocks, threadsPerBlock&gt;&gt;&gt;(input, output);
+}</pre></div></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
