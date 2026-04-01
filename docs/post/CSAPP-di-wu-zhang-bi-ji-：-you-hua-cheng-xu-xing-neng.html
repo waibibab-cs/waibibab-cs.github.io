@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="在很多情况下，让程序运行得快也是一个重要的考虑因素，编写高效程序需要做到以下几点：第一、我们必须选择一组适当的算法和数据结构。">
+<meta property="og:title" content="CSAPP第五章笔记：优化程序性能">
+<meta property="og:description" content="在很多情况下，让程序运行得快也是一个重要的考虑因素，编写高效程序需要做到以下几点：第一、我们必须选择一组适当的算法和数据结构。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/CSAPP-di-wu-zhang-bi-ji-%EF%BC%9A-you-hua-cheng-xu-xing-neng.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>CSAPP第五章笔记：优化程序性能</title>
+
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">CSAPP第五章笔记：优化程序性能</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/27" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>在很多情况下，让程序运行得快也是一个重要的考虑因素，编写高效程序需要做到以下几点：第一、我们必须选择一组适当的算法和数据结构。第二、我们必须编写出编译器能够有效优化以转换成高效可执行代码的源代码。对于第二点，理解优化编译器的能力和局限性是很重要的，编写程序方式看上去只是一点小小的变动，都会引起编译器优化方式很大的变化。</p>
+<h1>5.1 优化编译器的能力和局限性</h1>
+<p>大多数编译器包括GCC，向用户提供了一些对它们所使用的优化的控制，最简单的控制就是指定<strong>优化级别</strong>，例如，以命令行选项"-Og"调用GCC是让GCC使用一组基本的优化，以选项"-O1"或更高（如"-O2"或"-O3"）调用GCC会让它使用更大量的优化。这样做可以进一步提高程序的性能，但是也可能增加程序的规模。<br>
+编译器必须很小心地对程序只使用<strong>安全</strong>的优化，也就是说对于程序可能遇到的所有可能的情况，优化前后有一样的行为，让我们来看看下面这两个过程：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105720.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105720.png" alt="image.png" style="max-width: 100%;"></a></p>
+<p>这两个过程似乎有相同的行为，而twiddle2效率更高一些，它只要求3次内存引用，而twiddle1需要6次，不过当xp == yp时，twiddle1会让xp指向的值增加4倍，而twiddle2仅让xp指向的值增加3倍。这种两个指针可能指向同一个内存位置的情况称为<strong>内存别名使用</strong>，这造成了一个主要的<strong>妨碍优化的因素</strong>，也是可能严重限制编译器产生优化代码机会的程序的一个方面，如果编译器不能确定两个指针是否指向同一个位置，就必须假设什么情况都有可能，这就限制了可能的优化策略。<br>
+第二个妨碍优化的因素是函数调用，考虑下面这两个过程：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105735.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105735.png" alt="image.png" style="max-width: 100%;"></a><br>
+看上去两个过程计算的都是相同的结果，但是考虑f函数的代码如下：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105752.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105752.png" alt="image.png" style="max-width: 100%;"></a><br>
+这个函数有个副作用——它修改了全局程序状态的一部分，改变调用它的次数会改变程序的行为。大多数编译器不会试图判断一个函数是否没有副作用，如果没有，就可以被优化成像func2中的样子。然而，编译器会假设最糟的情况，因此保持所有的函数调用不变。<br>
+在各种编译器中，就优化能力来说，GCC被认为是胜任的，但是并不是特别突出，它能完成基本的优化，但是不会对程序进行更加激进的变换，因此，使用GCC的程序员必须花费更多的精力，以一种简化编译器生成高效代码的任务的方式来编写程序。</p>
+<h1>5.2 表示程序性能</h1>
+<p>我们引入度量标准<strong>每元素的周期数（Cycles Per Element，CPE）</strong> ，作为一种表示程序性能并指导我们改进代码的方法。处理器活动的顺序是由时钟控制的，时钟提供了某个频率的规律信号，通常用<strong>千兆赫兹（GHz）</strong>，即十亿周期每秒来表示。<br>
+许多过程含有一组元素上迭代的循环，例如图5-1中的函数psum1和psum2计算的都是一个长度为n的向量的<strong>前置和</strong>。对于向量a，前置和p定义为：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105803.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105803.png" alt="image.png" style="max-width: 100%;"></a></p>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105814.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105814.png" alt="image.png" style="max-width: 100%;"></a></p>
+<p>函数psum1每次迭代计算结果向量的一个元素，第二个函数使用<strong>循环展开</strong>的技术，每次迭代计算两个元素，本章后面会探讨循环展开的好处。</p>
+<h1>5.3 程序示例</h1>
+<p>为了说明一个抽象的程序是如何被系统地转换成更有效的代码的，我们将使用一个基于图5-3所示的向量数据结构的运行示例。向量由两个内存块表示：头部和数据数组，头部是一个声明为如下的结构：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105823.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105823.png" alt="image.png" style="max-width: 100%;"></a><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105838.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105838.png" alt="image.png" style="max-width: 100%;"></a><br>
+对于上述的数据结构，我们给出一个生成向量的函数：<code class="notranslate">vec_ptr new_vec(long len)</code>、一个访问向量元素的函数：<code class="notranslate">int get_vec_element(vec_ptr v, long index, data_t *dest)</code>、这个程序会对每个向量引用进行边界检查，边界检查降低了程序出错的机会，但同样也会减缓程序的执行。<br>
+图5-5所示的代码使用某种运算，将一个向量中所有的元素合并成一个值：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105848.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105848.png" alt="image.png" style="max-width: 100%;"></a><br>
+接下来，我们会对这个代码进行一系列的变化，得到这个合并函数的不同版本，通过测量CPE来评估性能，首先是未优化的和抽象的-O1的结果：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105858.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105858.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h2>5.3.1 消除循环的低效率</h2>
+<p>图5-6是一个修改了的版本，称为combine2，它在开始时调用vec_length，并将结果赋值给局部变量length。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105912.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105912.png" alt="image.png" style="max-width: 100%;"></a><br>
+这个优化是一类常见的优化的一个例子，称为<strong>代码移动</strong>，这类优化包括识别要执行多次但是计算结果不会改变的计算。因而可以将计算移动到代码前面不会被多次求值的部分。然而编译器不知道一个函数是否会有副作用，因此为了改进代码，程序员必须经常帮助编译器显式地完成代码的移动。</p>
+<h2>5.3.2 减少过程调用</h2>
+<p>以<code class="notranslate">combine2</code>代码为例，其循环迭代调用<code class="notranslate">get_vec_element</code>函数获取向量元素时，因要做边界检查导致效率低，不过经分析该代码所有引用合法；因此提出替代方法，通过增加<code class="notranslate">get_vec_start</code>函数获取数组起始地址，进而写出无函数调用、直接访问数组的<code class="notranslate">combine3</code>过程，虽然这种变换可能损害程序模块性，但有些程序员认为这是获得高性能结果的必要步骤。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105922.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105922.png" alt="image.png" style="max-width: 100%;"></a><br>
+我们发现修改之后性能没有明显的提升，实际上，整数求和的性能还略有下降，这个原因在于内循环中的其他操作形成了瓶颈，限制性能超过调用<code class="notranslate">get_vec_element</code></p>
+<h2>5.3.3 消除不必要的内存引用</h2>
+<p>在分析 <code class="notranslate">combine3</code> 函数的内部循环生成的汇编代码时，特别是针对 <code class="notranslate">double</code> 类型和乘法运算进行计算时，可以观察到一个关键的性能瓶颈：</p>
+<ol>
+<li><strong>冗余的内存读写</strong>：计算的累积值被指令不断地写入由 <code class="notranslate">dest</code> 指向的内存位置。</li>
+<li><strong>循环内部操作</strong>：在每次迭代中，累积计算的结果都存储在寄存器 <code class="notranslate">%xmm0</code> 中，然后通过 <code class="notranslate">vmovsd %xmm0, (%rax)</code>（假设 <code class="notranslate">%rax</code> 包含 <code class="notranslate">dest</code> 的地址）<strong>写回到内存</strong>。在下一次迭代开始时，程序又会从内存中<strong>读回</strong>这个值，用于新的计算。<br>
+解决方案：使用累加变量<br>
+为了解决这种低效率，优化方法是<strong>消除不必要的内存引用</strong>。<br>
+程序员应当在循环内部使用一个<strong>累加变量</strong>（accumulator variable），该变量通常存储在处理器寄存器中。<br>
+• <strong>实现机制</strong>：将累积计算的结果一直保存在这个本地（临时）变量中，直到循环完成。<br>
+• <strong>最终写回</strong>：只有在循环结束时，才需要将最终的累积结果写回到 <code class="notranslate">dest</code>。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105942.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260401105942.png" alt="image.png" style="max-width: 100%;"></a></li>
+</ol>
+<h1>5.4 理解现代处理器</h1>
+<p>现代处理器的性能优化不仅依赖于目标机器的任何特性，还依赖于对<strong>流水线处理器</strong>结构的理解。优化需要深刻理解机器的基本限制，并生成能够最大限度地在功能单元上实现并行执行的代码。<br>
+现代处理器的复杂性与执行机制：</p>
+<ul>
+<li>现代处理器采用了<strong>乱序执行 (out-of-order execution)</strong> 的技术：指令执行的顺序不一定要与它们在机器级程序中的顺序一致。</li>
+<li>处理器的成功关键在于<strong>动态调度 (dynamic scheduling)</strong>，它按顺序接收指令，但可以在乱序中执行操作。</li>
+<li>虽然程序在汇编代码中看起来是按顺序执行的，但处理器在执行层面采取了许多步骤来实现并行。</li>
+<li>程序性能的限制由两个基本因素决定：<strong>延迟界限 (latency bound)</strong> 和<strong>吞吐量界限 (throughput bound)</strong>。</li>
+</ul>
+<p>现代处理器（如 Intel 处理器）的结构通常包含两个主要部分：<strong>指令控制单元（ICU）</strong> 和<strong>执行单元（EU）</strong> 。</p>
+<ol>
+<li><strong>指令控制单元 (ICU)：</strong>
+<ol>
+<li>ICU负责从内存（指令高速缓存）中读取指令。</li>
+<li>ICU将复杂的指令序列转换成一系列更小的<strong>基本操作</strong>（微操作）。</li>
+<li>ICU 通过<strong>分支预测 (branch prediction)</strong> 技术来处理控制流（分支）。如果预测错误，将需要“冲刷”（刷新流水线），导致性能损失。</li>
+<li><strong>退役单元 (retirement unit)</strong> 是ICU的一部分，它维护程序寄存器状态的正确顺序。</li>
+</ol>
+</li>
+<li><strong>执行单元 (EU)：</strong>
+<ol>
+<li>EU 接收 ICU 生成的微操作，并将它们分配给不同的<strong>功能单元</strong>来执行。</li>
+<li>功能单元是执行特定操作的硬件资源，例如整数运算、浮点/向量运算、加载和存储。</li>
+<li>EU使用<strong>高速缓存 (data cache)</strong> 读取内存数据，加载和存储单元通过高速缓存与内存进行通信。</li>
+</ol>
+</li>
+</ol>
+<h1>5.5 循环展开</h1>
+<p>循环展开（Loop Unrolling）是一种重要的程序优化技术，旨在提高循环执行效率，并允许处理器实现更高程度的指令级并行性。<br>
+它通过增加每次迭代处理的元素数量，来达到优化目的：<br>
+• <strong>减少循环开销：</strong> 减少了整个循环执行所需的迭代次数，从而减少了索引增加和条件判断（比较和跳转）的循环控制开销。<br>
+• <strong>增加指令数量：</strong> 允许在内层循环中执行更多的操作，为处理器提供了更多的指令，从而增加了<strong>乱序执行</strong>（out-of-order execution）和<strong>功能单元并行</strong>的机会。<br>
+• <strong>优化关键路径：</strong> 可以减少限制性能的关键路径上的操作数量。</p>
+<p>单累加变量是最简单的循环展开形式，其中k个元素在一次迭代中被处理，但所有中间结果都累积在<strong>同一个累加变量</strong>（accumulator, acc）中。这种展开形式可以有效地降低循环开销，从而提高吞吐量界限附近的性能，然而：这种k×1 展开<strong>不能突破延迟界限</strong>。由于累加操作（例如乘法或加法）仍存在<strong>数据相关性</strong>（当前迭代的计算依赖于前一次迭代的 acc 值），关键路径的长度并未改变。性能仍然受限于操作的延迟。</p>
+<p>为了克服单累加变量带来的延迟限制，需要结合使用循环展开和<strong>多累加变量</strong>（Multiple Accumulators）的技术。这被称为 k×k 循环展开（或 k 路并行）。将 k 个独立的累加变量用于 k 值的累积。例如，2×2 展开（<code class="notranslate">combine6</code>）将奇数和偶数元素分别累积到两个独立的变量 (<code class="notranslate">acc0</code> 和 <code class="notranslate">acc1</code>) 中。</p>
+<p>在某些情况下，为了充分发挥 k×k 展开的优势，还需要进行<strong>重新结合变换</strong>（reassociation transformation）。比如将<code class="notranslate">acc = (acc OP data[i]) OP data[i+1]</code>写成<code class="notranslate">acc = acc OP (data[i] OP data[i+1])</code>，重新结合变换旨在打破限制性能的关键路径上的数据相关性，从而<strong>提高并行操作的数量</strong>。</p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
