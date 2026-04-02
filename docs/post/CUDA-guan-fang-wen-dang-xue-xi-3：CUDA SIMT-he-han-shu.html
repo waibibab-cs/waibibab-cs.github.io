@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="原文章链接：https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html
+# 1.线程的层次结构
+SIMT模型允许每个线程保持自身状态和控制流。">
+<meta property="og:title" content="CUDA官方文档学习3：CUDA SIMT核函数">
+<meta property="og:description" content="原文章链接：https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html
+# 1.线程的层次结构
+SIMT模型允许每个线程保持自身状态和控制流。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/CUDA-guan-fang-wen-dang-xue-xi-3%EF%BC%9ACUDA%20SIMT-he-han-shu.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>CUDA官方文档学习3：CUDA SIMT核函数</title>
+<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">CUDA官方文档学习3：CUDA SIMT核函数</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/29" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>原文章链接：<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html" rel="nofollow">https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html</a></p>
+<h1>1.线程的层次结构</h1>
+<p>SIMT模型允许每个线程保持自身状态和控制流。从功能角度而言，每个线程可以执行独立的代码路径。但需要注意，通过减少同一<code class="notranslate">warp</code>内线程执行不同代码路径的情况，可以显著提升内核代码的性能表现。</p>
+<p>经典线程的层次结构包含grid-block-thread，其中尺寸与索引访问的相关函数如下所示<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402111532.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402111532.png" alt="image.png" style="max-width: 100%;"></a><br>
+使用多维线程块和网格仅出于便利考虑，不影响性能。线程块内的线程以可预测的方式线性排列：索引x的变化速度最快，其次是y，最后是z。（类似于x是秒针、y是分针、z是时针）</p>
+<h1>2.GPU设备内存空间</h1>
+<p>CUDA 设备包含多个可由内核中的 CUDA 线程访问的内存空间。下表总结了常见内存类型及其线程作用域和生命周期。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402111718.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402111718.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h2>2.1 全局内存</h2>
+<p>全局内存（也称设备内存 / Device Memory）是 GPU 上最主要的存储空间，其地位和作用等同于 CPU 系统的 RAM。它的核心特性是<strong>网格级完全可见（Grid-wide accessible）</strong>，这意味着在核函数（Kernel）运行期间，GPU 上启动的所有线程都可以自由地读取和写入这块内存区中的数据。</p>
+<p>全局内存的数据具有<strong>持久性（Persistent）</strong>，它的生命周期贯穿于整个应用程序，不会随着核函数的结束而消失。开发者必须手动接管它的生老病死，涉及的核心 CUDA API 包括：</p>
+<ul>
+<li><strong>分配</strong>：使用 <code class="notranslate">cudaMalloc</code>（标准显存分配）或 <code class="notranslate">cudaMallocManaged</code>（统一内存分配）开辟空间。</li>
+<li><strong>搬运</strong>：使用 <code class="notranslate">cudaMemcpy</code> 在主机（CPU）和全局内存（GPU）之间双向传输数据。</li>
+<li><strong>销毁</strong>：使用完毕后必须严格调用 <code class="notranslate">cudaFree</code> 释放内存空间，或者通过调用 <code class="notranslate">cudaDeviceReset</code> 直接重置当前设备并清空所有分配。</li>
+</ul>
+<p>在 CUDA 编程模型中，主机端启动的核函数（Kernel）的返回值类型强制要求为 <code class="notranslate">void</code>。因此，全局内存是 GPU 将计算结果传回主机，或者将中间数据传递给下一个核函数的“唯一物理载体”。但也正是因为所有线程都能并发访问这块区域，开发者必须对底层执行保持敬畏，采取合理的内存合并或同步策略，严防多线程并发读写导致的数据竞争（Data Races）。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__global__ <span class="pl-k">void</span> <span class="pl-en">vecAdd</span>(<span class="pl-k">float</span>* A, <span class="pl-k">float</span>* B, <span class="pl-k">float</span>* C, <span class="pl-k">int</span> vectorLength)
+{
+    <span class="pl-k">int</span> workIndex = threadIdx.<span class="pl-smi">x</span> + blockIdx.<span class="pl-smi">x</span>*blockDim.<span class="pl-smi">x</span>;
+    <span class="pl-k">if</span>(workIndex &lt; vectorLength)
+    {
+        C[workIndex] = A[workIndex] + B[workIndex];</pre></div>
+<h2>2.2 共享内存</h2>
+<p>共享内存是一种位于流多处理器（SM, Streaming Multiprocessor）内部的片上（On-chip）内存，在物理层面与 L1 缓存共享硬件资源。共享内存的带宽极高且延迟极低，其可见性与生命周期被严格限制在线程块级别。其内存空间在核函数（Kernel）启动时分配（为每个线程块分配一个独立的共享内存空间），数据在整个核函数执行期间持续存在（Persist）。它仅对同一个线程块内的所有线程可见，其他线程块绝对无法访问。</p>
+<p>鉴于块内所有线程均可并发读写共享内存，如果不加干预，极易引发读写冲突与数据竞争（Data Races）。为保证内存一致性，必须通过调用 <strong><code class="notranslate">__syncthreads()</code></strong> 内置函数进行强制同步。该函数充当块级执行屏障（Barrier），它会阻塞先到达的线程，直到块内所有线程都执行到此代码点，以确保此前的共享内存读写操作已全部完成并对所有线程可见。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> assuming blockDim.x is 128</span>
+__global__ <span class="pl-k">void</span> <span class="pl-en">example_syncthreads</span>(<span class="pl-k">int</span>* input_data, <span class="pl-k">int</span>* output_data) {
+    __shared__ <span class="pl-k">int</span> shared_data[<span class="pl-c1">128</span>];
+    <span class="pl-c"><span class="pl-c">//</span> Every thread writes to a distinct element of 'shared_data':</span>
+    shared_data[threadIdx.<span class="pl-smi">x</span>] = input_data[threadIdx.<span class="pl-smi">x</span>];
+
+    <span class="pl-c"><span class="pl-c">//</span> All threads synchronize, guaranteeing all writes to 'shared_data' are ordered </span>
+    <span class="pl-c"><span class="pl-c">//</span> before any thread is unblocked from '__syncthreads()':</span>
+    <span class="pl-c1">__syncthreads</span>();
+
+    <span class="pl-c"><span class="pl-c">//</span> A single thread safely reads 'shared_data':</span>
+    <span class="pl-k">if</span> (threadIdx.<span class="pl-smi">x</span> == <span class="pl-c1">0</span>) {
+        <span class="pl-k">int</span> sum = <span class="pl-c1">0</span>;
+        <span class="pl-k">for</span> (<span class="pl-k">int</span> i = <span class="pl-c1">0</span>; i &lt; blockDim.<span class="pl-smi">x</span>; ++i) {
+            sum += shared_data[i];
+        }
+        output_data[blockIdx.<span class="pl-smi">x</span>] = sum;
+    }
+}</pre></div>
+<p>共享内存的具体容量上限严格依赖于 GPU 的微架构（Architecture）。在物理层面，共享内存与 L1 缓存共享同一块片上存储（On-chip SRAM）。这使得两者在容量分配上构成“零和博弈”：核函数（Kernel）使用的共享内存越多，留给 L1 缓存的空间就越小；反之，若核函数完全不使用共享内存，L1 缓存将独占该物理区域的全部容量。</p>
+<p>为了保证代码在不同 GPU 架构上的鲁棒性，开发者应避免硬编码（Hardcode）内存上限，而必须通过调用 <strong><code class="notranslate">cudaGetDeviceProperties</code></strong> 函数进行动态查询。在返回的 <code class="notranslate">cudaDeviceProp</code> 结构体中，必须重点审查两个属性：</p>
+<ul>
+<li><strong><code class="notranslate">sharedMemPerMultiprocessor</code></strong>：单个流多处理器（SM）所能提供的共享内存总容量上限（决定了该 SM 能并发驻留多少个线程块）。</li>
+<li><strong><code class="notranslate">sharedMemPerBlock</code></strong>：单个线程块（Thread Block）所能申请的共享内存最大限制。</li>
+</ul>
+<p>开发者可通过调用 <strong><code class="notranslate">cudaFuncSetCacheConfig</code></strong> 函数，向 CUDA 运行时（Runtime）显式提交共享内存与 L1 缓存的容量划分倾向（例如偏好更大的共享内存，或偏好更大的 L1 缓存）。<strong>关键注意</strong>：该配置仅作为“性能偏好建议（Preference）”，而非强制性指令。CUDA 运行时拥有最终裁量权，会结合当前可用硬件资源与核函数的实际需求进行最终调配。</p>
+<p>静态共享内存适用于在编译期即可确定数据规模的场景。</p>
+<ul>
+<li><strong>声明语法</strong>：在核函数（Kernel）内部，使用 <code class="notranslate">__shared__</code> 修饰符声明定长数组（例如：<code class="notranslate">__shared__ float smem[1024];</code>）。</li>
+<li><strong>行为特征</strong>：该数组被分配在当前线程块的物理共享内存中，其生命周期与核函数执行周期一致。块内所有线程均持有对该数组的访问权限，因此在进行并发读写时，仍需显式调用 <code class="notranslate">__syncthreads()</code> 以防止数据竞争。</li>
+</ul>
+<p>动态共享内存适用于规模依赖输入数据、需在运行期（Run-time）决定的场景（如处理变长序列）。</p>
+<ul>
+<li><strong>配置语法</strong>：必须在主机端（Host）发起核函数调用时，通过执行配置的第三个参数指定所需内存的字节数（Bytes）（例如：<code class="notranslate">kernel&lt;&lt;&lt;grid, block, sharedMemBytes&gt;&gt;&gt;(...);</code>）。</li>
+<li><strong>声明语法</strong>：在核函数内部，必须配合 <code class="notranslate">extern</code> 关键字声明未定长数组（例如：<code class="notranslate">extern __shared__ float smem[];</code>）。</li>
+</ul>
+<p>当核函数内部需要同时使用<strong>多个</strong>不同类型的动态共享内存数组时，CUDA 底层<strong>仅允许存在一个</strong> <code class="notranslate">extern __shared__</code> 声明。开发者必须手动进行内存池的切分（Memory Partitioning）。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402113243.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402113243.png" alt="image.png" style="max-width: 100%;"></a><br>
+特定类型的指针必须指向其数据类型大小的整数倍地址。例如，<code class="notranslate">float</code> 或 <code class="notranslate">int</code> 类型的指针必须对齐到 4 字节边界。<strong>错误示例</strong>：若前一个数组的结束地址未对齐（如 <code class="notranslate">&amp;arr0[127]</code> 并非 4 的倍数），将其强制转换为 <code class="notranslate">float*</code> 会导致硬件级的未对齐内存访问（Unaligned Memory Access），这将引发严重的性能降级甚至程序崩溃。开发者必须手动填充补齐（Padding）以满足对齐要求。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">extern</span> __shared__ <span class="pl-k">float</span> array[];
+<span class="pl-k">short</span>* array0 = (<span class="pl-k">short</span>*)array;
+<span class="pl-k">float</span>* array1 = (<span class="pl-k">float</span>*)&amp;array0[<span class="pl-c1">127</span>];</pre></div>
+<h2>2.3 寄存器</h2>
+<p>寄存器物理驻留于SM内部，具有严格的线程私有作用域。其分配与生命周期完全由编译器负责隐式管理，专门用于在核函数执行期间作为线程局部存储使用。属于受限的底层核心资源，其物理上限决定了硬件的并发承载力。开发者必须通过查阅 GPU 的设备属性来获取硬件的具体限制，其中必须重点关注两个核心指标：<strong><code class="notranslate">regsPerMultiprocessor</code></strong>（限定单个 SM 上可用的寄存器总数）以及 <strong><code class="notranslate">regsPerBlock</code></strong>（限定单个线程块可分配的寄存器总数）。</p>
+<p>在编译阶段，开发者可通过 NVCC 编译器的 <strong><code class="notranslate">-maxrregcount</code></strong> 选项显式设定单个核函数可使用的寄存器数量上限。这是一项关键的性能调优权衡策略：人为压低寄存器的使用上限，能够释放物理资源从而允许更多的线程块在 SM 上并发调度（提升占用率）；但其核心代价是可能引发严重的寄存器溢出（Register Spilling），导致数据被迫迁移至更慢的局部内存层级，进而大幅拖累执行性能。</p>
+<h2>2.4 局部内存</h2>
+<p>局部内存在逻辑作用域上属于线程私有，其分配与生命周期由 NVCC 编译器隐式管理，行为上类似于寄存器。然而，必须深刻理解的是，“局部”一词仅指代其逻辑可见性，其物理存储位置实际上位于全局/设备内存空间中。正因为物理上驻留于片外显存，局部内存的访存延迟与带宽完全等同于全局内存。</p>
+<p>局部内存通常作为寄存器资源的补充或作为寄存器溢出的退路。NVCC 编译器会在以下三种特定场景下，自动将局部自动变量降级放入局部内存中：</p>
+<ol>
+<li>编译器无法在编译期确定其索引为常量值的数组。（如 <code class="notranslate">arr[i]</code>），而非固定的数字（如 <code class="notranslate">arr[0]</code>）</li>
+<li>体积过于庞大，会导致消耗过量寄存器空间的结构体（Structures）或大数组。</li>
+<li>核函数（Kernel）实际使用的寄存器总数超出了硬件物理可用上限，从而发生寄存器溢出。</li>
+</ol>
+<p>尽管面临全局显存级别的高延迟，但局部内存的底层数据组织结构经过了专门优化：连续的 32 位字被映射到连续的线程 ID 上。得益于这种交错式的排列方式，只要同一个线程束（Warp）内的所有线程同时访问各自变量的同一个相对地址（例如访问数组的同一索引，或结构体的同一个成员），该访问操作就能实现完全的合并访存（Fully Coalesced Access），从而最大化利用显存带宽。例如：</p>
+<h2>2.5 常量内存</h2>
+<p>常量内存驻留于 GPU 设备端，具有网格级别（Grid scope）的全局可见性。其生命周期与创建它的 CUDA 上下文（Context）完全一致（即伴随应用程序的整个生命周期），且每个物理设备均维护一份独立的内存对象。在核函数（Kernel）执行期间，常量内存被严格限制为只读（Read-only）状态。</p>
+<p>在编程范式上，常量内存变量必须在所有函数体外部，使用 <strong><code class="notranslate">__constant__</code></strong> 修饰符进行全局声明，并且必须由主机端（Host）负责初始化。主机端无法直接通过标准指针访问它，必须调用专属的 CUDA 运行时库函数进行交互与数据搬运，这些核心函数包括：<strong><code class="notranslate">cudaGetSymbolAddress()</code></strong>（获取符号地址）、<strong><code class="notranslate">cudaGetSymbolSize()</code></strong>（获取符号大小）、<strong><code class="notranslate">cudaMemcpyToSymbol()</code></strong>（将数据从主机拷入常量内存）以及 <strong><code class="notranslate">cudaMemcpyFromSymbol()</code></strong>（将数据从常量内存拷回主机）。</p>
+<p>常量内存的物理容量极其有限，通常每个设备仅提供 64KB的存储空间。开发者必须通过设备属性（Device Properties）中的 <strong><code class="notranslate">totalConstMem</code></strong> 字段来动态查询当前硬件的具体容量上限。基于其“容量小、全局只读”的物理与逻辑特性，常量内存的最佳工程适用场景是：存储需被网格中每个线程频繁共享读取的小型只读数据集（例如算法中的固定参数或查找表）。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> In your .cu file</span>
+__constant__ <span class="pl-k">float</span> coeffs[<span class="pl-c1">4</span>];
+
+__global__ <span class="pl-k">void</span> <span class="pl-en">compute</span>(<span class="pl-k">float</span> *out) {
+    <span class="pl-k">int</span> idx = threadIdx.<span class="pl-smi">x</span>;
+    out[idx] = coeffs[<span class="pl-c1">0</span>] * idx + coeffs[<span class="pl-c1">1</span>];
+}
+
+<span class="pl-c"><span class="pl-c">//</span> In your host code</span>
+<span class="pl-k">float</span> h_coeffs[<span class="pl-c1">4</span>] = {<span class="pl-c1">1</span>.<span class="pl-c1">0f</span>, <span class="pl-c1">2</span>.<span class="pl-c1">0f</span>, <span class="pl-c1">3</span>.<span class="pl-c1">0f</span>, <span class="pl-c1">4</span>.<span class="pl-c1">0f</span>};
+<span class="pl-en">cudaMemcpyToSymbol</span>(coeffs, h_coeffs, <span class="pl-k">sizeof</span>(h_coeffs));
+compute&lt;&lt;&lt;<span class="pl-c1">1</span>, <span class="pl-c1">10</span>&gt;&gt;&gt;(device_out);</pre></div>
+<h2>2.6 缓存</h2>
+<p>GPU 在硬件底层采用了多级缓存架构（核心包含 L1 与 L2 缓存）。其中，L2 缓存（L2 Cache）驻留于设备端（Device），属于全局共享资源，被所有的流多处理器（SM）共同访问。在工程调优时，开发者必须通过调用 <strong><code class="notranslate">cudaGetDeviceProperties</code></strong> 函数，并提取其返回结构体中的 <strong><code class="notranslate">l2CacheSize</code></strong> 属性字段，来精准探查当前物理设备的 L2 缓存总容量，这是评估全局数据复用效率的硬件基础。</p>
+<p>L1 缓存（L1 Cache）在物理层面上直接内嵌于每个单独的 SM 中。其最关键的底层特征是：L1 缓存与共享内存（Shared Memory）在硬件上完全占用同一块物理存储介质。这种设计意味着两者在容量分配上是互斥的——当核函数（Kernel）完全不申请使用共享内存时，该块物理空间的全部容量将被系统自动接管，100% 作为 L1 缓存使用，从而最大化常规显存读取的命中率。</p>
+<h2>2.7 分布式共享内存</h2>
+<p>在计算能力 9.0中，CUDA 引入了由协作组（Cooperative Groups）支持的线程块集群（Thread Block Clusters）特性。该机制允许集群内的所有线程跨越传统物理边界，直接访问集群内其他线程块的共享内存，从而构建出分布式共享内存（Distributed Shared Memory）地址空间。在此空间内，线程可对本地或远程线程块的地址自由执行读取、写入及原子操作（Atomics）。在资源分配上，无论是静态还是动态声明，共享内存的配置基准依然是“单个线程块”。分布式共享内存的总物理容量严格等于“集群内的线程块总数”乘以“单个线程块的共享内存大小”。</p>
+<p>跨块访问分布式共享内存的核心硬件约束是：所有相关的线程块必须在物理上同时存活（Exist）。为了保证内存安全，开发者必须调用 <code class="notranslate">cluster_group</code> 类下的 <strong><code class="notranslate">cluster.sync()</code></strong> 函数。该函数具备双重重要作用：一是在执行初期确保集群内的所有线程块均已成功启动；二是在执行末期充当生命周期屏障，强制确保所有针对分布式共享内存的读写操作完全结束后，才允许任何线程块退出，从而严防因目标线程块提前销毁而导致的非法远程内存访问。</p>
+<h3>2.7.1 直方图案例</h3>
+<p>在传统的直方图计算中，开发者通常先在单块共享内存中局部统计，再通过全局内存原子操作进行汇总。然而，由于单块共享内存容量极小，一旦直方图桶（Bins）的数量超出限制，算法只能被迫退化为直接操作低效的全局内存。分布式共享内存的出现填补了这一架构空白。它为存储分配提供了一个大容量的高速“中间层”，使得程序能够根据 Bins 的具体规模，在单块共享内存、容量呈倍数扩展的分布式共享内存，以及全局显存之间进行灵活、自适应的计算降级与优化。具体代码与注释如下所示：</p>
+<p>核函数：</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>cooperative_groups.h<span class="pl-pds">&gt;</span></span>
+<span class="pl-c"><span class="pl-c">//</span> 参数说明：</span>
+<span class="pl-c"><span class="pl-c">//</span> bins: 指向全局显存的指针，用于存储最终的直方图统计结果。</span>
+<span class="pl-c"><span class="pl-c">//</span> nbins: 直方图的总桶数（例如 1024 种不同的像素值）。</span>
+<span class="pl-c"><span class="pl-c">//</span> bins_per_block: 每个线程块（Block）在分布式共享内存中负责维护的桶的数量。</span>
+<span class="pl-c"><span class="pl-c">//</span> input: 指向输入数据的全局显存指针。__restrict__ 关键字向编译器保证没有其他指针会修改这块内存，从而优化读取速度。</span>
+<span class="pl-c"><span class="pl-c">//</span> array_size: 输入数据数组的总长度</span>
+__global__ <span class="pl-k">void</span> <span class="pl-en">clusterHist_kernel</span>(<span class="pl-k">int</span> *bins, <span class="pl-k">const</span> <span class="pl-k">int</span> nbins, <span class="pl-k">const</span> <span class="pl-k">int</span> bins_per_block, <span class="pl-k">const</span> <span class="pl-k">int</span> *__restrict__ input,
+                                   <span class="pl-c1">size_t</span> array_size)
+{
+  <span class="pl-c"><span class="pl-c">//</span> 1. 动态共享内存声明 (Dynamic Shared Memory)</span>
+  <span class="pl-c"><span class="pl-c">//</span> extern 与 [] 结合，表明该共享内存的大小是在启动核函数时（Host端）动态指定的。</span>
+  <span class="pl-c"><span class="pl-c">//</span> 在这里，它将作为当前线程块负责的那部分直方图桶的“局部高速缓存”。</span>
+  <span class="pl-k">extern</span> __shared__ <span class="pl-k">int</span> smem[];
+  <span class="pl-k">namespace</span> <span class="pl-en">cg</span> <span class="pl-k">=</span> cooperative_groups;
+  
+  <span class="pl-c"><span class="pl-c">//</span> 2. 获取全局线程唯一索引 (Global Thread Rank)</span>
+  <span class="pl-c"><span class="pl-c">//</span> 计算当前线程在整个 Grid（网格）中的绝对线性编号。</span>
+  <span class="pl-c"><span class="pl-c">//</span> 作用类似于传统的 (blockIdx.x * blockDim.x) + threadIdx.x，但支持更复杂的多维结构。</span>
+  <span class="pl-k">int</span> tid = <span class="pl-c1">cg::this_grid</span>().<span class="pl-c1">thread_rank</span>();
+
+  <span class="pl-c"><span class="pl-c">//</span> 3. 创建一个代表当前集群的对象。只有处于同一个集群内的线程块，才能互相访问共享内存。</span>
+  cg::cluster_group cluster = <span class="pl-c1">cg::this_cluster</span>();
+  
+  <span class="pl-c"><span class="pl-c">//</span> 获取当前线程块（Block）在当前集群（Cluster）内的排名（编号）。</span>
+  <span class="pl-c"><span class="pl-c">//</span> 例如，如果集群大小为 8，则该值为 0 到 7 之间的整数。</span>
+  <span class="pl-c"><span class="pl-c">//</span> 这个排名决定了当前块要负责直方图的哪一段区域。</span>
+  <span class="pl-k">unsigned</span> <span class="pl-k">int</span> clusterBlockRank = cluster.<span class="pl-c1">block_rank</span>();
+  
+  <span class="pl-c"><span class="pl-c">//</span> 获取当前集群在 X 维度上包含的线程块总数（在此直方图算法中，我们使用的是一维集群）。</span>
+  <span class="pl-k">int</span> cluster_size = cluster.<span class="pl-c1">dim_blocks</span>().<span class="pl-smi">x</span>;
+
+  <span class="pl-c"><span class="pl-c">//</span> 4. 并行初始化局部共享内存 (Parallel Initialization via Block-Stride Loop)</span>
+  <span class="pl-c"><span class="pl-c">//</span> 让当前线程块内的所有线程共同协作，把当前块分配到的共享内存清零。</span>
+  <span class="pl-c"><span class="pl-c">//</span> 使用 blockDim.x 作为步长（跨步循环），不仅能处理桶数大于线程数的情况，</span>
+  <span class="pl-c"><span class="pl-c">//</span> 还能保证同一个 Warp 内的线程访问连续的内存地址，实现内存合并（Memory Coalescing），达到最高带宽。</span>
+  <span class="pl-k">for</span> (<span class="pl-k">int</span> i = threadIdx.<span class="pl-smi">x</span>; i &lt; bins_per_block; i += blockDim.<span class="pl-smi">x</span>)
+  {
+    smem[i] = <span class="pl-c1">0</span>;
+  }
+
+  <span class="pl-c"><span class="pl-c">//</span> 5. 极其关键的第一次集群同步 (Cluster Barrier - Initialization Phase)</span>
+  <span class="pl-c"><span class="pl-c">//</span> 必须确保两件事：</span>
+  <span class="pl-c"><span class="pl-c">//</span> 第一，集群内所有的线程块都已经成功调度到 SM 上（并发存在）。</span>
+  <span class="pl-c"><span class="pl-c">//</span> 第二，所有块的共享内存都已经彻底清零完毕。</span>
+  <span class="pl-c"><span class="pl-c">//</span> 如果不同步，跑得快的线程块可能会提前去写跑得慢的块的共享内存，导致数据被后续的清零操作覆盖。</span>
+  cluster.<span class="pl-c1">sync</span>();
+
+  <span class="pl-c"><span class="pl-c">//</span> 6. 全局数据读取与处理 (Grid-Stride Loop)</span>
+  <span class="pl-c"><span class="pl-c">//</span> 经典的网格跨步循环。不管输入数据有多庞大（array_size），也不管 GPU 启动了多少个线程，</span>
+  <span class="pl-c"><span class="pl-c">//</span> 所有的线程都会像流水线工人一样，处理完一个数据后，向后跳过一个“全网格线程总数”的跨度，继续处理下一个数据。</span>
+  <span class="pl-k">for</span> (<span class="pl-k">int</span> i = tid; i &lt; array_size; i += blockDim.<span class="pl-smi">x</span> * gridDim.<span class="pl-smi">x</span>)
+  {
+    <span class="pl-k">int</span> ldata = input[i]; <span class="pl-c"><span class="pl-c">//</span> 从全局显存读取一个数据点</span>
+
+    <span class="pl-c"><span class="pl-c">//</span> 7. 数据合法性边界截断 (Clamping)</span>
+    <span class="pl-c"><span class="pl-c">//</span> 防止脏数据导致后续计算出的内存地址越界，引发非法内存访问错误。</span>
+    <span class="pl-k">int</span> binid = ldata;
+    <span class="pl-k">if</span> (ldata &lt; <span class="pl-c1">0</span>)
+      binid = <span class="pl-c1">0</span>;               <span class="pl-c"><span class="pl-c">//</span> 负数全部归入第 0 个桶</span>
+    <span class="pl-k">else</span> <span class="pl-k">if</span> (ldata &gt;= nbins)
+      binid = nbins - <span class="pl-c1">1</span>;       <span class="pl-c"><span class="pl-c">//</span> 超过最大值的全部归入最后一个桶</span>
+
+    <span class="pl-c"><span class="pl-c">//</span> 8. 核心路由计算：确定数据该去哪个块的哪块内存 (Distributed Routing)</span>
+    <span class="pl-c"><span class="pl-c">//</span> 因为完整的直方图被切分并均匀分布在集群内多个块的共享内存中：</span>
+    <span class="pl-c"><span class="pl-c">//</span> dst_block_rank: 计算这个数据所属的桶，归集群里的几号线程块管？</span>
+    <span class="pl-k">int</span> dst_block_rank = (<span class="pl-k">int</span>)(binid / bins_per_block);
+    <span class="pl-c"><span class="pl-c">//</span> dst_offset: 计算这个数据，应该放在目标线程块共享内存的哪个具体偏移位置？</span>
+    <span class="pl-k">int</span> dst_offset = binid % bins_per_block;
+
+    <span class="pl-c"><span class="pl-c">//</span> 9. 建立分布式共享内存指针 (Mapping Remote Shared Memory)</span>
+    <span class="pl-c"><span class="pl-c">//</span> Hopper 架构的专属硬件魔法。把计算出的“目标块排名(dst_block_rank)”和本地指针传入，</span>
+    <span class="pl-c"><span class="pl-c">//</span> 硬件会通过内部高速互联网络（SM Fabric），返回一个直接指向目标线程块共享内存的物理地址指针。</span>
+    <span class="pl-k">int</span> *dst_smem = cluster.<span class="pl-c1">map_shared_rank</span>(smem, dst_block_rank);
+
+    <span class="pl-c"><span class="pl-c">//</span> 10. 执行分布式共享内存原子加法 (Distributed Atomic Update)</span>
+    <span class="pl-c"><span class="pl-c">//</span> 直接对目标地址执行原子加 1 操作。</span>
+    <span class="pl-c"><span class="pl-c">//</span> 这比写全局显存快得多，极大地缓解了海量线程竞争同一地址带来的性能瓶颈。</span>
+    <span class="pl-c1">atomicAdd</span>(dst_smem + dst_offset, <span class="pl-c1">1</span>);
+  }
+
+  <span class="pl-c"><span class="pl-c">//</span> 11. 极其关键的第二次集群同步 (Cluster Barrier - Execution Phase)</span>
+  <span class="pl-c"><span class="pl-c">//</span> 退出保护机制（Exit Protection）。</span>
+  <span class="pl-c"><span class="pl-c">//</span> 必须确保集群内所有的跨块读写操作彻底完成。如果没有这个同步，</span>
+  <span class="pl-c"><span class="pl-c">//</span> 某个块可能率先算完并退出，导致它名下的物理共享内存被硬件回收。</span>
+  <span class="pl-c"><span class="pl-c">//</span> 此时如果其他块还有“迟到”的数据想要投递到这个块，就会触发灾难性的显存寻址崩溃。</span>
+  cluster.<span class="pl-c1">sync</span>();
+
+  <span class="pl-c"><span class="pl-c">//</span> 12. 最终结果汇总至全局显存 (Global Memory Aggregation)</span>
+  <span class="pl-c"><span class="pl-c">//</span> 各个线程块各自领回自己维护的那部分直方图桶，并将其累加到全局显存（Global Memory）中。</span>
+  <span class="pl-c"><span class="pl-c">//</span> cluster.block_rank() * bins_per_block 计算出当前块在全局大数组 bins 中的起始写入偏移量。</span>
+  <span class="pl-k">int</span> *lbins = bins + cluster.<span class="pl-c1">block_rank</span>() * bins_per_block;
+  
+  <span class="pl-c"><span class="pl-c">//</span> 同样使用块跨步循环（Block-Stride Loop）并行写出。</span>
+  <span class="pl-c"><span class="pl-c">//</span> 这里必须使用 atomicAdd，因为不同的集群（不同 Cluster）如果恰好在写同一个全局桶段，</span>
+  <span class="pl-c"><span class="pl-c">//</span> 普通加法会导致数据覆盖，原子操作保证了跨集群的最终正确性。</span>
+  <span class="pl-k">for</span> (<span class="pl-k">int</span> i = threadIdx.<span class="pl-smi">x</span>; i &lt; bins_per_block; i += blockDim.<span class="pl-smi">x</span>)
+  {
+    <span class="pl-c1">atomicAdd</span>(&amp;lbins[i], smem[i]);
+  }
+}</pre></div>
+<p>主机端调用</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">{
+  <span class="pl-c"><span class="pl-c">//</span> 1. 初始化扩展启动配置结构体 (Extensible Launch Configuration)</span>
+  <span class="pl-c"><span class="pl-c">//</span> 这是 CUDA 9.0+ 引入的新标准，用于替代传统的 &lt;&lt;&lt;grid, block, smem, stream&gt;&gt;&gt; 语法，</span>
+  <span class="pl-c"><span class="pl-c">//</span> 它的存在是为了能够挂载极其复杂的硬件级属性（如 Cluster 配置）。</span>
+  cudaLaunchConfig_t config = {<span class="pl-c1">0</span>};
+
+  <span class="pl-c"><span class="pl-c">//</span> 2. 配置网格与线程块维度 (Grid &amp; Block Dimensions)</span>
+  <span class="pl-c"><span class="pl-c">//</span> config.gridDim: 设定启动的总线程块数量。这里依赖整除计算，实际工程中通常会向上取整，</span>
+  <span class="pl-c"><span class="pl-c">//</span> 但由于核函数内部使用了网格跨步循环（Grid-Stride Loop），即使向下取整截断，也不会导致程序崩溃。</span>
+  config.<span class="pl-smi">gridDim</span> = array_size / threads_per_block;
+  <span class="pl-c"><span class="pl-c">//</span> config.blockDim: 设定每个线程块包含的线程数（例如 256 或 512）。</span>
+  config.<span class="pl-smi">blockDim</span> = threads_per_block;
+
+  <span class="pl-c"><span class="pl-c">//</span> 3. 定义集群规模 (Define Cluster Size)</span>
+  <span class="pl-c"><span class="pl-c">//</span> 决定了一个“集群（Cluster）”内包含多少个“线程块（Block）”。</span>
+  <span class="pl-c"><span class="pl-c">//</span> 硬件约束：属于同一个 Cluster 的 Block 会被强制调度到同一个显存处理器集群（GPC）内。</span>
+  <span class="pl-c"><span class="pl-c">//</span> 逻辑意义：如果设为 1，则退化为传统模式（无分布式共享内存）；设为 2 及以上，则开启硬件高速互联。</span>
+  <span class="pl-k">int</span> cluster_size = <span class="pl-c1">2</span>; <span class="pl-c"><span class="pl-c">//</span> 此处设为 2，代表每 2 个 Block 结对成一个集群，共享彼此的物理内存。</span>
+  
+  <span class="pl-c"><span class="pl-c">//</span> 4. 计算分布式任务切分 (Partition Histogram Bins)</span>
+  <span class="pl-c"><span class="pl-c">//</span> nbins 是直方图的总桶数。此处将其平均分配给集群内的各个线程块。</span>
+  <span class="pl-c"><span class="pl-c">//</span> 例如：总共 1024 个桶，cluster_size 为 2，那么每个 Block 只需在其共享内存中维护 512 个桶。</span>
+  <span class="pl-k">int</span> nbins_per_block = nbins / cluster_size;
+
+  <span class="pl-c"><span class="pl-c">//</span> 5. 计算并设置单块动态共享内存容量 (Dynamic Shared Memory Allocation)</span>
+  <span class="pl-c"><span class="pl-c">//</span> 极其重要的底层概念：无论是否开启分布式共享内存，物理内存的申请依然是“按单个 Block”为单位的！</span>
+  <span class="pl-c"><span class="pl-c">//</span> 分布式共享内存的总容量 = cluster_size * (每个 Block 申请的 dynamicSmemBytes)。</span>
+  config.<span class="pl-smi">dynamicSmemBytes</span> = nbins_per_block * <span class="pl-k">sizeof</span>(<span class="pl-k">int</span>);
+
+  <span class="pl-c"><span class="pl-c">//</span> 6. 提权申请突破默认内存限制 (Bypass Default Shared Memory Limits)</span>
+  <span class="pl-c"><span class="pl-c">//</span> 默认情况下，CUDA 为了向后兼容，将单个 Block 的共享内存上限锁死在 48KB。</span>
+  <span class="pl-c"><span class="pl-c">//</span> 当我们需要处理大规模直方图时，所需的共享内存会轻易超过这个限制。</span>
+  <span class="pl-c"><span class="pl-c">//</span> cudaFuncSetAttribute：向 CUDA 驱动申请“特批”，允许当前核函数使用更大的动态共享内存。</span>
+  <span class="pl-c"><span class="pl-c">//</span> 如果不加这一句，稍后启动核函数时如果超出默认上限，程序会直接报错崩溃。</span>
+  <span class="pl-c1">CUDA_CHECK</span>(::<span class="pl-c1">cudaFuncSetAttribute</span>((<span class="pl-k">void</span> *)clusterHist_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, config.<span class="pl-smi">dynamicSmemBytes</span>));
+
+  <span class="pl-c"><span class="pl-c">//</span> 7. 配置集群专属硬件属性 (Configure Cluster Hardware Attributes)</span>
+  <span class="pl-c"><span class="pl-c">//</span> 创建一个属性数组（目前只需配置 1 个属性，即集群维度）。</span>
+  cudaLaunchAttribute attribute[<span class="pl-c1">1</span>];
+  
+  <span class="pl-c"><span class="pl-c">//</span> 声明当前属性的 ID 为“集群维度 (Cluster Dimension)”。</span>
+  attribute[<span class="pl-c1">0</span>].<span class="pl-smi">id</span> = cudaLaunchAttributeClusterDimension;
+  
+  <span class="pl-c"><span class="pl-c">//</span> 设定集群的三维物理布局。</span>
+  <span class="pl-c"><span class="pl-c">//</span> 为了计算的高效性与寻址的简单性，通常直方图这种线性数据结构采用一维（X维度）排布即可。</span>
+  attribute[<span class="pl-c1">0</span>].<span class="pl-smi">val</span>.<span class="pl-smi">clusterDim</span>.<span class="pl-smi">x</span> = cluster_size; <span class="pl-c"><span class="pl-c">//</span> 将 X 维度设为我们之前定义的规模（例如 2）</span>
+  attribute[<span class="pl-c1">0</span>].<span class="pl-smi">val</span>.<span class="pl-smi">clusterDim</span>.<span class="pl-smi">y</span> = <span class="pl-c1">1</span>;
+  attribute[<span class="pl-c1">0</span>].<span class="pl-smi">val</span>.<span class="pl-smi">clusterDim</span>.<span class="pl-smi">z</span> = <span class="pl-c1">1</span>;
+
+  <span class="pl-c"><span class="pl-c">//</span> 8. 将属性挂载到启动配置上 (Attach Attributes to Configuration)</span>
+  config.<span class="pl-smi">numAttrs</span> = <span class="pl-c1">1</span>;       <span class="pl-c"><span class="pl-c">//</span> 告知系统当前挂载了 1 个扩展属性</span>
+  config.<span class="pl-smi">attrs</span> = attribute;  <span class="pl-c"><span class="pl-c">//</span> 绑定属性数组指针</span>
+
+  <span class="pl-c"><span class="pl-c">//</span> 9. 正式发射核函数 (Launch the Kernel)</span>
+  <span class="pl-c"><span class="pl-c">//</span> 使用增强版 API 发射核函数。此时，GPU 调度器会严格按照我们设定的 Cluster 规则，</span>
+  <span class="pl-c"><span class="pl-c">//</span> 将具有内部互联能力的线程块组派发到 Hopper 架构的计算核心上。</span>
+  <span class="pl-c"><span class="pl-c">//</span> 参数依次为：配置结构体指针, 核函数名, 接下来是传给核函数的实际业务参数。</span>
+  <span class="pl-c1">cudaLaunchKernelEx</span>(&amp;config, clusterHist_kernel, bins, nbins, nbins_per_block, input, array_size);
+}</pre></div>
+<p>一个示意图以及相关思考如下所示：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402110744.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402110744.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h1>3.内存表现</h1>
+<h2>3.1 合并全局内存访问</h2>
+<p>全局内存是通过 <strong>32 字节的内存事务（Memory Transactions）</strong> 进行访问的。当一个 CUDA 线程从全局内存请求一个数据字（Word）（例如4个字节）时，相关的线程束（Warp）会将该线程束内所有线程的内存请求<strong>合并（Coalesce）</strong> 为满足请求所需的最小数量的内存事务。具体生成的事务数量，取决于每个线程访问的数据字大小，以及这些内存地址在各线程间的物理分布情况。</p>
+<p>例如，如果一个线程请求一个 4 字节的数据字，该线程束实际向全局内存发起的内存事务总量将是 32 字节。为了最高效地利用内存系统，线程束应当尽可能消耗掉单次内存事务中抓取回来的全部数据。换言之，如果一个线程请求了 4 字节数据，而底层事务大小不可避免地是 32 字节，只要该线程束内的其他线程也能用得上这 32 字节事务里的其他 4 字节数据，就能实现内存系统的最优化利用。</p>
+<p>举一个简单的例子：如果线程束中<strong>连续的线程</strong>请求内存中<strong>连续的 4 字节数据字</strong>，那么整个线程束总共需要 128 字节的内存。这 128 字节的需求将被打包，通过 4 次 32 字节的内存事务来完美获取。这种访问模式实现了 <strong>100% 的内存系统利用率</strong>。也就是说，所有的内存总线流量都被该线程束榨干了，没有任何带宽被浪费。图 10 展示了这种完美合并访存的经典示例。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402174853.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402174853.png" alt="image.png" style="max-width: 100%;"></a><br>
+反之，最糟糕的病态场景是：线程束（Warp）内连续的线程所访问的数据元素，在内存中彼此相距 <strong>32 字节或更远</strong>。在这种情况下，线程束将被迫为<strong>每一个线程</strong>都发起一次独立的 32 字节内存事务。这样一来，总的内存流量将达到：32 字节 × 32 个线程/线程束 = <strong>1024 字节</strong>。</p>
+<p>然而，实际被有效利用的数据量仅为 <strong>128 字节</strong>（线程束内每个线程仅请求 4 字节），因此内存利用率仅为 128 / 1024 = <strong>12.5%</strong>。这是一种对内存系统极其低效的利用方式。图 11 展示了这种非合并内存访问的示例。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402175328.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402175328.png" alt="image.png" style="max-width: 100%;"></a><br>
+实现合并访存最直接的方法，是让<strong>连续的线程访问内存中连续的元素</strong>。例如，对于一个使用一维线程块启动的核函数，下面的 <code class="notranslate">VecAdd</code>（向量加法）核函数就能实现合并访存。请观察线程索引 <code class="notranslate">workIndex</code> 是如何访问这三个数组的：连续的线程（由连续的 <code class="notranslate">workIndex</code> 值表示）访问的是数组中物理连续的元素。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__global__ <span class="pl-k">void</span> <span class="pl-en">vecAdd</span>(<span class="pl-k">float</span>* A, <span class="pl-k">float</span>* B, <span class="pl-k">float</span>* C, <span class="pl-k">int</span> vectorLength)
+{
+    <span class="pl-k">int</span> workIndex = threadIdx.<span class="pl-smi">x</span> + blockIdx.<span class="pl-smi">x</span>*blockDim.<span class="pl-smi">x</span>;
+    <span class="pl-k">if</span>(workIndex &lt; vectorLength)
+    {
+        C[workIndex] = A[workIndex] + B[workIndex];</pre></div>
+<p>需要注意的是，实现合并访存并不强制要求连续线程必须访问连续的内存元素，这仅仅是达到合并的最典型方式。只要线程束（Warp）中的所有线程，能够以某种<strong>线性或排列（Permuted）</strong> 的方式，访问同一个 32 字节内存分段内的元素，就会发生合并访存。</p>
+<h3>3.1.1 矩阵转置案例</h3>
+<p>作为一个简单的例子，考虑一个<strong>异地（Out-of-place）</strong> 矩阵转置核函数。该函数将一个大小为 $N \times N$ 的 32 位浮点数方阵从矩阵 <code class="notranslate">a</code> 转置到矩阵 <code class="notranslate">c</code>。<br>
+本例使用二维网格（2D Grid），并假设启动的是 <strong>32 × 32</strong> 线程的二维线程块。也就是说，<code class="notranslate">blockDim.x = 32</code> 且 <code class="notranslate">blockDim.y = 32</code>。因此，每个二维线程块将负责操作矩阵中一个 32 × 32 的<strong>分块（Tile）</strong>。<br>
+由于每个线程都操作矩阵中一个唯一的元素，因此不需要进行显式的线程同步（Synchronization）。图 12 展示了这一矩阵转置操作的过程，图后附有核函数的源代码。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402175744.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402175744.png" alt="image.png" style="max-width: 100%;"></a></p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">/*</span> macro to index a 1D memory array with 2D indices in row-major order <span class="pl-c">*/</span></span>
+<span class="pl-c"><span class="pl-c">/*</span> ld is the leading dimension, i.e. the number of columns in the matrix     <span class="pl-c">*/</span></span>
+
+#<span class="pl-k">define</span> <span class="pl-en">INDX</span>(<span class="pl-v"> row, col, ld </span>) ( ( (row) * (ld) ) + (col) )
+
+<span class="pl-c"><span class="pl-c">/*</span> CUDA kernel for naive matrix transpose <span class="pl-c">*/</span></span>
+
+__global__ <span class="pl-k">void</span> <span class="pl-en">naive_cuda_transpose</span>(<span class="pl-k">int</span> m, <span class="pl-k">float</span> *a, <span class="pl-k">float</span> *c )
+{
+    <span class="pl-k">int</span> myCol = blockDim.<span class="pl-smi">x</span> * blockIdx.<span class="pl-smi">x</span> + threadIdx.<span class="pl-smi">x</span>;
+    <span class="pl-k">int</span> myRow = blockDim.<span class="pl-smi">y</span> * blockIdx.<span class="pl-smi">y</span> + threadIdx.<span class="pl-smi">y</span>;
+
+    <span class="pl-k">if</span>( myRow &lt; m &amp;&amp; myCol &lt; m )
+    {
+        c[<span class="pl-c1">INDX</span>( myCol, myRow, m )] = a[<span class="pl-c1">INDX</span>( myRow, myCol, m )];
+    } <span class="pl-c"><span class="pl-c">/*</span> end if <span class="pl-c">*/</span></span>
+    <span class="pl-k">return</span>;
+} <span class="pl-c"><span class="pl-c">/*</span> end naive_cuda_transpose <span class="pl-c">*/</span></span></pre></div>
+<p>评估<strong>合并访存（Coalesced Memory Access）</strong> 的核心准则是最快变化维度（<code class="notranslate">threadIdx.x</code>）是否严格映射至连续的物理内存地址。具体而言，当 <code class="notranslate">threadIdx.x</code>（通常表现为列索引 <code class="notranslate">myCol</code>）作为一维寻址宏 <code class="notranslate">INDX</code> 的第二个参数时，连续线程能读取连续地址，从而实现完美的合并读取（例如对矩阵 <code class="notranslate">a</code> 的操作）；然而，若在矩阵转置等场景中将其作为 <code class="notranslate">INDX</code> 的第一个参数写入目标矩阵 <code class="notranslate">c</code>，连续线程的物理寻址步长将被拉长为 <code class="notranslate">ld</code>（主维度长度，Leading Dimension）。当矩阵规模导致 <code class="notranslate">ld &gt; 32</code> 时，这种跨步访存将演变为极度低效的非合并写入（病态场景）。针对这种不可避免的显存读写不对称瓶颈，底层架构的终极解法是引入<strong>共享内存（Shared Memory）</strong> 作为高速中转缓存，以此消除全局显存的非合并惩罚。</p>
+<h2>3.2 共享内存访问模式</h2>
+<p>共享内存的物理底层由 <strong>32 个存储体（Banks）</strong> 交错组织而成。其核心内存映射规则为：连续的多个32 位数据字会被依次分布到连续的存储体中。在理想状态下，每个存储体在单个时钟周期内仅能提供 32 位的数据访问带宽。</p>
+<p>触发存储体冲突的核心条件是：当<strong>同一个线程束（Warp）</strong> 内的多个线程，尝试并发访问<strong>同一个存储体中的不同数据元素</strong>时。一旦发生冲突，硬件无法在单个时钟周期内处理该存储体上的多个独立请求，从而被迫将这些访问操作<strong>串行化（Serialized）</strong>。系统必须排队等待，直至所有请求该存储体数据的线程都完成访问，这种强制的串行化会导致极大的性能惩罚。</p>
+<p>上述冲突规则存在明确的例外情况。当同一线程束内的多个线程尝试访问共享内存的<strong>同一个内存位置</strong>（无论是读或写）时，不会触发存储体冲突及串行化惩罚：</p>
+<ul>
+<li><strong>读操作豁免</strong>：当多线程读取同一地址时，硬件会触发<strong>广播（Broadcast）</strong> 机制，将该数据字在一个时钟周期内同时发送给所有发出请求的线程。</li>
+<li><strong>写操作豁免</strong>：当多线程写入同一地址时，该共享内存地址最终<strong>仅会被其中一个线程</strong>成功写入（需要注意的是，具体由哪个线程完成此次写入操作，在架构层面是未定义的）。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402180105.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402180105.png" alt="image.png" style="max-width: 100%;"></a><br>
+上图为32位存储体模式下的跨步共享内存访问，左图是步长为一个数据字（32位）的线性寻址，无冲突；中图是步长为两个数据字的线性寻址，存在两路存储体冲突；右图步长为三，无冲突</li>
+</ul>
+<p>下图展示了一些涉及<strong>广播机制</strong>的内存读取访问示例。存储体（Bank）内部的<strong>红色方框</strong>代表共享内存中的一个<strong>唯一位置</strong>。如果多个箭头指向同一个位置，则该数据将<strong>广播</strong>给所有请求它的线程。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402180525.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402180525.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h3>3.2.1 矩阵转置案例</h3>
+<p>在前面的“基于全局内存的矩阵转置示例”中，展示了一种朴素（Naive）的矩阵转置实现方法。尽管该方法在功能逻辑上是正确的，但由于对目标矩阵 <code class="notranslate">c</code> 的写入操作未能实现正确的合并访存，因此并未针对全局内存的高效利用进行优化。在本示例中，共享内存将被视为一种由用户自主管理的缓存。它被用来暂存（Stage）来自全局内存的读取（Loads）和写入（Stores）操作，从而确保对全局内存的读取和写入均能实现合并访问。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">/*</span> definitions of thread block size in X and Y directions <span class="pl-c">*/</span></span>
+
+#<span class="pl-k">define</span> <span class="pl-en">THREADS_PER_BLOCK_X</span> <span class="pl-c1">32</span>
+#<span class="pl-k">define</span> <span class="pl-en">THREADS_PER_BLOCK_Y</span> <span class="pl-c1">32</span>
+
+<span class="pl-c"><span class="pl-c">/*</span> macro to index a 1D memory array with 2D indices in row-major order <span class="pl-c">*/</span></span>
+<span class="pl-c"><span class="pl-c">/*</span> ld is the leading dimension, i.e. the number of columns in the matrix     <span class="pl-c">*/</span></span>
+
+#<span class="pl-k">define</span> <span class="pl-en">INDX</span>(<span class="pl-v"> row, col, ld </span>) ( ( (row) * (ld) ) + (col) )
+
+<span class="pl-c"><span class="pl-c">/*</span> CUDA kernel for shared memory matrix transpose <span class="pl-c">*/</span></span>
+
+__global__ <span class="pl-k">void</span> <span class="pl-en">smem_cuda_transpose</span>(<span class="pl-k">int</span> m, <span class="pl-k">float</span> *a, <span class="pl-k">float</span> *c )
+{
+
+    <span class="pl-c"><span class="pl-c">/*</span> declare a statically allocated shared memory array <span class="pl-c">*/</span></span>
+
+    __shared__ <span class="pl-k">float</span> smemArray[THREADS_PER_BLOCK_X][THREADS_PER_BLOCK_Y];
+
+    <span class="pl-c"><span class="pl-c">/*</span> determine my row tile and column tile index <span class="pl-c">*/</span></span>
+
+    <span class="pl-k">const</span> <span class="pl-k">int</span> tileCol = blockDim.<span class="pl-smi">x</span> * blockIdx.<span class="pl-smi">x</span>;
+    <span class="pl-k">const</span> <span class="pl-k">int</span> tileRow = blockDim.<span class="pl-smi">y</span> * blockIdx.<span class="pl-smi">y</span>;
+
+    <span class="pl-c"><span class="pl-c">/*</span> read from global memory into shared memory array <span class="pl-c">*/</span></span>
+    smemArray[threadIdx.<span class="pl-smi">x</span>][threadIdx.<span class="pl-smi">y</span>] = a[<span class="pl-c1">INDX</span>( tileRow + threadIdx.<span class="pl-smi">y</span>, tileCol + threadIdx.<span class="pl-smi">x</span>, m )];
+
+    <span class="pl-c"><span class="pl-c">/*</span> synchronize the threads in the thread block <span class="pl-c">*/</span></span>
+    <span class="pl-c1">__syncthreads</span>();
+
+    <span class="pl-c"><span class="pl-c">/*</span> write the result from shared memory to global memory <span class="pl-c">*/</span></span>
+    c[<span class="pl-c1">INDX</span>( tileCol + threadIdx.<span class="pl-smi">y</span>, tileRow + threadIdx.<span class="pl-smi">x</span>, m )] = smemArray[threadIdx.<span class="pl-smi">y</span>][threadIdx.<span class="pl-smi">x</span>];
+    <span class="pl-k">return</span>;
+
+} <span class="pl-c"><span class="pl-c">/*</span> end smem_cuda_transpose <span class="pl-c">*/</span></span></pre></div>
+<p>上述示例中所展示的根本性性能优化，在于确保在访问全局内存时，内存访问能够被正确地合并。在执行数据拷贝操作之前，每个线程都会计算其对应的 <code class="notranslate">tileRow</code>（分块行）和 <code class="notranslate">tileCol</code>（分块列）索引。这些索引定义了当前线程块所要操作的具体分块（Tile）位置，并且这些分块索引是基于正在执行的线程块编号计算得出的。</p>
+<p>同一线程块中的所有线程都拥有相同的 <code class="notranslate">tileRow</code> 和 <code class="notranslate">tileCol</code> 值，因此这两个值可以被视为该特定线程块负责操作的分块起始位置。</p>
+<p>随后，核函数开始执行拷贝操作：每个线程块负责通过以下语句，将矩阵中一个 <strong>32 × 32</strong> 的分块从全局内存拷贝到共享内存。由于一个线程束（Warp）的大小为 32 个线程，这次拷贝操作将由 <strong>32 个线程束</strong>共同完成（即 $32 \times 32 \div 32 = 32$），且这些线程束之间的执行顺序是不确定的。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">smemArray[threadIdx.x][threadIdx.y] = a[INDX( tileRow + threadIdx.y, tileCol + threadIdx.x, m )];</pre></div>
+<p>请注意，由于 <code class="notranslate">threadIdx.x</code> 出现在 <code class="notranslate">INDX</code> 宏的第二个参数中，连续的线程正在访问内存中的连续元素，因此<strong>对数组 <code class="notranslate">a</code> 的读取操作是完美合并的</strong>。</p>
+<p>核函数的下一步是调用 <strong><code class="notranslate">__syncthreads()</code></strong> 函数。该函数确保线程块中的所有线程在继续执行后续代码之前，都已完成了前面代码的运行，从而保证将 <code class="notranslate">a</code> 写入共享内存的操作在进入下一步之前已经彻底完成。这一点至关重要，因为接下来的步骤涉及线程从共享内存中读取数据。如果没有 <code class="notranslate">__syncthreads()</code> 调用，就无法保证线程块中的所有线程束在某些线程束向代码深处推进之前，都已经完成了将数据存入共享内存的操作。</p>
+<p>此时，在核函数内部，每个线程块的 <code class="notranslate">smemArray</code>（共享内存数组）都存储了一个 32 × 32 的矩阵分块，其排列顺序与原始矩阵完全一致。为了确保分块内的元素被正确转置，线程在读取 <code class="notranslate">smemArray</code> 时交换了 <code class="notranslate">threadIdx.x</code> 和 <code class="notranslate">threadIdx.y</code> 的位置。同时，为了确保整个分块被放置在目标矩阵 <code class="notranslate">c</code> 中的正确位置，在写入 <code class="notranslate">c</code> 时也交换了 <code class="notranslate">tileRow</code> 和 <code class="notranslate">tileCol</code> 索引。为了确保写入时的合并性（Coalescing），<code class="notranslate">threadIdx.x</code> 被用作 <code class="notranslate">INDX</code> 宏的第二个参数，如下面的语句所示。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">c[INDX( tileCol + threadIdx.y, tileRow + threadIdx.x, m )] = smemArray[threadIdx.y][threadIdx.x];</pre></div>
+<p>该核函数展示了共享内存的两种常见用途：</p>
+<ol>
+<li><strong>数据暂存以实现合并访存</strong>：共享内存被用作从全局内存到处理核心之间的中转站，以确保对全局内存的读取和写入操作都能正确实现合并。</li>
+<li><strong>块内数据共享</strong>：共享内存被用于允许同一个线程块（Thread Block）中的线程之间相互共享数据。</li>
+</ol>
+<h3>3.2.2 共享内存块冲突问题</h3>
+<p>上面我们描述了共享内存的存储体结构。在之前的矩阵转置示例中，我们成功实现了往返于全局内存的正确合并访存，但并未考虑是否存在共享内存存储体冲突，请考虑以下二维共享内存声明：</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__shared__ <span class="pl-k">float</span> smemArray[<span class="pl-c1">32</span>][<span class="pl-c1">32</span>];</pre></div>
+<p>由于一个线程束（Warp）包含 32 个线程，在同一个线程束中，所有线程的 <code class="notranslate">threadIdx.y</code> 值是固定的，而 <code class="notranslate">threadIdx.x</code> 的取值范围则为 $0 \le threadIdx.x &amp;lt; 32$。</p>
+<p>图 15 的左侧面板展示了当线程束中的线程访问 <code class="notranslate">smemArray</code> 的<strong>某一列</strong>时的情况。此时，线程束 0 正在访问从 <code class="notranslate">smemArray[0][0]</code> 到 <code class="notranslate">smemArray[31][0]</code> 的内存位置。在 C++ 多维数组的存储顺序中，最后一个索引变化最快（行主序），因此线程束 0 中的连续线程所访问的内存位置在物理上相隔了 32 个元素。如图中所示，颜色代表不同的存储体（Banks）；线程束 0 这种纵贯整列的访问模式导致了 32 路存储体冲突。</p>
+<p>图 15 的右侧面板展示了当线程束中的线程访问 <code class="notranslate">smemArray</code> 的某一行时的情况。此时，线程束 0 正在访问从 <code class="notranslate">smemArray[0][0]</code> 到 <code class="notranslate">smemArray[0][31]</code> 的内存位置。在这种情况下，线程束 0 中的连续线程所访问的是彼此相邻的内存位置。如图中所示，颜色代表不同的存储体；线程束 0 这种横跨整行的访问模式不会产生任何存储体冲突。理想的场景是让线程束中的每个线程都访问带有不同颜色的共享内存位置。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402181428.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402181428.png" alt="image.png" style="max-width: 100%;"></a><br>
+回到 <strong>3.2.1 节</strong>的示例，我们可以通过检查共享内存的使用情况，来确定是否存在存储体冲突。</p>
+<p><strong>1. 写入阶段：产生冲突</strong> 共享内存的首次使用，是将数据从全局内存存储到共享内存中： <code class="notranslate">smemArray[threadIdx.x][threadIdx.y] = a[INDX( tileRow + threadIdx.y, tileCol + threadIdx.x, m )];</code></p>
+<p>由于 C++ 数组是按行主序存储的，同一线程束（Warp）中连续的线程（由连续的 <code class="notranslate">threadIdx.x</code> 值表示）将以 32 个元素为步长访问 <code class="notranslate">smemArray</code>。这是因为 <code class="notranslate">threadIdx.x</code> 被用作了该数组的第一个索引（行索引）。这种访问模式会导致 32 路存储体冲突，如图 15 的左侧面板所示。</p>
+<p><strong>2. 读取阶段：无冲突</strong> 共享内存的第二次使用，是将数据从共享内存写回全局内存： <code class="notranslate">c[INDX( tileCol + threadIdx.y, tileRow + threadIdx.x, m )] = smemArray[threadIdx.y][threadIdx.x];</code></p>
+<p>在这种情况下，由于 <code class="notranslate">threadIdx.x</code> 成为了 <code class="notranslate">smemArray</code> 数组的第二个索引（列索引），同一线程束中的连续线程将以 1 个元素为步长访问 <code class="notranslate">smemArray</code>（即访问相邻地址）。这种模式不会产生任何存储体冲突，如图 15 的右侧面板所示。</p>
+<p>因此，上述矩阵转置核函数中包含一次无冲突的共享内存访问，以及一次引发 32 路存储体冲突的访问。为了避免此类冲突，一个通用的修复方案是对共享内存进行填充（Pad），即在数组的列维度上增加 1，声明如下：<br>
+<code class="notranslate">__shared__ float smemArray[THREADS_PER_BLOCK_X][THREADS_PER_BLOCK_Y + 1];</code><br>
+对 <code class="notranslate">smemArray</code> 的声明进行这一微小的调整，即可彻底消除存储体冲突。为了说明这一点，请参考图 16，其中共享内存数组的大小被声明为 32 × 33。可以观察到，无论同一个线程束（Warp）中的线程是沿着整列访问还是横跨整行访问该共享内存数组，存储体冲突都已不复存在——也就是说，同一线程束中的线程所访问的内存位置对应着不同的颜色（即不同的存储体）。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402181933.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402181933.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h1>4.原子性操作</h1>
+<p>高性能 CUDA 核函数的构建基石在于最大化算法的并行度与维持线程的独立性。然而，在复杂的算法场景中，线程间的数据交互不可避免。虽然 CUDA 允许单一线程块内的线程通过共享内存实现同步，但在架构层面，不存在能够直接同步整个网格中所有线程的机制。</p>
+<p>为了突破网格级别的同步限制并安全访问全局内存，CUDA 引入了原子函数。该机制允许单个线程在特定的全局内存地址上获取排他性的“锁”，进而执行不可分割的“读取-修改-写入”操作。在锁被持有的生命周期内，硬件严格禁止任何其他线程访问该目标地址，从而从根本上避免了多线程并发写入时的数据竞争与覆盖。</p>
+<p>CUDA 提供了与 C++ 标准库原子操作行为一致的 <code class="notranslate">cuda::std::atomic</code> 和 <code class="notranslate">cuda::std::atomic_ref</code>。此外，CUDA 还提供了扩展的 C++ 原子操作 <code class="notranslate">cuda::atomic</code> 和 <code class="notranslate">cuda::atomic_ref</code>，它们允许用户指定原子操作的<strong>线程作用域（Thread Scope）</strong>。有关原子函数的详细细节将在“原子函数”章节中涵盖。</p>
+<p>下面是一个使用 <code class="notranslate">cuda::atomic_ref</code> 执行设备范围（Device-wide）原子加法的示例。其中 <code class="notranslate">array</code> 是一个浮点数数组，而 <code class="notranslate">result</code> 是指向全局内存位置的浮点数指针，该位置将用于存储数组的总和。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__global__ <span class="pl-k">void</span> <span class="pl-en">sumReduction</span>(<span class="pl-k">int</span> n, <span class="pl-k">float</span> *array, <span class="pl-k">float</span> *result) {
+   ...
+   tid = threadIdx.<span class="pl-smi">x</span> + blockIdx.<span class="pl-smi">x</span> * blockDim.<span class="pl-smi">x</span>;
+
+   cuda::atomic_ref&lt;<span class="pl-k">float</span>, cuda::thread_scope_device&gt; <span class="pl-c1">result_ref</span>(result);
+   result_ref.<span class="pl-c1">fetch_add</span>(array[tid]);
+   ...
+}</pre></div>
+<h1>5.核函数启动与占用率</h1>
+<p>当 CUDA 核函数启动时，硬件调度器（Scheduler）根据执行配置将线程块分配至各个流多处理器（SM）。开发者必须明确：应用程序无法控制或查询特定的线程块被分配到哪个 SM，且调度器不提供任何执行顺序保证。这种设计要求算法逻辑必须具备高度的独立性，严禁依赖任何特定的调度顺序或预设的执行方案来维持结果的正确性。</p>
+<p>一个 SM 能同时承载的线程块数量并非固定值，而是取决于<strong>资源匹配度</strong>：</p>
+<ul>
+<li><strong>资源约束</strong>：单个线程块所需的寄存器数量、共享内存大小以及线程总数，必须与 SM 现有的空闲硬件资源相匹配。</li>
+<li><strong>分配逻辑</strong>：核函数启动初期，调度器会扫描所有 SM，只要某 SM 拥有足够的未占用资源，就会持续向其压入线程块。</li>
+</ul>
+<p>调度过程遵循动态负载均衡。当所有 SM 的资源容量均达到饱和、无法再接纳新的线程块时，调度器将进入等待状态。直到某 SM 完成并释放了先前分配的线程块资源，调度器才会立即填补空缺，将后续的线程块压入该 SM。这一“执行-释放-再分配”的循环过程，是确保 GPU 大规模并行任务能够有序推进至最终完成的关键底层逻辑。</p>
+<p><code class="notranslate">cudaGetDeviceProperties</code> 函数允许应用程序通过<strong>设备属性（Device Properties）</strong> 来查询每个流多处理器（SM）的硬件限制。需要注意的是，这些限制分为<strong>每 SM 级</strong>和<strong>每线程块级</strong>两个层面。</p>
+<ul>
+<li><strong><code class="notranslate">maxBlocksPerMultiProcessor</code></strong>：每个 SM 能够同时驻留（Resident）的最大线程块数量。</li>
+<li><strong><code class="notranslate">sharedMemPerMultiprocessor</code></strong>：每个 SM 可用的共享内存总量（单位：字节）。</li>
+<li><strong><code class="notranslate">regsPerMultiprocessor</code></strong>：每个 SM 可用的 32 位寄存器总数。</li>
+<li><strong><code class="notranslate">maxThreadsPerMultiProcessor</code></strong>：每个 SM 能够同时驻留的最大线程总数。</li>
+<li><strong><code class="notranslate">sharedMemPerBlock</code></strong>：单个线程块可以分配的最大共享内存量（单位：字节）。</li>
+<li><strong><code class="notranslate">regsPerBlock</code></strong>：单个线程块可以分配的最大 32 位寄存器数量。</li>
+<li><strong><code class="notranslate">maxThreadsPerBlock</code></strong>：单个线程块允许包含的最大线程数量。</li>
+</ul>
+<p>CUDA 核函数的<strong>占用率（Occupancy）</strong> 是指：活跃线程束的数量与 SM 所能支持的最大活跃线程束数量之比。通常情况下，保持尽可能高的占用率是一项良好的编程实践，因为这有助于隐匿指令延迟并提升整体性能。</p>
+<p>为了计算占用率，开发者需要了解前文所述的 SM 资源限制，同时还需要明确该 CUDA 核函数本身所消耗的资源量。为了确定每个核函数的资源使用情况，在程序编译阶段，可以使用 <code class="notranslate">nvcc</code> 编译器的 <strong><code class="notranslate">--resource-usage</code></strong> 选项。该选项将显示该核函数运行所需的寄存器数量和共享内存大小。</p>
+<p>为了进一步说明，请考虑一个计算能力（Compute Capability）为 10.0 的设备，其设备属性详见表 2。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402221911.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260402221911.png" alt="image.png" style="max-width: 100%;"></a><br>
+如果一个核函数以 <code class="notranslate">testKernel&lt;&lt;&lt;512, 768&gt;&gt;&gt;()</code> 的配置启动（即每块 768 个线程），每个 SM 每次只能执行 2 个线程块。调度器无法为每个 SM 分配超过 2 个块，因为 <code class="notranslate">maxThreadsPerMultiProcessor</code>（每 SM 最大线程数）的限制是 2048。在这种情况下，占用率将是 $(768 \times 2) / 2048 = 75%$。</p>
+<p>如果核函数以 <code class="notranslate">testKernel&lt;&lt;&lt;512, 32&gt;&gt;&gt;()</code> 的配置启动（即每块 32 个线程），虽然每个 SM 不会触及 <code class="notranslate">maxThreadsPerMultiProcessor</code> 的限制，但由于 <code class="notranslate">maxBlocksPerMultiProcessor</code>（每 SM 最大线程块数）的限制是 32，调度器每个 SM 只能分配 32 个线程块。由于每个块只有 32 个线程，SM 上驻留的总线程数将是 $32 \text{ 块} \times 32 \text{ 线程/块} = 1024$ 个总线程。对于计算能力 10.0 的 SM，其最大驻留线程数为 2048，因此在这种情况下，占用率仅为 $1024 / 2048 = 50%$。</p>
+<p>同样的分析也适用于共享内存。例如，如果一个核函数使用 100KB 的共享内存，调度器每个 SM 只能分配 2 个线程块。因为如果分配第 3 个线程块，该 SM 将需要额外的 100KB（总计 300KB），这超出了每 SM 可用的 233,472 字节（约 228KB）的限制。</p>
+<p>每个线程块的线程数<strong>和</strong>每个线程块的共享内存使用量是由程序员显式控制的，可以进行调整以达到理想的占用率。程序员对寄存器使用量的控制相对有限，因为编译器和运行时会尝试优化寄存器的分配。然而，程序员可以通过 <code class="notranslate">nvcc</code> 的 <strong><code class="notranslate">--maxrregcount</code></strong> 选项指定每个线程可用的最大寄存器数量。如果核函数需要的寄存器超过了此设定值，多出的数据可能会溢出（Spill）到局部内存（Local Memory）中，这将改变核函数的性能特征。在某些情况下，尽管发生了溢出，但限制寄存器数量可以允许调度更多的线程块，从而提高占用率，并可能带来最终的性能净增长。</p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script><script>MathJax = {tex: {inlineMath: [["$", "$"]]}};</script><script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</html>
