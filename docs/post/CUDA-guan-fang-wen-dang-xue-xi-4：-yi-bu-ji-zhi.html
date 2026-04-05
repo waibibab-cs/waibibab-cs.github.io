@@ -380,7 +380,44 @@ cudaStream_t stream1, stream2;
 <li><strong>捕获/创建（Capture）</strong>：这是图逻辑的录制阶段。通常在图首次被执行时，应用程序会启动捕获机制记录下所有的操作路径（除流捕获外，也可使用 CUDA Graph API 进行手动组装）。此步骤仅需执行一次。</li>
 <li><strong>实例化（Instantiate）</strong>：这是图的预编译与准备阶段。在捕获完成后，系统会进行一次性的实例化操作，提前在底层配置好执行该图所需的所有运行时硬件和内存结构，确保后续组件的启动速度达到物理极限。</li>
 <li><strong>执行（Execute）</strong>：这是图的高效重播阶段。在后续步骤中，预先实例化好的图可以根据需求被无限次触发。由于繁琐的运行时结构配置已在实例化阶段完成，此时启动整张图的 CPU 开销被降至最低水平。</li>
-</ol></div>
+</ol>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">define</span> <span class="pl-en">N</span> <span class="pl-c1">500000</span> <span class="pl-c"><span class="pl-c">//</span> tuned such that kernel takes a few microseconds</span>
+
+<span class="pl-c"><span class="pl-c">//</span> A very lightweight kernel</span>
+__global__ <span class="pl-k">void</span> <span class="pl-en">shortKernel</span>(<span class="pl-k">float</span> * out_d, <span class="pl-k">float</span> * in_d){
+    <span class="pl-k">int</span> idx=blockIdx.<span class="pl-smi">x</span>*blockDim.<span class="pl-smi">x</span>+threadIdx.<span class="pl-smi">x</span>;
+    <span class="pl-k">if</span>(idx&lt;N) out_d[idx]=<span class="pl-c1">1.23</span>*in_d[idx];
+}
+
+<span class="pl-k">bool</span> graphCreated=<span class="pl-c1">false</span>;
+cudaGraph_t graph;
+cudaGraphExec_t instance;
+
+<span class="pl-c"><span class="pl-c">//</span> The graph will be executed NSTEP times</span>
+<span class="pl-k">for</span>(<span class="pl-k">int</span> istep=<span class="pl-c1">0</span>; istep&lt;NSTEP; istep++){
+    <span class="pl-k">if</span>(!graphCreated){
+        <span class="pl-c"><span class="pl-c">//</span> Capture the graph</span>
+        <span class="pl-c1">cudaStreamBeginCapture</span>(stream, cudaStreamCaptureModeGlobal);
+
+        <span class="pl-c"><span class="pl-c">//</span> Launch NKERNEL kernels</span>
+        <span class="pl-k">for</span>(<span class="pl-k">int</span> ikrnl=<span class="pl-c1">0</span>; ikrnl&lt;NKERNEL; ikrnl++){
+            shortKernel&lt;&lt;&lt;blocks, threads, <span class="pl-c1">0</span>, stream&gt;&gt;&gt;(out_d, in_d);
+        }
+
+        <span class="pl-c"><span class="pl-c">//</span> End the capture</span>
+        <span class="pl-c1">cudaStreamEndCapture</span>(stream, &amp;graph);
+
+        <span class="pl-c"><span class="pl-c">//</span> Instantiate the graph</span>
+        <span class="pl-c1">cudaGraphInstantiate</span>(&amp;instance, graph, <span class="pl-c1">NULL</span>, <span class="pl-c1">NULL</span>, <span class="pl-c1">0</span>);
+        graphCreated=<span class="pl-c1">true</span>;
+    }
+
+    <span class="pl-c"><span class="pl-c">//</span> Launch the graph</span>
+    <span class="pl-c1">cudaGraphLaunch</span>(instance, stream);
+
+    <span class="pl-c"><span class="pl-c">//</span> Synchronize the stream</span>
+    <span class="pl-c1">cudaStreamSynchronize</span>(stream);
+}</pre></div></div>
 <div style="font-size:small;margin-top:8px;float:right;"></div>
 
 <button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>

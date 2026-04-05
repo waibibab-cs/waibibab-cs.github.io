@@ -337,4 +337,42 @@ CUDA 图的实际运作严格遵循以下三个阶段：
 1. **捕获/创建（Capture）**：这是图逻辑的录制阶段。通常在图首次被执行时，应用程序会启动捕获机制记录下所有的操作路径（除流捕获外，也可使用 CUDA Graph API 进行手动组装）。此步骤仅需执行一次。
 2. **实例化（Instantiate）**：这是图的预编译与准备阶段。在捕获完成后，系统会进行一次性的实例化操作，提前在底层配置好执行该图所需的所有运行时硬件和内存结构，确保后续组件的启动速度达到物理极限。
 3. **执行（Execute）**：这是图的高效重播阶段。在后续步骤中，预先实例化好的图可以根据需求被无限次触发。由于繁琐的运行时结构配置已在实例化阶段完成，此时启动整张图的 CPU 开销被降至最低水平。
+```cpp
+#define N 500000 // tuned such that kernel takes a few microseconds
 
+// A very lightweight kernel
+__global__ void shortKernel(float * out_d, float * in_d){
+    int idx=blockIdx.x*blockDim.x+threadIdx.x;
+    if(idx<N) out_d[idx]=1.23*in_d[idx];
+}
+
+bool graphCreated=false;
+cudaGraph_t graph;
+cudaGraphExec_t instance;
+
+// The graph will be executed NSTEP times
+for(int istep=0; istep<NSTEP; istep++){
+    if(!graphCreated){
+        // Capture the graph
+        cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
+
+        // Launch NKERNEL kernels
+        for(int ikrnl=0; ikrnl<NKERNEL; ikrnl++){
+            shortKernel<<<blocks, threads, 0, stream>>>(out_d, in_d);
+        }
+
+        // End the capture
+        cudaStreamEndCapture(stream, &graph);
+
+        // Instantiate the graph
+        cudaGraphInstantiate(&instance, graph, NULL, NULL, 0);
+        graphCreated=true;
+    }
+
+    // Launch the graph
+    cudaGraphLaunch(instance, stream);
+
+    // Synchronize the stream
+    cudaStreamSynchronize(stream);
+}
+```
