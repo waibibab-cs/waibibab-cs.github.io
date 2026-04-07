@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="论文全名：SPFresh: Incremental In-Place Update for Billion-Scale Vector Search
+# 摘要
+高维向量数据的近似最近邻搜索（ANNS）现已广泛应用于信息检索、问答系统和推荐系统等各类场景。">
+<meta property="og:title" content="【论文阅读；SOSP'23】SPFresh：十亿级向量搜索的增量原地更新">
+<meta property="og:description" content="论文全名：SPFresh: Incremental In-Place Update for Billion-Scale Vector Search
+# 摘要
+高维向量数据的近似最近邻搜索（ANNS）现已广泛应用于信息检索、问答系统和推荐系统等各类场景。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/%E3%80%90-lun-wen-yue-du-%EF%BC%9BSOSP%2723%E3%80%91SPFresh%EF%BC%9A-shi-yi-ji-xiang-liang-sou-suo-de-zeng-liang-yuan-di-geng-xin.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>【论文阅读；SOSP'23】SPFresh：十亿级向量搜索的增量原地更新</title>
+
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">【论文阅读；SOSP'23】SPFresh：十亿级向量搜索的增量原地更新</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/31" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>论文全名：SPFresh: Incremental In-Place Update for Billion-Scale Vector Search</p>
+<h1>摘要</h1>
+<p>高维向量数据的近似最近邻搜索（ANNS）现已广泛应用于信息检索、问答系统和推荐系统等各类场景。随着向量数据规模持续增长，支持向量索引更新变得至关重要 —— 向量索引是实现高效、精准高维向量近似最近邻搜索的核心技术。</p>
+<p>受高维维度灾难影响，在索引更新过程中，为新向量定位其正确近邻的开销通常十分高昂。为摊薄更新成本，现有系统会维护一个二级索引来累积更新操作，并通过定期全局重建整个索引的方式，将累积更新与主索引合并。然而，该方法会导致搜索延迟与精度出现剧烈波动，更何况索引重建需要消耗大量资源，且耗时极长。</p>
+<p>本文提出 SPFresh，一种支持向量原地更新的系统。SPFresh 的核心是 LIRE，即轻量级增量重平衡协议，该协议通过对向量分区进行切分，并对邻近分区内的向量重新分配，以适配数据分布的变化。LIRE 仅对分区边界处的向量进行重新分配，从而实现低开销的向量更新 —— 在高质量向量索引中，此类边界向量的数量通常极少。依托 LIRE，在基于磁盘、规模达十亿级且日向量更新率为 1% 的向量索引场景下，SPFresh 相较基于全局重建的方案，能提供更优的查询延迟与精度，且峰值运行时仅需现有顶尖方案 1% 的动态随机存取存储器（DRAM）资源与不足 10% 的算力核心。</p>
+<h1>一、介绍</h1>
+<p>如今，深度学习模型能够将语音、视觉、文本等几乎所有类型的数据，嵌入数十维乃至数百维的多维向量中。这类向量对于复杂语义理解任务至关重要 [42,49]。为实现高效的向量分析，向量最近邻搜索（NNS）系统已成为搜索 [35]、推荐 [57] 等越来越多在线服务的核心系统组件。</p>
+<p>为满足这些在线服务严苛的查询延迟要求，向量搜索系统普遍采用近似最近邻搜索（ANNS）方法 [17,22,34,51,56,59,65,69]，以尽可能多地定位正确结果（即保证查询精度）。大规模最近邻搜索系统的核心是向量索引，这一关键数据结构能够高效组织高维向量，支撑高精度、低延迟的向量搜索 [3,9,14,38,58,67]。</p>
+<p>与传统索引类似，高质量向量索引会依据高维空间中的向量邻近关系，构建出一套快速 “导航路径”。邻近关系通常通过 “捷径” 实现，这类连接仅存在于距离相近的向量对之间。查询会依据这些捷径遍历数据集，得到结果集合。索引能否支持高效遍历，高度依赖捷径质量：捷径不足会遗漏相关向量，捷径冗余则会带来过高的遍历与存储开销。针对高维数据，向量索引需要精心构建，以生成足量且高质量的 “捷径”，常见形式包括向量分区 [14,67] 或向量数据图 [56,65]。</p>
+<p>雪上加霜的是，当前各类场景下系统会持续产生海量向量数据，因此对向量索引的实时更新能力提出了强烈需求。例如，YouTube 每分钟上传超过 500 小时的内容 [21]，京东每日新增十亿张图片 [34]，阿里巴巴在大促期间接入 500PB 新增非结构化数据 [69]。实时更新要求向量索引以前所未有的规模与速度纳入新向量，同时保持索引质量，以维持近似向量搜索的低查询延迟与高查询精度。</p>
+<p>然而，在更新数百维向量时，向量索引很难持续维持高质量的 “捷径”。基于图的索引天然存在高昂的原地更新开销，因为每次插入或删除向量数据，往往需要遍历整张图，在高维空间中更新边关系。面向快速向量索引更新的一个可行思路是采用基于聚类的索引，其更新开销低于图索引。向量的插入与删除仅需对向量分区进行常数级的局部修改。但随着各分区内更新不断累积，数据分布会随时间发生偏移，导致分区大小不均，进而使索引质量下降，损害查询延迟与精度 [34]。</p>
+<p>由于向量索引难以高效实现原地更新，现有近似最近邻搜索系统均采用非原地更新方式支持向量更新 [34,53,59,65]，即定期全局重建索引。系统先累积一批向量更新并单独构建索引（非原地），再通过重建整个索引，定期将其与基础索引合并。这类方案会给近似最近邻搜索系统带来巨大的资源开销。例如，为规模达十亿、大小 128GB 的 SIFT 数据集构建全局 DiskANN 索引，峰值内存需 1100GB，耗时两天；若内存限制为 64GB、使用 32 个虚拟 CPU，则需耗时五天 [56]。此类重建消耗的资源甚至可能超过索引正常服务所需资源（2.3 节）。此外，这类非原地更新方法采用日志结构合并（LSM）式更新逻辑 [53]，以牺牲读取性能换取写入优化，会影响在线服务的搜索性能。</p>
+<p>为以更低成本支撑大规模向量数据集，本文提出 SPFresh：一款基于磁盘的向量索引，支持轻量级增量式原地局部更新，无需全局重建。SPFresh 基于当前最优的基于聚类的向量索引设计，可在线低开销地纳入向量索引更新，同时维持良好索引质量，在十亿级向量数据集上保证高搜索性能与精度。SPFresh 的核心是 LIRE 协议，即轻量级增量重平衡协议，用于累积局部向量分区的小规模向量更新，并以低成本重平衡局部数据分布。与开销巨大的全局重建不同，LIRE 能够通过即时局部修复数据分布异常，维持索引质量。</p>
+<p>LIRE 的核心设计思路，是依托已处于良好分区状态的向量索引。对高质量向量分区的小规模向量更新，通常仅会影响该分区及其相邻分区。由于更新规模较小，相应变化大概率局限在局部区域，使得整体重平衡过程轻量且可行。</p>
+<p>尽管具备这一优势，重平衡仍面临诸多难点。具体而言，LIRE 需要解决以下挑战：1）为保证较短的搜索延迟，LIRE 需通过及时的分区分裂与合并，维持分区大小均匀分布；2）为保证较高的搜索精度，LIRE 需要识别出导致索引数据失衡的最小向量集合，通过重新分配这些向量维持高索引质量；3）LIRE 的实现需足够轻量，对前台搜索的性能影响可忽略不计。</p>
+<p>LIRE 通过以下四项核心设计应对上述挑战：</p>
+<ul>
+<li>LIRE 通过主动、增量式的分区分裂与合并，保持分区大小分布均匀。</li>
+<li>LIRE 依据最近邻张贴分配规则（NPA），严格定义了向量重分配的两个必要条件。基于这些条件，LIRE 可按需识别最小规模的邻域向量集合，以适配数据分布变化。</li>
+<li>LIRE 的实现解耦为两阶段前向流水线，将后台分裂与重分配操作移出前台更新的关键路径。流水线各阶段均采用多线程设计，可充分发挥高性能 NVMe 设备的高 IOPS 能力。</li>
+<li>专为 LIRE 设计的基于 SSD 的用户态存储引擎，绕过传统存储栈，优先处理分区读取，并对分区追加写入进行优化。</li>
+</ul>
+<p>实验结果表明，在十亿级向量数据集上，SPFresh 在各项指标上均优于当前支持实时更新的顶尖近似最近邻搜索系统，具备稳定且恒定的搜索 / 插入延迟、高查询精度以及高效的资源利用率。相较于 DiskANN 全局重建需要额外 1000GB 内存与 32 个核心，SPFresh 仅需 10GB 内存与 2 个核心，平均尾延迟降低 2.41 倍，性能优于 DiskANN。此外，SPFresh 可达到 IOPS 上限，同时保持性能与资源利用率稳定。在配备 15 个核心的单 NVMe SSD 磁盘上，可同时实现峰值 4K QPS 的搜索吞吐与 2K QPS 的更新吞吐。</p>
+<h1>二、背景和相关工作</h1>
+<p>本节将介绍基于 ANNS 的向量搜索中的基本操作，并介绍两种主流的磁盘向量索引及其各自的索引更新挑战。</p>
+<h2>2.1 向量搜索和ANNS</h2>
+<p>向量搜索的常见用例是基于给定查询，在大型数据集中查找最相似的项。该过程常用于推荐系统、搜索引擎和自然语言处理任务中。如图 1 所示，若要根据查询图像从数据集中查找相似图像，系统首先通过深度学习模型将数据集中的每张图像表示为高维向量，查询图像也会被编码为同一高维空间中的向量。随后，系统使用余弦相似度或欧氏距离等相似度度量，计算查询向量与数据集中每个向量的相似度，再根据相似度得分对图像进行排序，并将排名靠前的结果返回给用户。本质上，该搜索就是在高维空间中查找查询向量的最近邻。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260407100214.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260407100214.png" alt="image.png" style="max-width: 100%;"></a><br>
+形式化地，给定包含n个m维向量的向量集合X∈Rn×m与查询向量q，向量最近邻搜索旨在从X中找到向量x∗，使得x∗=argminx∈X​Dist(x,q)，其中Dist为上文讨论的相似度度量。该定义可扩展至K近邻（KNN）搜索 [67]。现代机器学习模型通常生成维度在 100 到 10000 甚至更高的向量。例如，GPT-3 生成四种尺寸的嵌入向量，维度范围为 1024 至 12288 [48]。高维特性使得高效查找精确K近邻面临巨大挑战 [12]。为解决该问题，近期系统普遍采用近似最近邻搜索（ANNS）[51, 56, 67]，在资源开销、结果质量与搜索延迟之间实现有效权衡，从而适配大规模向量数据集。</p>
+<p>由于其近似特性，搜索结果精度成为衡量向量索引质量的重要指标。在 ANNS 中，Recall1K@K是衡量结果质量的常用指标。对于近似 KNN 查询，Recall1K@K定义为∣Y∩G∣​/∣G∣，其中Y为查询的结果集，G为查询的真实结果集，且∣Y∣=∣G∣=K。</p>
+<h2>2.2 向量索引组织</h2>
+<p>向量索引可抽象为一张逻辑图：顶点代表向量，边表示两个向量在距离上的邻近关系。用于 ANNS 的向量索引可分为细粒度基于图的向量索引与粗粒度基于聚类的向量索引，这两类方法均可应用于内存或磁盘场景。</p>
+<p>本文仅聚焦于磁盘向量索引，因为它们对于大规模向量集更具成本效益；同时，磁盘写入的开销远高于 DRAM 写入，这为向量更新带来了独特挑战。细粒度基于图的向量索引将每个向量表示为一个顶点，若两个顶点距离相近则在二者间建立边。查找 K 个最近向量通常涉及最佳优先图遍历，即按距离升序探索邻接顶点。</p>
+<p>基于细粒度图的向量索引方案包括：邻域图方法 [15,16,19,20,23,38,60,63]，将所有向量组织为邻域图，每个向量与其最近向量相连；混合方法 [26,27,62,68]，由空间划分树与邻域图构成，兼具树与图数据结构的优势。基于空间划分树的方法 [4,6,8,10,13,18,36,39,43,45,46,55,64,72] 可视为一类特殊的细粒度图，通过树结构表示空间划分与向量到子空间的映射。这类方案大多基于内存实现以保障性能，难以扩展至十亿级数据集。</p>
+<p>仅有少数细粒度基于图的向量索引针对辅助存储进行了优化（如 DiskANN [56] 与 HMANN [51]）。与外部图系统 [31,33,52,74] 类似，这些细粒度基于图的向量索引分为两部分存储：顶点数据与作为顶点邻接表的边数据。边数据存储于辅助存储，顶点数据可存储于磁盘 [51] 或内存 [56]；内存中的顶点数据可加速计算（如 ANNS 中的距离计算 [56]）。</p>
+<p>为降低搜索开销，DiskANN [56] 采用固定图遍历策略，将固定起点的邻域缓存至内存，以加速初始阶段的图遍历；同时维护压缩顶点数据（采用乘积量化）的内存副本，加速图遍历过程中的距离计算。相比之下，HM-ANN [51] 构建分层内存图，可导航至辅助存储中主图的最近入口点，从而高效定位最近向量的目标区域。</p>
+<p>尽管基于图的顶点索引在向量搜索中效果显著，但对更新不友好（详见 2.3 节）。</p>
+<p>粗粒度基于聚类的向量索引通过聚类组织向量索引，将距离相近的向量归至同一分区。逻辑上，每个分区内的向量构成一张全连通图，不同分区间无连接边。由于无需显式存储边数据，粗粒度基于聚类的向量索引所需存储开销大幅降低。基于聚类的向量索引的搜索流程为：首先通过计算与分区质心的距离定位候选分区，再对候选分区进行全扫描，从中筛选出 K 个最近向量。</p>
+<p>粗粒度基于聚类的向量索引包括：哈希方法 [14,24,28,32,44,50,54,61,70,71]，采用多个保局部性哈希函数实现向量到分区的映射；量化方法 [5,7,17,30,73]，通过乘积量化（PQ）[29] 压缩向量，并利用 K 均值生成向量到分区的映射码本。</p>
+<p>基于聚类的向量索引需维持分区间的负载均衡，以实现低尾搜索延迟。然而，采用局部敏感哈希 [14,28,66,70,71] 与 K 均值 [37] 进行聚类的 ANNS 索引，对分区均衡性关注不足，往往生成不均匀分区，因此仅适用于内存系统 —— 这类系统的绝对尾延迟远低于磁盘方案，影响相对不显著。</p>
+<p>SPANN [67] 是首个通过均衡聚类实现低尾搜索延迟的磁盘向量索引。SPANN 将向量集划分为大量均衡分区存储于磁盘，同时将分区质心保留在内存中，以便在搜索时快速定位候选分区；并通过多项技术保障分区的良好均衡状态（详见 3.1 节）。SPANN 在多个十亿级数据集上，于内存开销、结果质量与搜索延迟方面均达到了当前最优性能。</p>
+<p>基于聚类的向量索引对更新友好，因为每次向量插入或删除仅涉及对应分区内向量数据的局部修改。但对局部分区的简单更新最终可能导致聚类失衡，进而恶化搜索尾延迟与精度（详见 2.3 节）。</p>
+<h1>2.3 实时性需求与挑战</h1>
+<p>现代近似最近邻搜索（ANNS）系统需要每日处理数十亿次向量更新，同时仍需保持低查询延迟与高查询精度。随着 OpenAI ChatGPT 检索插件 [47] 的流行，部分基于其构建的 AI 应用甚至要求<strong>实时更新</strong>，以同步个人文档或上下文的变更 —— 包括文件、笔记、邮件与聊天记录等均以向量形式存在，从而在新提示输入时能检索到最相关的文本片段。然而，向量索引在更新过程中难以维持索引质量，这一问题极具挑战性。</p>
+<p><strong>非原地更新</strong>对于向量插入操作，细粒度基于图的索引必须将新向量与数百个邻接向量建立连接，以在高维空间中保留足够的导航捷径。而向量删除的开销更高，通常需要对有向图进行全图扫描。</p>
+<p>为解决原地更新的难题，现有系统采用<strong>非原地更新</strong>结合定期全局重建的方案。这类系统会将增量向量更新累积并索引到独立的内存二级索引中，再通过全局索引重建定期与基础索引合并，以保证良好的索引质量。ADBV [69]、Milvus [65] 等主流 ANNS 系统均采用该方式。为推迟昂贵的全局更新，Milvus 甚至在内存中维护多个增量索引。但该方法要求向量搜索同时检索主索引与二级索引，既提升了资源需求，又降低了搜索性能。表 1 表明，全局重建既消耗大量资源又极为耗时。例如，为基于磁盘的最新系统 DiskANN 重建十亿级向量索引 [56]，需要 1100GB 动态随机存取存储器（DRAM）、32 个虚拟 CPU，耗时两天；若将资源限制为 64GB 内存与 16 个虚拟 CPU，重建时间会大幅延长，如 DiskANN 需耗时五天。这种严苛配置还会因计算资源严重紧缺，导致查询性能灾难性下降。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260407101716.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260407101716.png" alt="image.png" style="max-width: 100%;"></a></p>
+<p><strong>早期原地更新尝试</strong>相较于非原地向量更新，支持原地更新的系统寥寥无几。Vearch [34] 是其中之一，它基于内存聚类向量索引，将新向量插入最近的分区（亦称投递表，分区以投递列表形式实现），并通过维护删除标记位图实现删除与结果过滤。</p>
+<p>为探究 Vearch 设计对磁盘索引的影响，我们将其方案应用于唯一基于分区的磁盘向量索引系统 SPANN。图 2 显示，与静态构建索引相比，更新三分之一向量会使查询召回率下降超过 1 个百分点，尾延迟提升 4 倍。原因主要有两点：1）随着数据量增长，投递列表长度扩张会导致查询延迟上升；2）各分区质心固定，无法适配分区内逐渐变化的数据分布，进而造成召回率下降。综上，尽管 Vearch 与改进后的 SPANN 无需非原地数据结构，但仍需定期全局重建以维持高索引质量与稳定搜索延迟。例如，Vearch 每周执行一次重建。该重建开销对内存向量索引或许尚可接受，但对于 SPANN 这类磁盘索引，全局重建成本极高，如表 1 所示。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260407101730.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260407101730.png" alt="image.png" style="max-width: 100%;"></a><br>
+总而言之，现有的基于图与基于聚类的方案，无论采用原地或非原地更新，均依赖定期全局索引重建来保障索引质量与稳定搜索性能，而该过程会消耗巨额资源。</p>
+<h1>2.4 本文目标</h1>
+<p>时至今日，面向磁盘向量索引的高效实时更新仍是开放性难题。本文旨在提出一种全新的磁盘式 ANNS 系统，实现以下目标：1）为大规模向量数据集提供低资源开销的索引维护能力；2）支持高吞吐、低延迟的向量查询与更新操作；3）保证新向量以高概率被检索召回。</p>
+<p>基于上述分析，我们选择采用粗粒度聚类方案构建磁盘索引，但与现有方案显著不同的是，<strong>完全摒弃全局重建</strong>。本文提出的 SPFresh 系统通过在索引数据结构中执行<strong>原地增量更新</strong>，适配数据分布偏移。为此，SPFresh 集成了轻量级增量重平衡协议（LIRE），可高效识别新向量引发的最小规模分区更新量，在维持索引特性的同时避免明显的精度损失。同样关键的是，我们还解决了多项系统层面挑战，使 LIRE 重平衡足够高效、轻量，以降低对搜索延迟（尤其是尾延迟）的负面影响。本质上，LIRE 可视为高维空间中一种高效的压缩整理技术。</p>
+<h1>三、LIRE协议设计</h1>
+<p>LIRE is built on SPANN [67], the state-of-the-art disk-based vector index system. In this section, we first introduce SPANN briefly and then elaborate LIRE in detail.</p>
+<h2>3.1 SPANN：基于聚类的平衡向量索引</h2>
+<p>SPANN [67] 是面向外部存储优化的十亿级聚类式向量索引。图 3 展示了 SPANN 的整体索引结构。SPANN 将向量以大量 <strong>投递列表（posting）</strong>  的形式存储在磁盘上，每个投递列表对应一组邻近向量构成的聚类。同时，SPANN 为所有投递列表的质心构建了基于图的内存索引 SPTAG [68]，用于快速定位查询相关的投递列表。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260407102625.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260407102625.png" alt="image.png" style="max-width: 100%;"></a><br>
+处理查询时，系统先通过内存索引找到最近的投递列表质心，再将对应投递列表从磁盘加载到内存中进行后续检索。为控制尾延迟并保证高搜索召回率，SPANN 通过维持两项核心特性实现投递列表的均衡分布：</p>
+<ol>
+<li>采用快速层次化均衡聚类算法，将向量均匀划分为大量小尺寸投递列表，使每次查询访问的向量数量相近，从而限制搜索尾延迟。</li>
+<li>在多个投递列表的边界处复制少量向量，充分保证高搜索召回率。</li>
+</ol>
+<p>均衡的 SPANN 索引启发我们提出了轻量级增量重平衡协议（LIRE）。其核心直觉是：对一个已高度均衡的索引进行单次向量更新，通常只会影响局部区域，因此整体重平衡过程可以做到轻量且低成本。</p>
+<h2>3.2 LIRE：轻量级增量再平衡</h2>
+<p>一个分区良好的向量索引具有 <strong>最近分区分配（NPA）</strong> 特性：每个向量应被放入距离最近的投递列表，从而能被该列表的质心良好代表。当某个投递列表持续发生向量更新时，会导致查询召回率与延迟恶化，因此 SPFresh 会在投递列表长度达到预设上限时对其进行分裂。但简单的分裂操作会破坏索引的 NPA 特性。</p>
+<p>图 4 展示了 NPA 被破坏的示例。初始存在两个相邻的投递列表 A 和 B，蓝色点为其质心。某一时刻，投递列表 A 因向量插入超出长度限制，被分裂为 A1 和 A2 两个新列表，分裂后选出的新质心以橙色点表示。在朴素分裂策略下，A 中原向量仅根据与新质心的距离分别归入 A1 或 A2。为便于说明，假设黄色点代表的向量被归入 A2。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260407102821.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260407102821.png" alt="image.png" style="max-width: 100%;"></a></p>
+<p>然而，分裂产生新质心后，会导致相邻投递列表 A1、A2 与 B 中原先满足 NPA 的向量不再符合规则。其一，黄色点的最近投递列表变为 B，因为 B 的质心比 A2 更近，此时用 A2 质心代表黄色点违反了 NPA。其二，分裂前属于 B 的绿色点，其最近列表变为 A2。这两类违规都会降低索引质量，造成召回率下降。</p>
+<p>为修复分裂后的 NPA 违规问题并维持高索引质量，我们设计了 LIRE 协议，对发生分裂的投递列表及其邻近列表中的向量进行重分配。LIRE 协议核心包含五种基本操作：插入、删除、合并、分裂、重分配。</p>
+<p><strong>插入与删除</strong><br>
+LIRE 沿用原始 SPANN 索引设计，直接将新向量插入最近的分区；同时保证被删除向量不会出现在搜索结果中，并最终从对应投递列表移除。</p>
+<p>插入与删除是面向用户的外部接口，其余三种为内部操作，对用户透明。这三种操作协同工作，使投递列表保持小尺寸且均衡分布，并确保向量遵循 NPA 规则被分配到正确列表。</p>
+<p><strong>分裂</strong><br>
+当某个投递列表超出长度上限时，LIRE 将其均匀分裂为两个更小的列表。如前所述，分裂后相邻列表中的向量可能违反 NPA，因此会对分裂列表及其邻近列表中的向量触发重分配流程（详见 3.3 节）。</p>
+<p><strong>合并</strong><br>
+当某个投递列表尺寸低于下限阈值时，LIRE 选择其最近列表作为合并候选。具体而言，LIRE 的合并操作会删除其中一个列表及其质心（通常是较短列表），并将其向量直接追加到另一列表。之后，被删列表中的向量需要执行重分配，因为原质心删除后，合并可能破坏 NPA 规则。重分配只会将向量移出，因此不会导致合并后的列表分裂；但被重分配的向量可能触发目标列表的分裂。尽管存在这种级联效应，3.4 节将证明 LIRE 的分裂–重分配流程总能收敛。</p>
+<h2>3.3 向量重分配</h2>
+<p>向量重分配开销较高，因为需要对磁盘上的投递列表进行修改。因此，关键在于精确定位需要重分配的邻域集合（相邻投递列表），避免不必要操作。对于合并操作，仅需对被删列表中的向量进行重分配，因为质心删除不会破坏未被删列表内向量的 NPA 合规性。</p>
+<p>而分裂操作不仅删除一个质心，还会新增两个质心，因此可能导致更复杂的 NPA 违规场景。通过对图 4 的分析，在高维向量空间为欧氏空间的假设下，我们推导出分裂后触发重分配的两个<strong>必要条件</strong>。</p>
+<p><strong>条件一</strong><br>
+对原质心为 Ao 的旧列表中向量 v，满足下式时需考虑重分配：<br>
+D(v,Ao)≤D(v,Ai),∀i∈{1,2}(1)</p>
+<p>其中 D 为距离，Ao 为分裂前旧质心，Ai 为分裂后的两个新质心。该条件表示：若旧质心 Ao 比新质心 A1、A2 更靠近 v，则不能排除 v 更接近某邻近列表质心的可能（如图 4 中的 B）。这是一个必要条件。反之，若D(v,Ao)&gt;D(v,Ai)，说明新质心比旧质心更优；根据 NPA 性质D(v,B)&gt;D(v,Ao)，可推得D(v,B)&gt;D(v,Ai)，因此无需检查重分配。</p>
+<p><strong>条件二</strong><br>
+对质心为 B 的邻近列表中向量 v，满足下式时需考虑重分配：<br>
+D(v,Ai)≤D(v,Ao),∃i∈{1,2}(2)</p>
+<p>这是 B 列表中向量被重分配到新分裂列表 Ai 的必要条件。式 (2) 表示 v 与新邻近质心的距离比旧质心更近，因此需要检查新质心是否比 v 当前所属质心 B 更近（如图 4 中绿色点与蓝色点的关系）。反之，若旧列表外任意向量 v 与两个新质心的距离均更远，则说明新质心比旧质心 Ao 更差，而 Ao 本就比 v 当前质心更远，此时无需对 v 进行重分配检查。</p>
+<p>若依据这两个必要条件对全量数据集中的所有向量逐一计算并比较D(v,Ao)与D(v,Ai)，开销将极其高昂。为最小化成本，LIRE 仅选取 Ao 的若干最近相邻投递列表进行重分配检查，并在这些列表上应用两个条件筛选出最终重分配集合。第 5 节实验表明，仅对少量邻近列表执行必要条件检查，即可充分维持索引质量。</p>
+<p>得到待重分配向量候选集后，LIRE 执行重分配：对每个候选向量 v，先搜索其新的最近投递列表，再执行 NPA 检查以排除误判 —— 若向量实际无需重分配则终止操作；否则将 v 追加到符合 NPA 规则的新投递列表，并从原列表删除 v。</p>
+<h2>3.4 分裂-重分配 收敛</h2>
+<p>本节将证明：对向量索引执行一次分裂–重分配操作，即便可能触发级联的分裂–重分配，最终也会<strong>收敛至稳定状态</strong>，并在有限步内终止。</p>
+<p>我们首先形式化定义向量索引的状态，以及触发状态转移的事件，随后证明状态转移必然收敛并终止。</p>
+<p><strong>索引状态</strong><br>
+对于向量数据集 V，向量索引的状态由两部分组成：</p>
+<ul>
+<li>C：所有投递列表质心的集合。</li>
+<li>M：向量到对应质心的归属关系。</li>
+</ul>
+<p>根据 LIRE 规则，在给定 C 的前提下，M 中每个向量都会被分配到 C 中距离最近的质心，即 <strong>M 由 C 唯一确定</strong>。</p>
+<p><strong>索引状态转移</strong><br>
+状态转移由两类事件触发：</p>
+<ul>
+<li>Einsert​：向量 v 被插入向量索引。</li>
+<li>Edelete​：向量 v 从向量索引中删除。</li>
+</ul>
+<p>向量 v 的一次重分配可视为：先对 v 执行 Edelete​，再执行 Einsert​。</p>
+<p>注意：事件只会改变 M 的状态，<strong>不一定会改变 C</strong>。</p>
+<p>同时，只有 Einsert​ 可能引发向量索引的分裂操作，分裂会改变 C，进而改变 M。</p>
+<p>由于 C 唯一决定 M，我们只需重点关注 C 的状态变化。</p>
+<p><strong>分裂–重分配的收敛性证明</strong><br>
+Edelete​ 最终可能在搜索过程中触发合并（根据 LIRE），而合并操作显然会终止。</p>
+<p>假设某一 Einsert​ 触发了 C 的一系列变化，记为：<br>
+Ci​,Ci+1​,…,Ci+N​</p>
+<p>要证明收敛，只需证明 N 是<strong>有限数</strong>。<br>
+我们注意到 C 具有以下两条性质：</p>
+<ol>
+<li>∣C∣≤∣V∣：质心集合的大小有上界，不超过向量数据集 V 的向量总数。</li>
+<li>∣Ci+1​∣=∣Ci​∣+1：每次分裂会从 Ci​ 中删除一个旧质心，并新增两个新质心。因此，<strong>每执行一次分裂，C 的大小严格加一</strong>。</li>
+</ol>
+<p>根据性质 2：<br>
+∣Ci+N​∣=∣Ci​∣+N<br>
+再根据性质 1：<br>
+∣Ci+N​∣≤∣V∣⟹N≤∣V∣−∣Ci​∣<br>
+由于 ∣V∣ 有限，N 必然有限。<br>
+因此，<strong>分裂操作一定会在有限步内终止</strong>。</p>
+<h1>四、Spfresh设计与执行</h1>
+<h2>4.1 总体架构</h2>
+<p>图 5 展示了 SPFresh 的系统架构。SPFresh 复用了 SPANN 的 SPTAG 索引（见图 3）以实现快速的投递列表质心导航，并沿用其查询执行器处理搜索请求。系统新增三个模块用于实现 LIRE 协议：轻量级<strong>原地更新器</strong>、低成本<strong>本地重建器</strong>和高速<strong>块控制器</strong>。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260407105238.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260407105238.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>更新器</strong>将新向量追加到其最近投递列表的尾部，并维护一个版本映射表，通过设置对应删除标记版本来追踪向量删除操作，避免已删向量出现在搜索结果中。该映射表同时用于追踪每个向量的副本：通过递增版本号，系统可将旧副本标记为已删除。系统在内存中维护全局版本映射表，并将向量连同版本号一同存储在磁盘上。若内存中的版本号大于磁盘上的版本号，则该向量为过期数据，可用于重分配带来的垃圾回收。版本机制能够延迟并批量执行垃圾回收，从而控制向量删除的 I/O 开销。向量原地插入完成后，更新器检查投递列表长度，若超出分裂上限，则向本地重建器下发分裂任务。实际的数据删除操作会在本地重建阶段异步批量执行。</p>
+<p><strong>本地重建器</strong>是实现 LIRE 的核心组件。它维护分裂、合并、重分配任务队列，并将任务分发至多个后台线程并发执行。</p>
+<ul>
+<li><strong>分裂任务</strong>：由更新器在投递列表超出分裂上限时触发，先清理超大投递列表中的已删向量，再按需将其切分为小列表。</li>
+<li><strong>合并任务</strong>：由查询执行器在发现部分投递列表小于最小长度阈值时触发，将邻近的过小列表合并为一个。</li>
+<li><strong>重分配任务</strong>：由分裂或合并任务触发，对邻近投递列表中的向量重新分配，平衡局部区域的数据分布。</li>
+</ul>
+<p>后台分裂与合并任务完成后，SPFresh 会使用新的投递列表质心更新内存中的 SPTAG 索引，替换旧质心信息。</p>
+<p><strong>块控制器</strong>处理磁盘上投递列表的读、写、追加请求，以及投递列表的插入与删除操作。它直接使用 SSD 的裸块接口，避免由常规存储引擎（如基于日志结构合并树的键值存储）带来的不必要读写放大。每个投递列表可跨多个 SSD 块，每个块存储多条向量（包含向量 ID、版本号与原始数据）。块控制器同时在内存中维护投递列表 ID 到其所使用 SSD 块的映射，以及空闲 SSD 块池。</p>
+<p>后续将详细介绍本地重建器（4.2 节）与块控制器（4.3 节）的设计与实现。</p>
+<h2>4.2 本地重建设计</h2>
+<p>为将分裂、合并与重分配任务移出更新关键路径，SPFresh 将更新流程分为前台更新器与后台本地重建器两部分。二者构成前向流水线，更新器作为请求生产者向本地重建器提交任务。在此流水线中，后台本地重建器是核心模块，高效实现 LIRE 协议的合并、分裂与重分配操作，以匹配前台更新速度。</p>
+<h3>4.2.1 LIRE协议的重建操作</h3>
+<p>本地重建器通过三种基础操作实现 LIRE：</p>
+<p><strong>合并</strong>：执行合并任务时，本地重建器严格遵循 3.2 节所述的合并协议。</p>
+<p><strong>分裂</strong>：收到超大投递列表分裂任务后，本地重建器首先回收列表中的已删向量，校验垃圾回收后的列表长度是否仍超出分裂上限。若未超出，则将回收后的列表写回存储，完成分裂任务。</p>
+<p>若仍超出上限，则触发均衡聚类流程，将超大列表切分为两个更小的列表。具体而言，本地重建器采用文献 [67] 中的多约束均衡聚类算法，生成高质量质心与均衡的投递列表。</p>
+<p>分裂完成后，本地重建器将两个新列表写入索引，并删除原超大列表。</p>
+<p><strong>重分配</strong>：重分配任务由分裂或合并任务生成，用于检查新列表及其邻接列表中的向量是否需要迁移，以平衡局部数据分布。重分配检查基于 3.3 节的两个必要条件。注意，合并触发的重分配无需检查邻接投递列表。</p>
+<p>若重分配向量时不删除其在未检查列表中的副本，会导致副本数量增加。这不仅提升存储开销，还会因多余副本占用列表空间而提高分裂与重分配频率。为在不执行实际删除的前提下高效识别重分配后的过期向量，本地重建器使用版本映射表记录每个向量的版本号。版本号占 1 字节并存储在内存中，记录向量的版本变更：7 位表示重分配版本，1 位为删除标记。重分配向量时，系统在版本映射表中递增其版本号，并将带新版本号的原始向量数据追加至目标投递列表。所有带过期版本号的旧副本会在搜索阶段被过滤，后续统一回收。</p>
+<h3>4.2.2 同步重建</h3>
+<p>SPFresh 的本地重建器采用多线程设计，并对内存与磁盘数据结构的更新实施高效并发控制。并发重建可避免因重平衡速度过慢导致的索引质量下降。</p>
+<p><strong>追加 / 分裂 / 合并的并发控制</strong>：由于追加、分裂、合并可能并发修改同一投递列表与内存块映射，系统为这三类操作添加细粒度的投递列表级写锁，保证列表修改的原子性。</p>
+<p>投递列表读取无需加锁，因此向量重分配的筛选过程无锁，仅执行索引搜索与两个必要条件检查。实验表明，即便在倾斜负载下，写锁竞争率极低（低于 1%），原因是仅有少量投递列表被并发修改。</p>
+<p>重分配过程中，可能出现向量被追加至已并发删除的过期列表的情况。此时系统中止本次重分配，重新执行该向量的重分配任务。实验显示，仅有不足 0.001% 的插入请求会遇到因分裂导致的列表缺失问题，因此中止与重执行的开销可忽略。</p>
+<p><strong>并发重分配</strong>：SPFresh 避免同一向量被同时重分配。收集重分配向量候选时，本地重建器会获取候选的当前版本，并借助版本号的 <strong>比较交换（CAS）</strong>  原子原语原子执行重分配操作。若向量版本映射表的 CAS 原子操作失败，说明该向量已为过期版本，重分配中止；否则重分配流程执行完毕。</p>
+<h2>4.3 块控制器设计</h2>
+<p>块控制器是一款高度优化读性能的轻量级存储引擎，支持对投递列表的仅追加操作。该设计利用投递列表的特性：旧列表数据不可变，更新不会带来额外读取开销（不同于日志结构文件系统需要多次额外的非原地读取）。在超出长度上限前，系统持续将向量更新追加至投递列表；当列表超长时，旧列表在分裂为两个新列表后被销毁。为避免文件系统或其他存储引擎（如键值存储）的额外开销，块控制器直接操作 SSD 裸接口。</p>
+<p><strong>基于 SPDK 的实现</strong>：图 6 概述了存储设计。块控制器基于 SSD 构建，使用英特尔高性能 NVMe SSD 库 SPDK [25] 提供的裸块接口。SPDK 提供一套用户态 I/O 库用于访问高速 NVMe 设备，可绕过传统存储栈直接执行 SSD I/O。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260407110921.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260407110921.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>存储数据布局</strong>：如图 6 所示，块控制器包含内存块映射、空闲块池与并发 I/O 请求队列。</p>
+<ul>
+<li><strong>块映射</strong>：将投递列表 ID 映射至对应的 SSD 块偏移。由于投递列表 ID 为连续整数，块映射以内存稠密数组实现，每个元素存储投递列表长度的块元数据与其 SSD 块偏移。一个投递列表由若干<code class="notranslate">&lt;向量ID, 版本号, 原始向量&gt;</code>元组构成，通常占用 3~4 个 SSD 块。每个块映射项仅占用 40 字节内存；对于十亿级向量数据集，约存在 1 亿个投递列表，块映射仅消耗约 4GB 内存。</li>
+<li><strong>空闲块池</strong>：维护所有空闲 SSD 块，记录空闲块偏移用于磁盘分配，并在分裂与重分配后回收过期块。</li>
+<li><strong>并发 I/O 请求队列</strong>：基于 SPDK 环形缓冲区实现，向 SSD 设备发送异步读写请求，最大化 IO 吞吐并降低 I/O 延迟。</li>
+</ul>
+<p><strong>投递列表 API 与实现</strong>：块控制器提供以下投递列表操作接口：</p>
+<ul>
+<li><strong>GET</strong>：根据 ID 读取投递列表数据。请求先查询块映射定位对应 SSD 块，再向当前 I/O 请求队列发送异步 I/O，待所有 I/O 完成后汇集目标块数据。</li>
+<li><strong>ParallelGET</strong>：并行读取多个投递列表，摊薄单次 GET 的延迟，保证高速搜索与更新。该接口可批量发送 I/O 请求获取所有候选列表，隐藏 I/O 延迟并提升磁盘利用率。</li>
+<li><strong>APPEND</strong>：向投递列表尾部追加新向量。不同于列表粒度的读 - 改 - 写，APPEND 仅对列表最后一个块执行读 - 改 - 写，大幅降低读写放大。如图 6 所示，APPEND 先分配新块，若原最后一块未满则读取该块，将新数据追加至原有数据后写入新块；新块写入后，通过 CAS 操作原子更新对应内存块映射项，旧块释放至空闲块池待用。</li>
+<li><strong>PUT</strong>：向 SSD 写入新投递列表。与 APPEND 类似，先批量分配新块并写入整个列表，再原子更新块映射项；若覆写旧列表，则将旧块释放至空闲块池。</li>
+</ul>
+<p>块控制器提供通用抽象与实现，可泛化应用于其他读密集型场景（如搜索引擎广泛使用的倒排索引 [2,11]）。</p>
+<h2>4.4 故障恢复</h2>
+<p>SPFresh 采用简易的故障恢复方案，结合<strong>快照</strong>与<strong>预写日志（WAL）</strong>。系统定期生成索引快照，相邻快照间的所有更新请求记入 WAL；发生故障时，从最新快照恢复并重放 WAL 即可。新快照生成后，旧 WAL 会被删除。</p>
+<p>向量索引快照需要同时记录内存与磁盘数据结构。对于内存索引数据，系统为质心索引、更新器中的版本映射表、块控制器中的块映射与块池创建快照并刷写到磁盘。快照开销较低：十亿级数据集对应的上述数据结构仅占 40GB，在 PCIe NVMe SSD 上完整刷盘仅需 2~3 秒。对于磁盘数据，得益于块级写时复制机制，系统可将两次快照间释放的所有块归入预释放缓冲区，待下一次快照完成后再加入空闲块池。因此，中间修改的所有数据块均可回滚至与上一快照一致的状态。该方案仅延迟旧块的空间释放，节省大量磁盘空间。</p>
+<h1>五、实验</h1>
+<h2>5.1 实验搭建</h2>
+<p><strong>实验平台</strong>：所有实验均在 Azure lsv3 [41] 虚拟机上运行，该机型为存储优化型虚拟机，配备本地高性能 NVMe 存储。实验所用虚拟机配置为：16 个虚拟 CPU（来自超线程 Intel Xeon Platinum 8370C Ice Lake 处理器）、128GB 内存。</p>
+<p><strong>数据集</strong>：采用两个广泛使用的向量数据集评估 SPFresh：</p>
+<ul>
+<li><strong>SIFT1B [40]</strong>：用于评估大规模向量搜索 ANNS 算法性能的经典图像向量数据集，包含 10 亿条 128 维字节型向量作为基础集，10000 条查询向量作为测试集。</li>
+<li><strong>SPACEV1B [1]</strong>：源自商业搜索引擎真实业务数据的数据集，采用深度自然语言编码这一不同类型的向量表示，包含 10 亿条 100 维字节型向量作为基础集，29316 条查询向量作为测试集。</li>
+</ul>
+<p><strong>对比基线</strong>：将 SPFresh 与两种基线系统对比：</p>
+<ul>
+<li><strong>DiskANN</strong>：当前最先进的基于磁盘的实时更新 ANNS 系统 [53]，基于图结构 ANNS 索引，采用非原地更新方案。配置与其论文 [53] 保持一致：更新策略为每新增 30M 条向量执行一次轻量级全局图重建（streamingMerge），图度数 R=64，插入候选列表长度 75；搜索策略为默认配置，波束宽度 2，搜索候选列表 L=40，以评测 Recall10@10。</li>
+<li><strong>SPANN+</strong>：SPANN [67] 的改进版本，仅在投递列表内本地追加更新，不执行分裂与重分配，相当于移除本地重建模块的仅追加版 SPFresh。</li>
+</ul>
+<p><strong>实验负载</strong>：实验使用三种负载：</p>
+<ul>
+<li><strong>负载 A</strong>：模拟真实向量更新场景，数据规模为 1 亿条 SPACEV 向量。将规模从 10 亿降至 1 亿，是因为 DiskANN 运行 10 亿级实时更新需要数 TB DRAM（见表 1），超出本机配置。该负载模拟 100 天内每日 1% 的更新率。为保证更新真实性，从 SPACEV1B 中抽取两个不相交的 1 亿条 SPACEV 数据集，一个作为 ANNS 索引基础集，另一个作为更新候选池。每日更新阶段从基础索引随机删除 1% 向量，并从更新池随机选取 1% 向量插入基础索引。</li>
+<li><strong>负载 B</strong>：数据规模与采样方式同负载 A，仅将数据集换为 1 亿条 SIFT 向量。</li>
+<li><strong>负载 C</strong>：将实验数据集扩展至 10 亿级，同时使用 SIFT 与 SPACEV 数据集，旨在对 SPFresh 进行压力测试，更新率同样为每日 1%。</li>
+</ul>
+<p><strong>评估指标</strong>：SPFresh 面向在线 ANNS 流式场景设计，评估聚焦以下四类指标：</p>
+<ul>
+<li><strong>搜索性能</strong>：尾延迟（P90、P95、P99、P99.9）与每秒查询吞吐量（QPS）。SPFresh 与所有基线系统均设置 10ms 硬截断，超时立即终止并返回当前搜索结果。</li>
+<li><strong>搜索精度</strong>：以系统检索到真实最近邻（ground truth）的比例衡量精度。</li>
+<li><strong>更新性能</strong>：向量插入与删除吞吐量。</li>
+<li><strong>资源使用</strong>：内存与 CPU 消耗量。</li>
+</ul>
+<h2>5.2-6</h2>
+<p>略</p>
+<h1>参考文献</h1>
+<p>略</p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
