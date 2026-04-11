@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="<html>
+<body>
+<!--StartFragment--><!-- obsidian --><h1 data-heading='题目描述'>题目描述</h1>
+<p>这是一道偏入门的 CPU 性能优化题。">
+<meta property="og:title" content="GEMM算子的CPU优化">
+<meta property="og:description" content="<html>
+<body>
+<!--StartFragment--><!-- obsidian --><h1 data-heading='题目描述'>题目描述</h1>
+<p>这是一道偏入门的 CPU 性能优化题。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/GEMM-suan-zi-de-CPU-you-hua.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>GEMM算子的CPU优化</title>
+
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">GEMM算子的CPU优化</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/33" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody">
+
+<h1>题目描述</h1>
+<p>这是一道偏入门的 CPU 性能优化题。你将拿到一个使用 C++ 和 Make 构建的小项目，你的任务是在保持结果正确的前提下，对其中的 GEMM 算子进行优化，使程序尽可能快。</p>
+<p>矩阵乘法（GEMM, General Matrix-Matrix Multiplication）是高性能计算中最经典、最重要的基础算子之一。在科学计算、机器学习、图形学以及大量数值程序中，很多更复杂的计算最后都可以转化为矩阵乘法或与矩阵乘法类似的计算。</p>
+<p>其核心计算过程即将输入矩阵的行向量与列向量求内积得到输出矩阵的每一个结果</p>
+<p>本题的核心，就是优化一个标准的 GEMM 算子。你不需要提前掌握很多数学知识，更重要的是理解程序是如何访问内存、如何组织循环，以及为什么某些写法会更快。</p>
+<p>本题实现的是最经典的矩阵乘法加法：</p>
+<pre class="notranslate"><code class="notranslate">C = A * B + C
+</code></pre>
+<p>其中：</p>
+<ul>
+<li><code class="notranslate">A</code> 的形状为 <code class="notranslate">M x K</code></li>
+<li><code class="notranslate">B</code> 的形状为 <code class="notranslate">K x N</code></li>
+<li><code class="notranslate">C</code> 的形状为 <code class="notranslate">M x N</code></li>
+<li>所有矩阵均按 row-major 存储</li>
+<li>数据类型固定为 <code class="notranslate">float</code></li>
+</ul>
+<h2>项目结构</h2>
+<p>代码目录如下：</p>
+<pre class="notranslate"><code class="notranslate">.
+├── data
+│   └── cases.in *
+├── include
+│   └── gemm.h *
+├── Makefile
+├── README.md
+├── run.sh
+└── src
+    ├── gemm.cpp
+    └── main.cpp *
+</code></pre>
+<p>标有星号的文件/文件夹是<strong>不可更改</strong>的。你必须在不修改这些文件的前提下进行优化，保持它们的接口和行为不变。<br>
+其中：</p>
+<ul>
+<li><code class="notranslate">include/gemm.h</code> 声明你需要实现的接口</li>
+<li><code class="notranslate">src/gemm.cpp</code> 是你主要需要优化的文件</li>
+<li><code class="notranslate">src/main.cpp</code> 负责 reference 计算、正确性校验、测速和评分</li>
+<li><code class="notranslate">data/cases.in</code> 是公开测试集<br>
+你可以修改Makefile来改变编译逻辑，但是必须要包含main.cpp和gemm.h以保证逻辑正确<br>
+你也可以修改run.sh来改变环境，但是必须保留原有的运行指令以保证测试正确</li>
+</ul>
+<h2>实现要求</h2>
+<p>你需要实现并优化如下接口：</p>
+<pre class="notranslate"><code class="notranslate">void gemm(const float* A, const float* B, float* C, int M, int N, int K);
+</code></pre>
+<p>要求：</p>
+<ul>
+<li>保持接口不变</li>
+<li>输出结果与参考实现足够接近</li>
+<li>可以任意修改 <code class="notranslate">gemm.cpp</code> 的实现方式</li>
+<li>允许使用多线程、SIMD或你认为合理的其他优化方式, 但<strong>不允许使用已有高性能计算库</strong><br>
+禁止事项：</li>
+<li>不允许修改题目给定的输入规模文件来规避测试</li>
+<li>不允许通过识别特定输入规模或特定数据内容做针对性特化</li>
+<li>不允许提交错误结果或伪造性能数据</li>
+</ul>
+<h2>构建与运行</h2>
+<p>构建：</p>
+<pre class="notranslate"><code class="notranslate">make
+</code></pre>
+<p>读取公开测试集直接运行：</p>
+<pre class="notranslate"><code class="notranslate">./gemm_bench data/cases.in
+</code></pre>
+<p>测试单个 case：</p>
+<pre class="notranslate"><code class="notranslate">./gemm_bench 256 512 256
+</code></pre>
+<h2>评分标准</h2>
+<p>总分为 <code class="notranslate">100</code> 分：</p>
+<ul>
+<li>正确性：<code class="notranslate">20</code> 分</li>
+<li>性能：<code class="notranslate">80</code> 分<br>
+评分方式如下：</li>
+</ul>
+<ol>
+<li>所有公开测试 case 都正确，才能拿到正确性分。</li>
+<li>每个 case 单独计算相对 reference 的加速比。</li>
+<li>不同规模的 case 使用不同的性能阈值。</li>
+<li>每个 case 先得到一个单独的性能分，再按权重汇总为最终的 <code class="notranslate">80</code> 分性能分。<br>
+程序运行时会输出：</li>
+</ol>
+<ul>
+<li>每个 case 的 reference 时间</li>
+<li>每个 case 的实现时间</li>
+<li>每个 case 的加速比</li>
+<li>每个 case 的性能得分</li>
+<li>最终总分</li>
+</ul>
+<h2>提交方式</h2>
+<p>请将你的代码放在名为cpu-gemm的文件夹中并打包为.tar.gz格式提交，我们会通过以下方式运行你的代码：</p>
+<pre class="notranslate"><code class="notranslate">tar -xzf submission.tar.gz
+cd cpu-gemm
+./run.sh
+</code></pre>
+<h2>平台说明</h2>
+<p>测试平台为Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz,你可以使用最多16核的资源。<br>
+我们有足够的时间限制和空间限制，请忽略页面上的时间和空间限制，当然，运行时间过长和内存占用过多会被杀死。</p>
+<h1>原始得分</h1>
+<p>本文采用的测试平台均为： 11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz</p>
+<pre class="notranslate"><code class="notranslate">==&gt; Summary
+cases             : 6
+total ref time    : 31207.638 ms
+total impl time   : 29565.342 ms
+overall speedup   : 1.056x
+correctness score : 20.000 / 20.000
+performance score : 0.964 / 80.000
+total score       : 20.964 / 100.000
+</code></pre>
+<h1>优化1：循环重排</h1>
+<p>在原始代码中，最内层循环是 <span>k</span>。计算 <code class="notranslate">B[k * N + j]</code> 时，<span>k</span> 每增加 1，内存地址就会跳跃 <span>N</span> 个位置。CPU 从内存读取数据时，实际上会一次性读取一整块（Cache Line，通常是 64 字节）到高速缓存中，跳跃访问会导致刚读进缓存的数据还没用完就被丢弃，缓存命中率极低（Cache Thrashing）。<br>
+下图展示了缓存结构，参考下面的命令查看cache相关信息</p>
+<pre class="notranslate"><code class="notranslate">lscpu
+ls /sys/devices/system/cpu/cpu0/cache/
+cat /sys/devices/system/cpu/cpu0/cache/index0/level 
+cat /sys/devices/system/cpu/cpu0/cache/index0/type 
+cat /sys/devices/system/cpu/cpu0/cache/index0/size 
+cat /sys/devices/system/cpu/cpu0/cache/index0/coherency_line_size 
+</code></pre>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260411154654.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260411154654.png" alt="image.png" style="max-width: 100%;"></a><br>
+我们将循环顺序改为 <span>i \rightarrow k \rightarrow j</span>。这样在最内层 <span>j</span> 循环时，<code class="notranslate">C[i * N + j]</code> 和 <code class="notranslate">B[k * N + j]</code> 的内存地址都是<strong>连续</strong>加 1 的。CPU 的预取（Prefetcher）机制会完美生效，大幅减少内存等待时间。<br>
+代码：</p>
+<pre class="notranslate"><code class="notranslate">#include "gemm.h"
+</code><p><code class="notranslate">void gemm(const float* A, const float* B, float* C, int M, int N, int K) {<br>
+for (int i = 0; i &lt; M; ++i) {<br>
+for (int k = 0; k &lt; K; ++k) {<br>
+float a = A[i * K + k];<br>
+for (int j = 0; j &lt; N; ++j) {<br>
+C[i * N + j] += a * B[k * N + j];<br>
+}<br>
+}<br>
+}<br>
+}<br>
+</code></p></pre><p></p>
+<p>得分：</p>
+<pre class="notranslate"><code class="notranslate">==&gt; Summary
+cases             : 6
+total ref time    : 30781.374 ms
+total impl time   : 15831.562 ms
+overall speedup   : 1.944x
+correctness score : 20.000 / 20.000
+performance score : 0.136 / 80.000
+total score       : 20.136 / 100.000
+</code></pre>
+<h1>优化2：分块</h1>
+<p>如果矩阵非常大（比如 <span>4096 \times 4096</span>），当最内层 <span>j</span> 跑完一行时，产生的数据量早已超出了 L1/L2 缓存的容量。等到下一轮 <span>k</span> 循环再去访问 <code class="notranslate">C</code> 的同一行时，它已经被挤出缓存，只能重新去慢速主存（RAM）里捞。</p>
+<p><strong>分块</strong>的思想是：我们不一次性算完一整行，而是把大矩阵切成（比如 <span>128 \times 256</span>）的“小瓷砖”（Tile）。我们保证每次计算的一块子矩阵大小，刚好能完全塞进 L1/L2 缓存里，算完这一块再算下一块。至于分块大小，需要根据CPU对应的缓存大小进行调优。</p>
+<p>先给出实验平台（左）和本地平台（右）的cpu规格</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>参数</th>
+<th>Xeon Gold 6338</th>
+<th>i5-1135G7</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>架构</td>
+<td>Ice Lake (10nm)</td>
+<td>Tiger Lake (10nm SuperFin)</td>
+</tr>
+<tr>
+<td>核心 / 线程</td>
+<td>32 核 / 64 线程</td>
+<td>4 核 / 8 线程</td>
+</tr>
+<tr>
+<td>基频 / 睿频</td>
+<td>2.0 GHz / 3.2 GHzIntel</td>
+<td>2.4 GHz / 4.2 GHzIntel</td>
+</tr>
+<tr>
+<td>L1d / 核</td>
+<td>48 KB</td>
+<td>48 KB</td>
+</tr>
+<tr>
+<td>L2 / 核</td>
+<td>1.25 MB（32 核共 40MB）</td>
+<td>1.25 MB（4 核共 5MB）</td>
+</tr>
+<tr>
+<td>L3</td>
+<td>48 MB（共享）Intel</td>
+<td>8 MB（共享）Intel</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p>初始我们的分块方案采用BM=64；BN=128；BK=64，代码如下：</p>
+<pre class="notranslate"><code class="notranslate">#include "gemm.h"
+#include &lt;algorithm&gt;
+<p>void gemm(const float *A, const float *B, float *C, int M, int N, int K)<br>
+{<br>
+// 定义分块大小（需根据 CPU 的 L1/L2 Cache 大小调优）<br>
+const int BM = 64;<br>
+const int BN = 128;<br>
+const int BK = 64;</p>
+<p>// 外层：遍历块 (Blocks)<br>
+for (int i0 = 0; i0 &lt; M; i0 += BM)<br>
+{<br>
+for (int j0 = 0; j0 &lt; N; j0 += BN)<br>
+{<br>
+for (int k0 = 0; k0 &lt; K; k0 += BK)<br>
+{</p>
+<pre class="notranslate"><code class="notranslate">    // 处理边界情况，防止矩阵维度不是分块大小的整数倍导致越界
+    int i_end = std::min(i0 + BM, M);
+    int j_end = std::min(j0 + BN, N);
+    int k_end = std::min(k0 + BK, K);
+
+    // 这里依然保持 i -&gt; k -&gt; j 的连续访存顺序
+    for (int i = i0; i &amp;#x3C; i_end; ++i)
+    {
+      for (int k = k0; k &amp;#x3C; k_end; ++k)
+      {
+        float a_ik = A[i * K + k];
+        for (int j = j0; j &amp;#x3C; j_end; ++j)
+        {
+          C[i * N + j] += a_ik * B[k * N + j];
+        }
+      }
+    }
+  }
+}
+</code></pre>
+</code><p><code class="notranslate">}<br>
+}<br>
+</code></p></pre><p></p>
+<p>得分：</p>
+<pre class="notranslate"><code class="notranslate">==&gt; Summary
+cases             : 6
+total ref time    : 37113.107 ms
+total impl time   : 12385.678 ms
+overall speedup   : 2.996x
+correctness score : 20.000 / 20.000
+performance score : 0.672 / 80.000
+total score       : 20.672 / 100.000
+</code></pre>
+<p>分块参数调优参考：<br>
+计算一块参与 GEMM 的子矩阵总大小的公式为（单位：字节）：<br>
+<span>Size = (BM \cdot BN + BM \cdot BK + BK \cdot BN) \times 4</span></p>
+<h1>优化3：SIMD</h1>
+<p>传统的标量计算，CPU 每个时钟周期只能执行一次 <code class="notranslate">float</code> 的乘加运算。现代 CPU 内部有很宽的向量寄存器（比如 AVX-512 是 512 位宽），可以<strong>一条指令同时计算 16 个 float 的乘加</strong>。通过 <code class="notranslate">#pragma omp simd</code> 强制告诉编译器同时处理多个 FLOP</p>
+<pre class="notranslate"><code class="notranslate">#include "gemm.h"
+#include &lt;algorithm&gt;
+<p>void gemm(const float *A, const float *B, float *C, int M, int N, int K)<br>
+{<br>
+// 定义分块大小（需根据 CPU 的 L1/L2 Cache 大小调优）<br>
+const int BM = M;<br>
+const int BN = N;<br>
+const int BK = K;</p>
+<p>// 外层：遍历块 (Blocks)<br>
+for (int i0 = 0; i0 &lt; M; i0 += BM)<br>
+{<br>
+for (int j0 = 0; j0 &lt; N; j0 += BN)<br>
+{<br>
+for (int k0 = 0; k0 &lt; K; k0 += BK)<br>
+{</p>
+<pre class="notranslate"><code class="notranslate">    // 处理边界情况，防止矩阵维度不是分块大小的整数倍导致越界
+    int i_end = std::min(i0 + BM, M);
+    int j_end = std::min(j0 + BN, N);
+    int k_end = std::min(k0 + BK, K);
+
+    // 这里依然保持 i -&gt; k -&gt; j 的连续访存顺序
+    for (int i = i0; i &amp;#x3C; i_end; ++i)
+    {
+      for (int k = k0; k &amp;#x3C; k_end; ++k)
+      {
+        float a_ik = A[i * K + k];
+</code></pre>
+</code><p><code class="notranslate">#pragma omp simd<br>
+for (int j = j0; j &lt; j_end; ++j)<br>
+{<br>
+C[i * N + j] += a_ik * B[k * N + j];<br>
+}<br>
+}<br>
+}<br>
+}<br>
+}<br>
+}<br>
+}<br>
+</code></p></pre><p></p>
+<p>此外，在Makefile中需要修改前几行为如下</p>
+<pre class="notranslate"><code class="notranslate">CXX := g++
+COMMON_CXXFLAGS ?= -std=c++17 -g -Wall -Wextra -fopenmp
+MAIN_CXXFLAGS ?= -O0
+GEMM_CXXFLAGS ?= -O3 -march=native
+CPPFLAGS ?=
+<p>TARGET := gemm_bench<br>
+OBJECTS := src/main.o src/gemm.o</p>
+<p>all: $(TARGET)</p>
+<p>$(TARGET): $(OBJECTS)<br>
+$(CXX) $(OBJECTS) -o $(TARGET) $(COMMON_CXXFLAGS)</p>
+<p>src/main.o: src/main.cpp include/gemm.h<br>
+$(CXX) $(CPPFLAGS) $(COMMON_CXXFLAGS) $(MAIN_CXXFLAGS) -I include -c $&lt; -o $@</p>
+<p>src/gemm.o: src/gemm.cpp include/gemm.h<br>
+$(CXX) $(CPPFLAGS) $(COMMON_CXXFLAGS) $(GEMM_CXXFLAGS) -I include -c $&lt; -o $@</p>
+<p>run: $(TARGET)<br>
+./$(TARGET)</p>
+<p>clean:<br>
+rm -f $(TARGET) $(OBJECTS)</p>
+</code><p><code class="notranslate">.PHONY: all run clean<br>
+</code></p></pre><p></p>
+<p>得分：</p>
+<pre class="notranslate"><code class="notranslate">==&gt; Summary
+cases             : 6
+total ref time    : 36410.445 ms
+total impl time   : 808.016 ms
+overall speedup   : 45.062x
+correctness score : 20.000 / 20.000
+performance score : 17.288 / 80.000
+total score       : 37.288 / 100.000
+</code></pre>
+<h1>优化4：多核并行</h1>
+<p>在第二步中，我们已经做了矩阵分块，对于C=A×B+C，最外面的两层循环其实就对应着C矩阵的每一个分块处理，而这些分块之间的计算恰好是独立的，所以可以把每个分块的计算用不同核心并行化。但注意第三层循环的k0不能够加入并行，可以理解成每个分块的计算是第三层循环累加到C的结果，若并行，可能发生数据竞争，如下所示：</p>
+<ul>
+<li><strong>线程 A</strong> 读取了 <span>C_{i,j}</span> 的当前值（假设是 10）。</li>
+<li><strong>线程 B</strong> 也读取了 <span>C_{i,j}</span> 的当前值（也是 10）。</li>
+<li><strong>线程 A</strong> 加上了自己的结果（+5），准备写回 15。</li>
+<li><strong>线程 B</strong> 加上了自己的结果（+2），准备写回 12。</li>
+<li><strong>最终结果</strong>：取决于谁最后写回。如果是 B 最后写，结果就是 12；如果是 A 最后写，就是 15。</li>
+<li><strong>正确结果</strong>：应该是 <span>10 + 5 + 2 = 17</span>。</li>
+</ul>
+<p>此处我们使用openmp做并行化，除了使用常规的parallel for之外，我们还加入了collapse子句，它的作用是将多个的循环“压扁（展平）”成一个巨大的一维循环，然后再把这些任务分给各个线程，若不使用，parallel for只会并行化最外面的一层循环。</p>
+<pre class="notranslate"><code class="notranslate">#include "gemm.h"
+<p>void gemm(const float *A, const float *B, float *C, int M, int N, int K)<br>
+{<br>
+// 定义分块大小（需根据 CPU 的 L1/L2 Cache 大小调优）<br>
+const int BM = 64;<br>
+const int BN = 128;<br>
+const int BK = 64;</p>
+<p>// 外层：遍历块 (Blocks)<br>
+// 开启多线程并行<br>
+// collapse(2) 表示将 i0 和 j0 这两层外循环合并为一个大的任务池进行分配<br>
+// schedule(dynamic) 让计算快的线程主动领新任务，防止各个核心工作量不均<br>
+#pragma omp parallel for collapse(2) schedule(dynamic)<br>
+for (int i0 = 0; i0 &lt; M; i0 += BM)<br>
+{<br>
+for (int j0 = 0; j0 &lt; N; j0 += BN)<br>
+{<br>
+for (int k0 = 0; k0 &lt; K; k0 += BK)<br>
+{</p>
+<pre class="notranslate"><code class="notranslate">    // 处理边界情况，防止矩阵维度不是分块大小的整数倍导致越界
+    int i_end = (i0 + BM &amp;#x3C; M) ? i0 + BM : M;
+    int j_end = (j0 + BN &amp;#x3C; N) ? j0 + BN : N;
+    int k_end = (k0 + BK &amp;#x3C; K) ? k0 + BK : K;
+
+    // 这里依然保持 i -&gt; k -&gt; j 的连续访存顺序
+    for (int i = i0; i &amp;#x3C; i_end; ++i)
+    {
+      for (int k = k0; k &amp;#x3C; k_end; ++k)
+      {
+        float a_ik = A[i * K + k];
+</code></pre>
+</code><p><code class="notranslate">#pragma omp simd<br>
+for (int j = j0; j &lt; j_end; ++j)<br>
+{<br>
+C[i * N + j] += a_ik * B[k * N + j];<br>
+}<br>
+}<br>
+}<br>
+}<br>
+}<br>
+}<br>
+}<br>
+</code></p></pre><p></p>
+<p>得分：</p>
+<pre class="notranslate"><code class="notranslate">==&gt; Summary
+cases             : 6
+total ref time    : 37793.549 ms
+total impl time   : 263.726 ms
+overall speedup   : 143.306x
+correctness score : 20.000 / 20.000
+performance score : 36.292 / 80.000
+total score       : 56.292 / 100.000
+</code></pre>
+<h1>优化5：条件判断</h1>
+<p>跑分时发现小规模矩阵(case1、case2）的性能损失很大，这是因为加入多线程的开销超过了其收益，因此我们在原来基础上加一个阈值判断，若规模很小，无需开启上述优化。</p>
+<pre class="notranslate"><code class="notranslate">#include "gemm.h"
+<p>void gemm(const float *A, const float *B, float *C, int M, int N, int K)<br>
+{<br>
+if (M &lt;= 128 &amp;&amp; N &lt;= 128 &amp;&amp; K &lt;= 128)<br>
+{<br>
+for (int i = 0; i &lt; M; ++i)<br>
+{<br>
+for (int k = 0; k &lt; K; ++k)<br>
+{<br>
+float a_ik = A[i * K + k];<br>
+#pragma omp simd<br>
+for (int j = 0; j &lt; N; ++j)<br>
+{<br>
+C[i * N + j] += a_ik * B[k * N + j];<br>
+}<br>
+}<br>
+}<br>
+return;<br>
+}</p>
+<p>// 定义分块大小（需根据 CPU 的 L1/L2 Cache 大小调优）<br>
+const int BM = 64;<br>
+const int BN = 128;<br>
+const int BK = 64;</p>
+<p>// 外层：遍历块 (Blocks)<br>
+// 开启多线程并行<br>
+// collapse(2) 表示将 i0 和 j0 这两层外循环合并为一个大的任务池进行分配<br>
+// schedule(dynamic) 让计算快的线程主动领新任务，防止各个核心工作量不均<br>
+#pragma omp parallel for collapse(2) schedule(dynamic)<br>
+for (int i0 = 0; i0 &lt; M; i0 += BM)<br>
+{<br>
+for (int j0 = 0; j0 &lt; N; j0 += BN)<br>
+{<br>
+for (int k0 = 0; k0 &lt; K; k0 += BK)<br>
+{</p>
+<pre class="notranslate"><code class="notranslate">    // 处理边界情况，防止矩阵维度不是分块大小的整数倍导致越界
+    int i_end = (i0 + BM &amp;#x3C; M) ? i0 + BM : M;
+    int j_end = (j0 + BN &amp;#x3C; N) ? j0 + BN : N;
+    int k_end = (k0 + BK &amp;#x3C; K) ? k0 + BK : K;
+
+    // 这里依然保持 i -&gt; k -&gt; j 的连续访存顺序
+    for (int i = i0; i &amp;#x3C; i_end; ++i)
+    {
+      for (int k = k0; k &amp;#x3C; k_end; ++k)
+      {
+        float a_ik = A[i * K + k];
+</code></pre>
+</code><p><code class="notranslate">#pragma omp simd<br>
+for (int j = j0; j &lt; j_end; ++j)<br>
+{<br>
+C[i * N + j] += a_ik * B[k * N + j];<br>
+}<br>
+}<br>
+}<br>
+}<br>
+}<br>
+}<br>
+}<br>
+</code></p></pre><p></p>
+<p>得分：</p>
+<pre class="notranslate"><code class="notranslate">==&gt; Summary
+cases             : 6
+total ref time    : 44226.380 ms
+total impl time   : 238.423 ms
+overall speedup   : 185.495x
+correctness score : 20.000 / 20.000
+performance score : 43.767 / 80.000
+total score       : 63.767 / 100.000
+</code></pre>
+<h1>最终得分</h1>
+<p>上述得分测试均是在本地测试环境下测的，把代码上传至实验平台上得分如下：</p>
+
+</div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
