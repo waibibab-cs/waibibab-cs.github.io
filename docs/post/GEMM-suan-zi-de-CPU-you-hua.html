@@ -10,20 +10,16 @@
         let theme = localStorage.getItem("meek_theme") || "light";
         document.documentElement.setAttribute("data-color-mode", theme);
     </script>
-<meta name="description" content="<html>
-<body>
-<!--StartFragment--><!-- obsidian --><h1 data-heading='题目描述'>题目描述</h1>
-<p>这是一道偏入门的 CPU 性能优化题。">
+<meta name="description" content="# 题目描述
+这是一道偏入门的 CPU 性能优化题。">
 <meta property="og:title" content="GEMM算子的CPU优化">
-<meta property="og:description" content="<html>
-<body>
-<!--StartFragment--><!-- obsidian --><h1 data-heading='题目描述'>题目描述</h1>
-<p>这是一道偏入门的 CPU 性能优化题。">
+<meta property="og:description" content="# 题目描述
+这是一道偏入门的 CPU 性能优化题。">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://waibibab-cs.github.io/post/GEMM-suan-zi-de-CPU-you-hua.html">
 <meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
 <title>GEMM算子的CPU优化</title>
-
+<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
 
 
 </head>
@@ -89,15 +85,13 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 </div>
 </div>
     <div id="content">
-<div class="markdown-body" id="postBody">
-
-<h1>题目描述</h1>
+<div class="markdown-body" id="postBody"><h1>题目描述</h1>
 <p>这是一道偏入门的 CPU 性能优化题。你将拿到一个使用 C++ 和 Make 构建的小项目，你的任务是在保持结果正确的前提下，对其中的 GEMM 算子进行优化，使程序尽可能快。</p>
 <p>矩阵乘法（GEMM, General Matrix-Matrix Multiplication）是高性能计算中最经典、最重要的基础算子之一。在科学计算、机器学习、图形学以及大量数值程序中，很多更复杂的计算最后都可以转化为矩阵乘法或与矩阵乘法类似的计算。</p>
 <p>其核心计算过程即将输入矩阵的行向量与列向量求内积得到输出矩阵的每一个结果</p>
 <p>本题的核心，就是优化一个标准的 GEMM 算子。你不需要提前掌握很多数学知识，更重要的是理解程序是如何访问内存、如何组织循环，以及为什么某些写法会更快。</p>
 <p>本题实现的是最经典的矩阵乘法加法：</p>
-<pre class="notranslate"><code class="notranslate">C = A * B + C
+<pre lang="text" class="notranslate"><code class="notranslate">C = A * B + C
 </code></pre>
 <p>其中：</p>
 <ul>
@@ -109,7 +103,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 </ul>
 <h2>项目结构</h2>
 <p>代码目录如下：</p>
-<pre class="notranslate"><code class="notranslate">.
+<pre lang="text" class="notranslate"><code class="notranslate">.
 ├── data
 │   └── cases.in *
 ├── include
@@ -133,8 +127,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 </ul>
 <h2>实现要求</h2>
 <p>你需要实现并优化如下接口：</p>
-<pre class="notranslate"><code class="notranslate">void gemm(const float* A, const float* B, float* C, int M, int N, int K);
-</code></pre>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">void</span> <span class="pl-en">gemm</span>(<span class="pl-k">const</span> <span class="pl-k">float</span>* A, <span class="pl-k">const</span> <span class="pl-k">float</span>* B, <span class="pl-k">float</span>* C, <span class="pl-k">int</span> M, <span class="pl-k">int</span> N, <span class="pl-k">int</span> K);</pre></div>
 <p>要求：</p>
 <ul>
 <li>保持接口不变</li>
@@ -148,14 +141,11 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 </ul>
 <h2>构建与运行</h2>
 <p>构建：</p>
-<pre class="notranslate"><code class="notranslate">make
-</code></pre>
+<div class="highlight highlight-source-shell"><pre class="notranslate">make</pre></div>
 <p>读取公开测试集直接运行：</p>
-<pre class="notranslate"><code class="notranslate">./gemm_bench data/cases.in
-</code></pre>
+<div class="highlight highlight-source-shell"><pre class="notranslate">./gemm_bench data/cases.in</pre></div>
 <p>测试单个 case：</p>
-<pre class="notranslate"><code class="notranslate">./gemm_bench 256 512 256
-</code></pre>
+<div class="highlight highlight-source-shell"><pre class="notranslate">./gemm_bench 256 512 256</pre></div>
 <h2>评分标准</h2>
 <p>总分为 <code class="notranslate">100</code> 分：</p>
 <ul>
@@ -179,365 +169,373 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 </ul>
 <h2>提交方式</h2>
 <p>请将你的代码放在名为cpu-gemm的文件夹中并打包为.tar.gz格式提交，我们会通过以下方式运行你的代码：</p>
-<pre class="notranslate"><code class="notranslate">tar -xzf submission.tar.gz
-cd cpu-gemm
-./run.sh
-</code></pre>
+<div class="highlight highlight-source-shell"><pre class="notranslate">tar -xzf submission.tar.gz
+<span class="pl-c1">cd</span> cpu-gemm
+./run.sh</pre></div>
 <h2>平台说明</h2>
 <p>测试平台为Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz,你可以使用最多16核的资源。<br>
 我们有足够的时间限制和空间限制，请忽略页面上的时间和空间限制，当然，运行时间过长和内存占用过多会被杀死。</p>
 <h1>原始得分</h1>
 <p>本文采用的测试平台均为： 11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz</p>
-<pre class="notranslate"><code class="notranslate">==&gt; Summary
-cases             : 6
-total ref time    : 31207.638 ms
-total impl time   : 29565.342 ms
-overall speedup   : 1.056x
-correctness score : 20.000 / 20.000
-performance score : 0.964 / 80.000
-total score       : 20.964 / 100.000
-</code></pre>
+<div class="highlight highlight-source-shell"><pre class="notranslate">==<span class="pl-k">&gt;</span> Summary
+cases             <span class="pl-c1">:</span> 6
+total ref <span class="pl-k">time</span>    <span class="pl-c1">:</span> 31207.638 ms
+total impl <span class="pl-k">time</span>   <span class="pl-c1">:</span> 29565.342 ms
+overall speedup   <span class="pl-c1">:</span> 1.056x
+correctness score <span class="pl-c1">:</span> 20.000 / 20.000
+performance score <span class="pl-c1">:</span> 0.964 / 80.000
+total score       <span class="pl-c1">:</span> 20.964 / 100.000</pre></div>
 <h1>优化1：循环重排</h1>
-<p>在原始代码中，最内层循环是 <span>k</span>。计算 <code class="notranslate">B[k * N + j]</code> 时，<span>k</span> 每增加 1，内存地址就会跳跃 <span>N</span> 个位置。CPU 从内存读取数据时，实际上会一次性读取一整块（Cache Line，通常是 64 字节）到高速缓存中，跳跃访问会导致刚读进缓存的数据还没用完就被丢弃，缓存命中率极低（Cache Thrashing）。<br>
+<p>在原始代码中，最内层循环是 $k$。计算 <code class="notranslate">B[k * N + j]</code> 时，$k$ 每增加 1，内存地址就会跳跃 $N$ 个位置。CPU 从内存读取数据时，实际上会一次性读取一整块（Cache Line，通常是 64 字节）到高速缓存中，跳跃访问会导致刚读进缓存的数据还没用完就被丢弃，缓存命中率极低（Cache Thrashing）。<br>
 下图展示了缓存结构，参考下面的命令查看cache相关信息</p>
-<pre class="notranslate"><code class="notranslate">lscpu
+<div class="highlight highlight-source-shell"><pre class="notranslate">lscpu
 ls /sys/devices/system/cpu/cpu0/cache/
 cat /sys/devices/system/cpu/cpu0/cache/index0/level 
 cat /sys/devices/system/cpu/cpu0/cache/index0/type 
 cat /sys/devices/system/cpu/cpu0/cache/index0/size 
-cat /sys/devices/system/cpu/cpu0/cache/index0/coherency_line_size 
-</code></pre>
+cat /sys/devices/system/cpu/cpu0/cache/index0/coherency_line_size </pre></div>
 <p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260411154654.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260411154654.png" alt="image.png" style="max-width: 100%;"></a><br>
-我们将循环顺序改为 <span>i \rightarrow k \rightarrow j</span>。这样在最内层 <span>j</span> 循环时，<code class="notranslate">C[i * N + j]</code> 和 <code class="notranslate">B[k * N + j]</code> 的内存地址都是<strong>连续</strong>加 1 的。CPU 的预取（Prefetcher）机制会完美生效，大幅减少内存等待时间。<br>
+我们将循环顺序改为 $i \rightarrow k \rightarrow j$。这样在最内层 $j$ 循环时，<code class="notranslate">C[i * N + j]</code> 和 <code class="notranslate">B[k * N + j]</code> 的内存地址都是<strong>连续</strong>加 1 的。CPU 的预取（Prefetcher）机制会完美生效，大幅减少内存等待时间。<br>
 代码：</p>
-<pre class="notranslate"><code class="notranslate">#include "gemm.h"
-</code><p><code class="notranslate">void gemm(const float* A, const float* B, float* C, int M, int N, int K) {<br>
-for (int i = 0; i &lt; M; ++i) {<br>
-for (int k = 0; k &lt; K; ++k) {<br>
-float a = A[i * K + k];<br>
-for (int j = 0; j &lt; N; ++j) {<br>
-C[i * N + j] += a * B[k * N + j];<br>
-}<br>
-}<br>
-}<br>
-}<br>
-</code></p></pre><p></p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">"</span>gemm.h<span class="pl-pds">"</span></span>
+
+<span class="pl-k">void</span> <span class="pl-en">gemm</span>(<span class="pl-k">const</span> <span class="pl-k">float</span>* A, <span class="pl-k">const</span> <span class="pl-k">float</span>* B, <span class="pl-k">float</span>* C, <span class="pl-k">int</span> M, <span class="pl-k">int</span> N, <span class="pl-k">int</span> K) {
+  <span class="pl-k">for</span> (<span class="pl-k">int</span> i = <span class="pl-c1">0</span>; i &lt; M; ++i) {
+    <span class="pl-k">for</span> (<span class="pl-k">int</span> k = <span class="pl-c1">0</span>; k &lt; K; ++k) {
+      <span class="pl-k">float</span> a = A[i * K + k];
+      <span class="pl-k">for</span> (<span class="pl-k">int</span> j = <span class="pl-c1">0</span>; j &lt; N; ++j) {
+        C[i * N + j] += a * B[k * N + j];
+      }
+    }
+  }
+}</pre></div>
 <p>得分：</p>
-<pre class="notranslate"><code class="notranslate">==&gt; Summary
-cases             : 6
-total ref time    : 30781.374 ms
-total impl time   : 15831.562 ms
-overall speedup   : 1.944x
-correctness score : 20.000 / 20.000
-performance score : 0.136 / 80.000
-total score       : 20.136 / 100.000
-</code></pre>
+<div class="highlight highlight-source-shell"><pre class="notranslate">==<span class="pl-k">&gt;</span> Summary
+cases             <span class="pl-c1">:</span> 6
+total ref <span class="pl-k">time</span>    <span class="pl-c1">:</span> 30781.374 ms
+total impl <span class="pl-k">time</span>   <span class="pl-c1">:</span> 15831.562 ms
+overall speedup   <span class="pl-c1">:</span> 1.944x
+correctness score <span class="pl-c1">:</span> 20.000 / 20.000
+performance score <span class="pl-c1">:</span> 0.136 / 80.000
+total score       <span class="pl-c1">:</span> 20.136 / 100.000</pre></div>
 <h1>优化2：分块</h1>
-<p>如果矩阵非常大（比如 <span>4096 \times 4096</span>），当最内层 <span>j</span> 跑完一行时，产生的数据量早已超出了 L1/L2 缓存的容量。等到下一轮 <span>k</span> 循环再去访问 <code class="notranslate">C</code> 的同一行时，它已经被挤出缓存，只能重新去慢速主存（RAM）里捞。</p>
-<p><strong>分块</strong>的思想是：我们不一次性算完一整行，而是把大矩阵切成（比如 <span>128 \times 256</span>）的“小瓷砖”（Tile）。我们保证每次计算的一块子矩阵大小，刚好能完全塞进 L1/L2 缓存里，算完这一块再算下一块。至于分块大小，需要根据CPU对应的缓存大小进行调优。</p>
+<p>如果矩阵非常大（比如 $4096 \times 4096$），当最内层 $j$ 跑完一行时，产生的数据量早已超出了 L1/L2 缓存的容量。等到下一轮 $k$ 循环再去访问 <code class="notranslate">C</code> 的同一行时，它已经被挤出缓存，只能重新去慢速主存（RAM）里捞。</p>
+<p><strong>分块</strong>的思想是：我们不一次性算完一整行，而是把大矩阵切成（比如 $128 \times 256$）的“小瓷砖”（Tile）。我们保证每次计算的一块子矩阵大小，刚好能完全塞进 L1/L2 缓存里，算完这一块再算下一块。至于分块大小，需要根据CPU对应的缓存大小进行调优。</p>
 <p>先给出实验平台（左）和本地平台（右）的cpu规格</p>
 <markdown-accessiblity-table><table role="table">
 <thead>
 <tr>
-<th>参数</th>
-<th>Xeon Gold 6338</th>
-<th>i5-1135G7</th>
+<th align="left">参数</th>
+<th align="left">**Xeon Gold 6338 **</th>
+<th align="left">**i5-1135G7 **</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>架构</td>
-<td>Ice Lake (10nm)</td>
-<td>Tiger Lake (10nm SuperFin)</td>
+<td align="left"><strong>架构</strong></td>
+<td align="left">Ice Lake (10nm)</td>
+<td align="left">Tiger Lake (10nm SuperFin)</td>
 </tr>
 <tr>
-<td>核心 / 线程</td>
-<td>32 核 / 64 线程</td>
-<td>4 核 / 8 线程</td>
+<td align="left"><strong>核心 / 线程</strong></td>
+<td align="left">32 核 / 64 线程</td>
+<td align="left">4 核 / 8 线程</td>
 </tr>
 <tr>
-<td>基频 / 睿频</td>
-<td>2.0 GHz / 3.2 GHzIntel</td>
-<td>2.4 GHz / 4.2 GHzIntel</td>
+<td align="left"><strong>基频 / 睿频</strong></td>
+<td align="left">2.0 GHz / <strong>3.2 GHz</strong>Intel</td>
+<td align="left">2.4 GHz / 4.2 GHzIntel</td>
 </tr>
 <tr>
-<td>L1d / 核</td>
-<td>48 KB</td>
-<td>48 KB</td>
+<td align="left"><strong>L1d / 核</strong></td>
+<td align="left">48 KB</td>
+<td align="left">48 KB</td>
 </tr>
 <tr>
-<td>L2 / 核</td>
-<td>1.25 MB（32 核共 40MB）</td>
-<td>1.25 MB（4 核共 5MB）</td>
+<td align="left"><strong>L2 / 核</strong></td>
+<td align="left">1.25 MB（32 核共 40MB）</td>
+<td align="left">1.25 MB（4 核共 5MB）</td>
 </tr>
 <tr>
-<td>L3</td>
-<td>48 MB（共享）Intel</td>
-<td>8 MB（共享）Intel</td>
+<td align="left"><strong>L3</strong></td>
+<td align="left">48 MB（共享）Intel</td>
+<td align="left">8 MB（共享）Intel</td>
 </tr>
 </tbody>
 </table></markdown-accessiblity-table>
 <p>初始我们的分块方案采用BM=64；BN=128；BK=64，代码如下：</p>
-<pre class="notranslate"><code class="notranslate">#include "gemm.h"
-#include &lt;algorithm&gt;
-<p>void gemm(const float *A, const float *B, float *C, int M, int N, int K)<br>
-{<br>
-// 定义分块大小（需根据 CPU 的 L1/L2 Cache 大小调优）<br>
-const int BM = 64;<br>
-const int BN = 128;<br>
-const int BK = 64;</p>
-<p>// 外层：遍历块 (Blocks)<br>
-for (int i0 = 0; i0 &lt; M; i0 += BM)<br>
-{<br>
-for (int j0 = 0; j0 &lt; N; j0 += BN)<br>
-{<br>
-for (int k0 = 0; k0 &lt; K; k0 += BK)<br>
-{</p>
-<pre class="notranslate"><code class="notranslate">    // 处理边界情况，防止矩阵维度不是分块大小的整数倍导致越界
-    int i_end = std::min(i0 + BM, M);
-    int j_end = std::min(j0 + BN, N);
-    int k_end = std::min(k0 + BK, K);
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">"</span>gemm.h<span class="pl-pds">"</span></span>
+#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>algorithm<span class="pl-pds">&gt;</span></span>
 
-    // 这里依然保持 i -&gt; k -&gt; j 的连续访存顺序
-    for (int i = i0; i &amp;#x3C; i_end; ++i)
+<span class="pl-k">void</span> <span class="pl-en">gemm</span>(<span class="pl-k">const</span> <span class="pl-k">float</span> *A, <span class="pl-k">const</span> <span class="pl-k">float</span> *B, <span class="pl-k">float</span> *C, <span class="pl-k">int</span> M, <span class="pl-k">int</span> N, <span class="pl-k">int</span> K)
+{
+  <span class="pl-c"><span class="pl-c">//</span> 定义分块大小（需根据 CPU 的 L1/L2 Cache 大小调优）</span>
+  <span class="pl-k">const</span> <span class="pl-k">int</span> BM = <span class="pl-c1">64</span>;
+  <span class="pl-k">const</span> <span class="pl-k">int</span> BN = <span class="pl-c1">128</span>;
+  <span class="pl-k">const</span> <span class="pl-k">int</span> BK = <span class="pl-c1">64</span>;
+
+  <span class="pl-c"><span class="pl-c">//</span> 外层：遍历块 (Blocks)</span>
+  <span class="pl-k">for</span> (<span class="pl-k">int</span> i0 = <span class="pl-c1">0</span>; i0 &lt; M; i0 += BM)
+  {
+    <span class="pl-k">for</span> (<span class="pl-k">int</span> j0 = <span class="pl-c1">0</span>; j0 &lt; N; j0 += BN)
     {
-      for (int k = k0; k &amp;#x3C; k_end; ++k)
+      <span class="pl-k">for</span> (<span class="pl-k">int</span> k0 = <span class="pl-c1">0</span>; k0 &lt; K; k0 += BK)
       {
-        float a_ik = A[i * K + k];
-        for (int j = j0; j &amp;#x3C; j_end; ++j)
+
+        <span class="pl-c"><span class="pl-c">//</span> 处理边界情况，防止矩阵维度不是分块大小的整数倍导致越界</span>
+        <span class="pl-k">int</span> i_end = <span class="pl-c1">std::min</span>(i0 + BM, M);
+        <span class="pl-k">int</span> j_end = <span class="pl-c1">std::min</span>(j0 + BN, N);
+        <span class="pl-k">int</span> k_end = <span class="pl-c1">std::min</span>(k0 + BK, K);
+
+        <span class="pl-c"><span class="pl-c">//</span> 这里依然保持 i -&gt; k -&gt; j 的连续访存顺序</span>
+        <span class="pl-k">for</span> (<span class="pl-k">int</span> i = i0; i &lt; i_end; ++i)
+        {
+          <span class="pl-k">for</span> (<span class="pl-k">int</span> k = k0; k &lt; k_end; ++k)
+          {
+            <span class="pl-k">float</span> a_ik = A[i * K + k];
+            <span class="pl-k">for</span> (<span class="pl-k">int</span> j = j0; j &lt; j_end; ++j)
+            {
+              C[i * N + j] += a_ik * B[k * N + j];
+            }
+          }
+        }
+      }
+    }
+  }
+}</pre></div>
+<p>得分：</p>
+<div class="highlight highlight-source-shell"><pre class="notranslate">==<span class="pl-k">&gt;</span> Summary
+cases             <span class="pl-c1">:</span> 6
+total ref <span class="pl-k">time</span>    <span class="pl-c1">:</span> 37113.107 ms
+total impl <span class="pl-k">time</span>   <span class="pl-c1">:</span> 12385.678 ms
+overall speedup   <span class="pl-c1">:</span> 2.996x
+correctness score <span class="pl-c1">:</span> 20.000 / 20.000
+performance score <span class="pl-c1">:</span> 0.672 / 80.000
+total score       <span class="pl-c1">:</span> 20.672 / 100.000</pre></div>
+<p>分块参数调优参考：<br>
+计算一块参与 GEMM 的子矩阵总大小的公式为（单位：字节）：<br>
+$Size = (BM \cdot BN + BM \cdot BK + BK \cdot BN) \times 4$</p>
+<h1>优化3：SIMD</h1>
+<p>传统的标量计算，CPU 每个时钟周期只能执行一次 <code class="notranslate">float</code> 的乘加运算。现代 CPU 内部有很宽的向量寄存器（比如 AVX-512 是 512 位宽），可以<strong>一条指令同时计算 16 个 float 的乘加</strong>。通过 <code class="notranslate">#pragma omp simd</code> 强制告诉编译器同时处理多个 FLOP</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">"</span>gemm.h<span class="pl-pds">"</span></span>
+#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>algorithm<span class="pl-pds">&gt;</span></span>
+
+<span class="pl-k">void</span> <span class="pl-en">gemm</span>(<span class="pl-k">const</span> <span class="pl-k">float</span> *A, <span class="pl-k">const</span> <span class="pl-k">float</span> *B, <span class="pl-k">float</span> *C, <span class="pl-k">int</span> M, <span class="pl-k">int</span> N, <span class="pl-k">int</span> K)
+{
+  <span class="pl-c"><span class="pl-c">//</span> 定义分块大小（需根据 CPU 的 L1/L2 Cache 大小调优）</span>
+  <span class="pl-k">const</span> <span class="pl-k">int</span> BM = M;
+  <span class="pl-k">const</span> <span class="pl-k">int</span> BN = N;
+  <span class="pl-k">const</span> <span class="pl-k">int</span> BK = K;
+
+  <span class="pl-c"><span class="pl-c">//</span> 外层：遍历块 (Blocks)</span>
+  <span class="pl-k">for</span> (<span class="pl-k">int</span> i0 = <span class="pl-c1">0</span>; i0 &lt; M; i0 += BM)
+  {
+    <span class="pl-k">for</span> (<span class="pl-k">int</span> j0 = <span class="pl-c1">0</span>; j0 &lt; N; j0 += BN)
+    {
+      <span class="pl-k">for</span> (<span class="pl-k">int</span> k0 = <span class="pl-c1">0</span>; k0 &lt; K; k0 += BK)
+      {
+
+        <span class="pl-c"><span class="pl-c">//</span> 处理边界情况，防止矩阵维度不是分块大小的整数倍导致越界</span>
+        <span class="pl-k">int</span> i_end = <span class="pl-c1">std::min</span>(i0 + BM, M);
+        <span class="pl-k">int</span> j_end = <span class="pl-c1">std::min</span>(j0 + BN, N);
+        <span class="pl-k">int</span> k_end = <span class="pl-c1">std::min</span>(k0 + BK, K);
+
+        <span class="pl-c"><span class="pl-c">//</span> 这里依然保持 i -&gt; k -&gt; j 的连续访存顺序</span>
+        <span class="pl-k">for</span> (<span class="pl-k">int</span> i = i0; i &lt; i_end; ++i)
+        {
+          <span class="pl-k">for</span> (<span class="pl-k">int</span> k = k0; k &lt; k_end; ++k)
+          {
+            <span class="pl-k">float</span> a_ik = A[i * K + k];
+#<span class="pl-k">pragma</span> omp simd
+            <span class="pl-k">for</span> (<span class="pl-k">int</span> j = j0; j &lt; j_end; ++j)
+            {
+              C[i * N + j] += a_ik * B[k * N + j];
+            }
+          }
+        }
+      }
+    }
+  }
+}</pre></div>
+<p>此外，在Makefile中需要修改前几行为如下</p>
+<div class="highlight highlight-source-shell"><pre class="notranslate">CXX := g++
+COMMON_CXXFLAGS <span class="pl-k">?</span>= -std=c++17 -g -Wall -Wextra -fopenmp
+MAIN_CXXFLAGS <span class="pl-k">?</span>= -O0
+GEMM_CXXFLAGS <span class="pl-k">?</span>= -O3 -march=native
+CPPFLAGS <span class="pl-k">?</span>=
+
+TARGET := gemm_bench
+OBJECTS := src/main.o src/gemm.o
+
+all: <span class="pl-s"><span class="pl-pds">$(</span>TARGET<span class="pl-pds">)</span></span>
+
+<span class="pl-s"><span class="pl-pds">$(</span>TARGET<span class="pl-pds">)</span></span>: <span class="pl-s"><span class="pl-pds">$(</span>OBJECTS<span class="pl-pds">)</span></span>
+    <span class="pl-s"><span class="pl-pds">$(</span>CXX<span class="pl-pds">)</span></span> <span class="pl-s"><span class="pl-pds">$(</span>OBJECTS<span class="pl-pds">)</span></span> -o <span class="pl-s"><span class="pl-pds">$(</span>TARGET<span class="pl-pds">)</span></span> <span class="pl-s"><span class="pl-pds">$(</span>COMMON_CXXFLAGS<span class="pl-pds">)</span></span>
+
+src/main.o: src/main.cpp include/gemm.h
+    <span class="pl-s"><span class="pl-pds">$(</span>CXX<span class="pl-pds">)</span></span> <span class="pl-s"><span class="pl-pds">$(</span>CPPFLAGS<span class="pl-pds">)</span></span> <span class="pl-s"><span class="pl-pds">$(</span>COMMON_CXXFLAGS<span class="pl-pds">)</span></span> <span class="pl-s"><span class="pl-pds">$(</span>MAIN_CXXFLAGS<span class="pl-pds">)</span></span> -I include -c $<span class="pl-k">&lt;</span> -o <span class="pl-smi">$@</span>
+
+src/gemm.o: src/gemm.cpp include/gemm.h
+    <span class="pl-s"><span class="pl-pds">$(</span>CXX<span class="pl-pds">)</span></span> <span class="pl-s"><span class="pl-pds">$(</span>CPPFLAGS<span class="pl-pds">)</span></span> <span class="pl-s"><span class="pl-pds">$(</span>COMMON_CXXFLAGS<span class="pl-pds">)</span></span> <span class="pl-s"><span class="pl-pds">$(</span>GEMM_CXXFLAGS<span class="pl-pds">)</span></span> -I include -c $<span class="pl-k">&lt;</span> -o <span class="pl-smi">$@</span>
+
+run: <span class="pl-s"><span class="pl-pds">$(</span>TARGET<span class="pl-pds">)</span></span>
+    ./<span class="pl-s"><span class="pl-pds">$(</span>TARGET<span class="pl-pds">)</span></span>
+
+clean:
+    rm -f <span class="pl-s"><span class="pl-pds">$(</span>TARGET<span class="pl-pds">)</span></span> <span class="pl-s"><span class="pl-pds">$(</span>OBJECTS<span class="pl-pds">)</span></span>
+
+.PHONY: all run clean</pre></div>
+<p>得分：</p>
+<div class="highlight highlight-source-shell"><pre class="notranslate">==<span class="pl-k">&gt;</span> Summary
+cases             <span class="pl-c1">:</span> 6
+total ref <span class="pl-k">time</span>    <span class="pl-c1">:</span> 36410.445 ms
+total impl <span class="pl-k">time</span>   <span class="pl-c1">:</span> 808.016 ms
+overall speedup   <span class="pl-c1">:</span> 45.062x
+correctness score <span class="pl-c1">:</span> 20.000 / 20.000
+performance score <span class="pl-c1">:</span> 17.288 / 80.000
+total score       <span class="pl-c1">:</span> 37.288 / 100.000</pre></div>
+<h1>优化4：多核并行</h1>
+<p>在第二步中，我们已经做了矩阵分块，对于C=A×B+C，最外面的两层循环其实就对应着C矩阵的每一个分块处理，而这些分块之间的计算恰好是独立的，所以可以把每个分块的计算用不同核心并行化。但注意第三层循环的k0不能够加入并行，可以理解成每个分块的计算是第三层循环累加到C的结果，若并行，可能发生数据竞争，如下所示：</p>
+<ul>
+<li>
+<strong>线程 A</strong> 读取了 $C_{i,j}$ 的当前值（假设是 10）。</li>
+<li>
+<strong>线程 B</strong> 也读取了 $C_{i,j}$ 的当前值（也是 10）。</li>
+<li>
+<strong>线程 A</strong> 加上了自己的结果（+5），准备写回 15。</li>
+<li>
+<strong>线程 B</strong> 加上了自己的结果（+2），准备写回 12。</li>
+<li>
+<strong>最终结果</strong>：取决于谁最后写回。如果是 B 最后写，结果就是 12；如果是 A 最后写，就是 15。</li>
+<li>
+<strong>正确结果</strong>：应该是 $10 + 5 + 2 = 17$。</li>
+</ul>
+<p>此处我们使用openmp做并行化，除了使用常规的parallel for之外，我们还加入了collapse子句，它的作用是将多个的循环“压扁（展平）”成一个巨大的一维循环，然后再把这些任务分给各个线程，若不使用，parallel for只会并行化最外面的一层循环。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">"</span>gemm.h<span class="pl-pds">"</span></span>
+
+<span class="pl-k">void</span> <span class="pl-en">gemm</span>(<span class="pl-k">const</span> <span class="pl-k">float</span> *A, <span class="pl-k">const</span> <span class="pl-k">float</span> *B, <span class="pl-k">float</span> *C, <span class="pl-k">int</span> M, <span class="pl-k">int</span> N, <span class="pl-k">int</span> K)
+{
+  <span class="pl-c"><span class="pl-c">//</span> 定义分块大小（需根据 CPU 的 L1/L2 Cache 大小调优）</span>
+  <span class="pl-k">const</span> <span class="pl-k">int</span> BM = <span class="pl-c1">64</span>;
+  <span class="pl-k">const</span> <span class="pl-k">int</span> BN = <span class="pl-c1">128</span>;
+  <span class="pl-k">const</span> <span class="pl-k">int</span> BK = <span class="pl-c1">64</span>;
+
+  <span class="pl-c"><span class="pl-c">//</span> 外层：遍历块 (Blocks)</span>
+  <span class="pl-c"><span class="pl-c">//</span> 开启多线程并行</span>
+  <span class="pl-c"><span class="pl-c">//</span> collapse(2) 表示将 i0 和 j0 这两层外循环合并为一个大的任务池进行分配</span>
+  <span class="pl-c"><span class="pl-c">//</span> schedule(dynamic) 让计算快的线程主动领新任务，防止各个核心工作量不均</span>
+#<span class="pl-k">pragma</span> omp parallel for collapse(2) schedule(dynamic)
+  <span class="pl-k">for</span> (<span class="pl-k">int</span> i0 = <span class="pl-c1">0</span>; i0 &lt; M; i0 += BM)
+  {
+    <span class="pl-k">for</span> (<span class="pl-k">int</span> j0 = <span class="pl-c1">0</span>; j0 &lt; N; j0 += BN)
+    {
+      <span class="pl-k">for</span> (<span class="pl-k">int</span> k0 = <span class="pl-c1">0</span>; k0 &lt; K; k0 += BK)
+      {
+
+        <span class="pl-c"><span class="pl-c">//</span> 处理边界情况，防止矩阵维度不是分块大小的整数倍导致越界</span>
+        <span class="pl-k">int</span> i_end = (i0 + BM &lt; M) ? i0 + BM : M;
+        <span class="pl-k">int</span> j_end = (j0 + BN &lt; N) ? j0 + BN : N;
+        <span class="pl-k">int</span> k_end = (k0 + BK &lt; K) ? k0 + BK : K;
+
+        <span class="pl-c"><span class="pl-c">//</span> 这里依然保持 i -&gt; k -&gt; j 的连续访存顺序</span>
+        <span class="pl-k">for</span> (<span class="pl-k">int</span> i = i0; i &lt; i_end; ++i)
+        {
+          <span class="pl-k">for</span> (<span class="pl-k">int</span> k = k0; k &lt; k_end; ++k)
+          {
+            <span class="pl-k">float</span> a_ik = A[i * K + k];
+#<span class="pl-k">pragma</span> omp simd
+            <span class="pl-k">for</span> (<span class="pl-k">int</span> j = j0; j &lt; j_end; ++j)
+            {
+              C[i * N + j] += a_ik * B[k * N + j];
+            }
+          }
+        }
+      }
+    }
+  }
+}</pre></div>
+<p>得分：</p>
+<div class="highlight highlight-source-shell"><pre class="notranslate">==<span class="pl-k">&gt;</span> Summary
+cases             <span class="pl-c1">:</span> 6
+total ref <span class="pl-k">time</span>    <span class="pl-c1">:</span> 37793.549 ms
+total impl <span class="pl-k">time</span>   <span class="pl-c1">:</span> 263.726 ms
+overall speedup   <span class="pl-c1">:</span> 143.306x
+correctness score <span class="pl-c1">:</span> 20.000 / 20.000
+performance score <span class="pl-c1">:</span> 36.292 / 80.000
+total score       <span class="pl-c1">:</span> 56.292 / 100.000</pre></div>
+<h1>优化5：条件判断</h1>
+<p>跑分时发现小规模矩阵(case1、case2）的性能损失很大，这是因为加入多线程的开销超过了其收益，因此我们在原来基础上加一个阈值判断，若规模很小，无需开启上述优化。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">"</span>gemm.h<span class="pl-pds">"</span></span>
+
+<span class="pl-k">void</span> <span class="pl-en">gemm</span>(<span class="pl-k">const</span> <span class="pl-k">float</span> *A, <span class="pl-k">const</span> <span class="pl-k">float</span> *B, <span class="pl-k">float</span> *C, <span class="pl-k">int</span> M, <span class="pl-k">int</span> N, <span class="pl-k">int</span> K)
+{
+  <span class="pl-k">if</span> (M &lt;= <span class="pl-c1">128</span> &amp;&amp; N &lt;= <span class="pl-c1">128</span> &amp;&amp; K &lt;= <span class="pl-c1">128</span>)
+  {
+    <span class="pl-k">for</span> (<span class="pl-k">int</span> i = <span class="pl-c1">0</span>; i &lt; M; ++i)
+    {
+      <span class="pl-k">for</span> (<span class="pl-k">int</span> k = <span class="pl-c1">0</span>; k &lt; K; ++k)
+      {
+        <span class="pl-k">float</span> a_ik = A[i * K + k];
+#<span class="pl-k">pragma</span> omp simd
+        <span class="pl-k">for</span> (<span class="pl-k">int</span> j = <span class="pl-c1">0</span>; j &lt; N; ++j)
         {
           C[i * N + j] += a_ik * B[k * N + j];
         }
       }
     }
+    <span class="pl-k">return</span>;
   }
-}
-</code></pre>
-</code><p><code class="notranslate">}<br>
-}<br>
-</code></p></pre><p></p>
-<p>得分：</p>
-<pre class="notranslate"><code class="notranslate">==&gt; Summary
-cases             : 6
-total ref time    : 37113.107 ms
-total impl time   : 12385.678 ms
-overall speedup   : 2.996x
-correctness score : 20.000 / 20.000
-performance score : 0.672 / 80.000
-total score       : 20.672 / 100.000
-</code></pre>
-<p>分块参数调优参考：<br>
-计算一块参与 GEMM 的子矩阵总大小的公式为（单位：字节）：<br>
-<span>Size = (BM \cdot BN + BM \cdot BK + BK \cdot BN) \times 4</span></p>
-<h1>优化3：SIMD</h1>
-<p>传统的标量计算，CPU 每个时钟周期只能执行一次 <code class="notranslate">float</code> 的乘加运算。现代 CPU 内部有很宽的向量寄存器（比如 AVX-512 是 512 位宽），可以<strong>一条指令同时计算 16 个 float 的乘加</strong>。通过 <code class="notranslate">#pragma omp simd</code> 强制告诉编译器同时处理多个 FLOP</p>
-<pre class="notranslate"><code class="notranslate">#include "gemm.h"
-#include &lt;algorithm&gt;
-<p>void gemm(const float *A, const float *B, float *C, int M, int N, int K)<br>
-{<br>
-// 定义分块大小（需根据 CPU 的 L1/L2 Cache 大小调优）<br>
-const int BM = M;<br>
-const int BN = N;<br>
-const int BK = K;</p>
-<p>// 外层：遍历块 (Blocks)<br>
-for (int i0 = 0; i0 &lt; M; i0 += BM)<br>
-{<br>
-for (int j0 = 0; j0 &lt; N; j0 += BN)<br>
-{<br>
-for (int k0 = 0; k0 &lt; K; k0 += BK)<br>
-{</p>
-<pre class="notranslate"><code class="notranslate">    // 处理边界情况，防止矩阵维度不是分块大小的整数倍导致越界
-    int i_end = std::min(i0 + BM, M);
-    int j_end = std::min(j0 + BN, N);
-    int k_end = std::min(k0 + BK, K);
 
-    // 这里依然保持 i -&gt; k -&gt; j 的连续访存顺序
-    for (int i = i0; i &amp;#x3C; i_end; ++i)
-    {
-      for (int k = k0; k &amp;#x3C; k_end; ++k)
-      {
-        float a_ik = A[i * K + k];
-</code></pre>
-</code><p><code class="notranslate">#pragma omp simd<br>
-for (int j = j0; j &lt; j_end; ++j)<br>
-{<br>
-C[i * N + j] += a_ik * B[k * N + j];<br>
-}<br>
-}<br>
-}<br>
-}<br>
-}<br>
-}<br>
-}<br>
-</code></p></pre><p></p>
-<p>此外，在Makefile中需要修改前几行为如下</p>
-<pre class="notranslate"><code class="notranslate">CXX := g++
-COMMON_CXXFLAGS ?= -std=c++17 -g -Wall -Wextra -fopenmp
-MAIN_CXXFLAGS ?= -O0
-GEMM_CXXFLAGS ?= -O3 -march=native
-CPPFLAGS ?=
-<p>TARGET := gemm_bench<br>
-OBJECTS := src/main.o src/gemm.o</p>
-<p>all: $(TARGET)</p>
-<p>$(TARGET): $(OBJECTS)<br>
-$(CXX) $(OBJECTS) -o $(TARGET) $(COMMON_CXXFLAGS)</p>
-<p>src/main.o: src/main.cpp include/gemm.h<br>
-$(CXX) $(CPPFLAGS) $(COMMON_CXXFLAGS) $(MAIN_CXXFLAGS) -I include -c $&lt; -o $@</p>
-<p>src/gemm.o: src/gemm.cpp include/gemm.h<br>
-$(CXX) $(CPPFLAGS) $(COMMON_CXXFLAGS) $(GEMM_CXXFLAGS) -I include -c $&lt; -o $@</p>
-<p>run: $(TARGET)<br>
-./$(TARGET)</p>
-<p>clean:<br>
-rm -f $(TARGET) $(OBJECTS)</p>
-</code><p><code class="notranslate">.PHONY: all run clean<br>
-</code></p></pre><p></p>
-<p>得分：</p>
-<pre class="notranslate"><code class="notranslate">==&gt; Summary
-cases             : 6
-total ref time    : 36410.445 ms
-total impl time   : 808.016 ms
-overall speedup   : 45.062x
-correctness score : 20.000 / 20.000
-performance score : 17.288 / 80.000
-total score       : 37.288 / 100.000
-</code></pre>
-<h1>优化4：多核并行</h1>
-<p>在第二步中，我们已经做了矩阵分块，对于C=A×B+C，最外面的两层循环其实就对应着C矩阵的每一个分块处理，而这些分块之间的计算恰好是独立的，所以可以把每个分块的计算用不同核心并行化。但注意第三层循环的k0不能够加入并行，可以理解成每个分块的计算是第三层循环累加到C的结果，若并行，可能发生数据竞争，如下所示：</p>
-<ul>
-<li><strong>线程 A</strong> 读取了 <span>C_{i,j}</span> 的当前值（假设是 10）。</li>
-<li><strong>线程 B</strong> 也读取了 <span>C_{i,j}</span> 的当前值（也是 10）。</li>
-<li><strong>线程 A</strong> 加上了自己的结果（+5），准备写回 15。</li>
-<li><strong>线程 B</strong> 加上了自己的结果（+2），准备写回 12。</li>
-<li><strong>最终结果</strong>：取决于谁最后写回。如果是 B 最后写，结果就是 12；如果是 A 最后写，就是 15。</li>
-<li><strong>正确结果</strong>：应该是 <span>10 + 5 + 2 = 17</span>。</li>
-</ul>
-<p>此处我们使用openmp做并行化，除了使用常规的parallel for之外，我们还加入了collapse子句，它的作用是将多个的循环“压扁（展平）”成一个巨大的一维循环，然后再把这些任务分给各个线程，若不使用，parallel for只会并行化最外面的一层循环。</p>
-<pre class="notranslate"><code class="notranslate">#include "gemm.h"
-<p>void gemm(const float *A, const float *B, float *C, int M, int N, int K)<br>
-{<br>
-// 定义分块大小（需根据 CPU 的 L1/L2 Cache 大小调优）<br>
-const int BM = 64;<br>
-const int BN = 128;<br>
-const int BK = 64;</p>
-<p>// 外层：遍历块 (Blocks)<br>
-// 开启多线程并行<br>
-// collapse(2) 表示将 i0 和 j0 这两层外循环合并为一个大的任务池进行分配<br>
-// schedule(dynamic) 让计算快的线程主动领新任务，防止各个核心工作量不均<br>
-#pragma omp parallel for collapse(2) schedule(dynamic)<br>
-for (int i0 = 0; i0 &lt; M; i0 += BM)<br>
-{<br>
-for (int j0 = 0; j0 &lt; N; j0 += BN)<br>
-{<br>
-for (int k0 = 0; k0 &lt; K; k0 += BK)<br>
-{</p>
-<pre class="notranslate"><code class="notranslate">    // 处理边界情况，防止矩阵维度不是分块大小的整数倍导致越界
-    int i_end = (i0 + BM &amp;#x3C; M) ? i0 + BM : M;
-    int j_end = (j0 + BN &amp;#x3C; N) ? j0 + BN : N;
-    int k_end = (k0 + BK &amp;#x3C; K) ? k0 + BK : K;
+  <span class="pl-c"><span class="pl-c">//</span> 定义分块大小（需根据 CPU 的 L1/L2 Cache 大小调优）</span>
+  <span class="pl-k">const</span> <span class="pl-k">int</span> BM = <span class="pl-c1">64</span>;
+  <span class="pl-k">const</span> <span class="pl-k">int</span> BN = <span class="pl-c1">128</span>;
+  <span class="pl-k">const</span> <span class="pl-k">int</span> BK = <span class="pl-c1">64</span>;
 
-    // 这里依然保持 i -&gt; k -&gt; j 的连续访存顺序
-    for (int i = i0; i &amp;#x3C; i_end; ++i)
+  <span class="pl-c"><span class="pl-c">//</span> 外层：遍历块 (Blocks)</span>
+  <span class="pl-c"><span class="pl-c">//</span> 开启多线程并行</span>
+  <span class="pl-c"><span class="pl-c">//</span> collapse(2) 表示将 i0 和 j0 这两层外循环合并为一个大的任务池进行分配</span>
+  <span class="pl-c"><span class="pl-c">//</span> schedule(dynamic) 让计算快的线程主动领新任务，防止各个核心工作量不均</span>
+#<span class="pl-k">pragma</span> omp parallel for collapse(2) schedule(dynamic)
+  <span class="pl-k">for</span> (<span class="pl-k">int</span> i0 = <span class="pl-c1">0</span>; i0 &lt; M; i0 += BM)
+  {
+    <span class="pl-k">for</span> (<span class="pl-k">int</span> j0 = <span class="pl-c1">0</span>; j0 &lt; N; j0 += BN)
     {
-      for (int k = k0; k &amp;#x3C; k_end; ++k)
+      <span class="pl-k">for</span> (<span class="pl-k">int</span> k0 = <span class="pl-c1">0</span>; k0 &lt; K; k0 += BK)
       {
-        float a_ik = A[i * K + k];
-</code></pre>
-</code><p><code class="notranslate">#pragma omp simd<br>
-for (int j = j0; j &lt; j_end; ++j)<br>
-{<br>
-C[i * N + j] += a_ik * B[k * N + j];<br>
-}<br>
-}<br>
-}<br>
-}<br>
-}<br>
-}<br>
-}<br>
-</code></p></pre><p></p>
-<p>得分：</p>
-<pre class="notranslate"><code class="notranslate">==&gt; Summary
-cases             : 6
-total ref time    : 37793.549 ms
-total impl time   : 263.726 ms
-overall speedup   : 143.306x
-correctness score : 20.000 / 20.000
-performance score : 36.292 / 80.000
-total score       : 56.292 / 100.000
-</code></pre>
-<h1>优化5：条件判断</h1>
-<p>跑分时发现小规模矩阵(case1、case2）的性能损失很大，这是因为加入多线程的开销超过了其收益，因此我们在原来基础上加一个阈值判断，若规模很小，无需开启上述优化。</p>
-<pre class="notranslate"><code class="notranslate">#include "gemm.h"
-<p>void gemm(const float *A, const float *B, float *C, int M, int N, int K)<br>
-{<br>
-if (M &lt;= 128 &amp;&amp; N &lt;= 128 &amp;&amp; K &lt;= 128)<br>
-{<br>
-for (int i = 0; i &lt; M; ++i)<br>
-{<br>
-for (int k = 0; k &lt; K; ++k)<br>
-{<br>
-float a_ik = A[i * K + k];<br>
-#pragma omp simd<br>
-for (int j = 0; j &lt; N; ++j)<br>
-{<br>
-C[i * N + j] += a_ik * B[k * N + j];<br>
-}<br>
-}<br>
-}<br>
-return;<br>
-}</p>
-<p>// 定义分块大小（需根据 CPU 的 L1/L2 Cache 大小调优）<br>
-const int BM = 64;<br>
-const int BN = 128;<br>
-const int BK = 64;</p>
-<p>// 外层：遍历块 (Blocks)<br>
-// 开启多线程并行<br>
-// collapse(2) 表示将 i0 和 j0 这两层外循环合并为一个大的任务池进行分配<br>
-// schedule(dynamic) 让计算快的线程主动领新任务，防止各个核心工作量不均<br>
-#pragma omp parallel for collapse(2) schedule(dynamic)<br>
-for (int i0 = 0; i0 &lt; M; i0 += BM)<br>
-{<br>
-for (int j0 = 0; j0 &lt; N; j0 += BN)<br>
-{<br>
-for (int k0 = 0; k0 &lt; K; k0 += BK)<br>
-{</p>
-<pre class="notranslate"><code class="notranslate">    // 处理边界情况，防止矩阵维度不是分块大小的整数倍导致越界
-    int i_end = (i0 + BM &amp;#x3C; M) ? i0 + BM : M;
-    int j_end = (j0 + BN &amp;#x3C; N) ? j0 + BN : N;
-    int k_end = (k0 + BK &amp;#x3C; K) ? k0 + BK : K;
 
-    // 这里依然保持 i -&gt; k -&gt; j 的连续访存顺序
-    for (int i = i0; i &amp;#x3C; i_end; ++i)
-    {
-      for (int k = k0; k &amp;#x3C; k_end; ++k)
-      {
-        float a_ik = A[i * K + k];
-</code></pre>
-</code><p><code class="notranslate">#pragma omp simd<br>
-for (int j = j0; j &lt; j_end; ++j)<br>
-{<br>
-C[i * N + j] += a_ik * B[k * N + j];<br>
-}<br>
-}<br>
-}<br>
-}<br>
-}<br>
-}<br>
-}<br>
-</code></p></pre><p></p>
+        <span class="pl-c"><span class="pl-c">//</span> 处理边界情况，防止矩阵维度不是分块大小的整数倍导致越界</span>
+        <span class="pl-k">int</span> i_end = (i0 + BM &lt; M) ? i0 + BM : M;
+        <span class="pl-k">int</span> j_end = (j0 + BN &lt; N) ? j0 + BN : N;
+        <span class="pl-k">int</span> k_end = (k0 + BK &lt; K) ? k0 + BK : K;
+
+        <span class="pl-c"><span class="pl-c">//</span> 这里依然保持 i -&gt; k -&gt; j 的连续访存顺序</span>
+        <span class="pl-k">for</span> (<span class="pl-k">int</span> i = i0; i &lt; i_end; ++i)
+        {
+          <span class="pl-k">for</span> (<span class="pl-k">int</span> k = k0; k &lt; k_end; ++k)
+          {
+            <span class="pl-k">float</span> a_ik = A[i * K + k];
+#<span class="pl-k">pragma</span> omp simd
+            <span class="pl-k">for</span> (<span class="pl-k">int</span> j = j0; j &lt; j_end; ++j)
+            {
+              C[i * N + j] += a_ik * B[k * N + j];
+            }
+          }
+        }
+      }
+    }
+  }
+}</pre></div>
 <p>得分：</p>
-<pre class="notranslate"><code class="notranslate">==&gt; Summary
-cases             : 6
-total ref time    : 44226.380 ms
-total impl time   : 238.423 ms
-overall speedup   : 185.495x
-correctness score : 20.000 / 20.000
-performance score : 43.767 / 80.000
-total score       : 63.767 / 100.000
-</code></pre>
+<div class="highlight highlight-source-shell"><pre class="notranslate">==<span class="pl-k">&gt;</span> Summary
+cases             <span class="pl-c1">:</span> 6
+total ref <span class="pl-k">time</span>    <span class="pl-c1">:</span> 44226.380 ms
+total impl <span class="pl-k">time</span>   <span class="pl-c1">:</span> 238.423 ms
+overall speedup   <span class="pl-c1">:</span> 185.495x
+correctness score <span class="pl-c1">:</span> 20.000 / 20.000
+performance score <span class="pl-c1">:</span> 43.767 / 80.000
+total score       <span class="pl-c1">:</span> 63.767 / 100.000</pre></div>
 <h1>最终得分</h1>
-<p>上述得分测试均是在本地测试环境（11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz）下测的，把代码上传至实验平台（Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz）上得分如下：</p>
-
-</div>
+<p>上述得分测试均是在本地测试环境（11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz）下测的，把代码上传至实验平台（Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz）上得分如下：</p></div>
 <div style="font-size:small;margin-top:8px;float:right;"></div>
 
 <button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
@@ -702,6 +700,6 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 </script>
-<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script><script>MathJax = {tex: {inlineMath: [["$", "$"]]}};</script><script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 
 </html>
