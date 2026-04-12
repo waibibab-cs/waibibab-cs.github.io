@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="这是一道偏入门的 GPU CUDA 性能优化题。">
+<meta property="og:title" content="CUDA算子优化：向量加、Stencil计算、reduce">
+<meta property="og:description" content="这是一道偏入门的 GPU CUDA 性能优化题。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/CUDA-suan-zi-you-hua-%EF%BC%9A-xiang-liang-jia-%E3%80%81Stencil-ji-suan-%E3%80%81reduce.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>CUDA算子优化：向量加、Stencil计算、reduce</title>
+<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">CUDA算子优化：向量加、Stencil计算、reduce</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/34" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>这是一道偏入门的 GPU CUDA 性能优化题。你将拿到一个使用 CUDA 和 nvcc 构建的小项目，你的任务是在保持结果正确的前提下，对其中的三个基础算子进行优化，使程序尽可能快。</p>
+<h1>题目简介</h1>
+<p>向量加法、Stencil计算和归约求和是高性能计算中最经典、最重要的基础算子之一。在科学计算、机器学习、图像处理以及大量数值程序中，这些基础算子被广泛地使用。</p>
+<p>本题的核心，就是使用 CUDA 优化三个基础算子：</p>
+<ol>
+<li>
+<p><strong>向量加法 (add)</strong>：将两个输入向量逐元素相加得到输出向量</p>
+<pre class="notranslate"><code class="notranslate">C[i] = A[i] + B[i]
+</code></pre>
+</li>
+<li>
+<p><strong>一维 Stencil 计算 (stencil)</strong>：对输入向量的每个元素，计算其邻域内元素的和</p>
+<pre class="notranslate"><code class="notranslate">C[i] = sum(A[i - radius + 1] ... A[i] ... A[i + radius - 1])
+</code></pre>
+</li>
+<li>
+<p><strong>归约求和 (reduce)</strong>：将输入向量的所有元素求和，输出一个标量</p>
+<pre class="notranslate"><code class="notranslate">C[0] = sum(A[0] + A[1] + ... + A[N-1])
+</code></pre>
+</li>
+</ol>
+<p>你不需要提前掌握很多数学知识，更重要的是理解 CUDA 编程模型、GPU 内存层次结构（共享内存、全局内存等）、线程组织方式，以及为什么某些写法会更快。</p>
+<p>其中：</p>
+<ul>
+<li>所有向量长度均为 <code class="notranslate">N</code></li>
+<li>数据类型固定为 <code class="notranslate">double</code></li>
+<li>数据存储在 GPU 显存中</li>
+</ul>
+<h2>项目结构</h2>
+<p>代码目录如下：</p>
+<pre lang="text" class="notranslate"><code class="notranslate">.
+├── data
+│   └── cases.in
+├── include
+│   └── operators.h
+├── Makefile
+├── README.md
+├── run.sh
+└── src
+    ├── main.cpp
+    └── operators.cu
+</code></pre>
+<p>你<strong>只能</strong>修改 <code class="notranslate">src/operators.cu</code> 来实现和优化三个算子，请勿修改其他文件。</p>
+<p>其中：</p>
+<ul>
+<li><code class="notranslate">include/operators.h</code> 声明你需要实现的接口</li>
+<li><code class="notranslate">src/operators.cu</code> 是你需要优化的文件</li>
+<li><code class="notranslate">src/main.cpp</code> 负责 reference 计算、正确性校验、测速和评分</li>
+<li><code class="notranslate">data/cases.in</code> 是公开测试集</li>
+</ul>
+<h2>实现要求</h2>
+<p>你需要实现并优化如下接口：</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">void</span> <span class="pl-en">add</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">const</span> <span class="pl-k">double</span> *B, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N);
+<span class="pl-k">void</span> <span class="pl-en">stencil</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N, <span class="pl-k">int</span> radius);
+<span class="pl-k">void</span> <span class="pl-en">reduce</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N);</pre></div>
+<p>要求：</p>
+<ul>
+<li>保持接口不变</li>
+<li>输出结果与参考实现平均误差小于1e-3</li>
+<li>可以任意修改 <code class="notranslate">operators.cu</code> 的实现方式</li>
+<li>允许使用 CUDA 的各种优化技术（共享内存、寄存器优化、合并内存访问、warp 级原语等），但<strong>不允许使用 cuBLAS、Thrust 等已有高性能计算库</strong></li>
+</ul>
+<p>禁止事项：</p>
+<ul>
+<li>不允许修改题目给定的输入规模文件来规避测试</li>
+<li>不允许通过识别特定输入规模或特定数据内容做针对性特化</li>
+<li>不允许提交错误结果或伪造性能数据</li>
+</ul>
+<h2>构建与运行</h2>
+<p>构建：</p>
+<div class="highlight highlight-source-shell"><pre class="notranslate">make</pre></div>
+<p>读取公开测试集直接运行：</p>
+<div class="highlight highlight-source-shell"><pre class="notranslate">./operators_bench data/cases.in</pre></div>
+<h2>评分标准</h2>
+<p>总分为 <code class="notranslate">100</code> 分：</p>
+<ul>
+<li>正确性：<code class="notranslate">30</code> 分</li>
+<li>性能：<code class="notranslate">70</code> 分</li>
+</ul>
+<p>评分方式如下：</p>
+<ol>
+<li>每个 case 每个算子正确，都可以拿到部分正确性分。</li>
+<li>每个 case 单独计算三个算子相对 reference 的加速比。</li>
+<li>不同规模的 case 使用不同的性能阈值。</li>
+<li>每个 case 先得到一个单独的性能分（add 占 30 分，stencil 占 30 分，reduce 占 40 分），再按权重为最终的 <code class="notranslate">100</code> 分性能分。</li>
+</ol>
+<p>程序运行时会输出：</p>
+<ul>
+<li>每个 case 的 reference 时间</li>
+<li>每个 case 的实现时间</li>
+<li>每个 case 的加速比</li>
+<li>每个 case 的性能得分</li>
+<li>最终总分</li>
+</ul>
+<h2>提交方式</h2>
+<p>请将你<code class="notranslate">operators.cu</code>直接提交，我们会通过<code class="notranslate">run.sh</code>运行你的代码。</p>
+<h2>平台说明</h2>
+<p>我们的测试平台是NVIDIA L40 48G。</p>
+<p>你可以充分利用 GPU 的并行计算能力进行优化。但是运行时间超过 baseline 的提交会被杀死，显存占用过多的提交也会被杀死。</p>
+<h1>向量加法</h1>
+<h2>基础写法</h2>
+<p>首先是 CUDA 编程最直觉的写法：<strong>让 GPU 上的每一个线程负责计算数组中的一个元素</strong></p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__global__
+<span class="pl-k">void</span> <span class="pl-en">addKernel</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">const</span> <span class="pl-k">double</span> *B, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N) {
+    <span class="pl-k">int</span> i = blockIdx.<span class="pl-smi">x</span> * blockDim.<span class="pl-smi">x</span> + threadIdx.<span class="pl-smi">x</span>;
+    <span class="pl-k">if</span> (i &lt; N) {
+        C[i] = A[i] + B[i];
+    }
+}
+
+<span class="pl-k">void</span> <span class="pl-en">add</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">const</span> <span class="pl-k">double</span> *B, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N) {
+    addKernel&lt;&lt;&lt;(N + <span class="pl-c1">255</span>) / <span class="pl-c1">256</span>, <span class="pl-c1">256</span>&gt;&gt;&gt;(A, B, C, N);
+    <span class="pl-c1">cudaDeviceSynchronize</span>();
+}</pre></div>
+<p>此处设定每个线程块有256个线程</p>
+<h2>优化1：网格跨步循环</h2>
+<p>当数据量 $N$ 极其巨大（比如十亿级别）时，基础写法会启动成百上千万个 Block。虽然 GPU 支持庞大的 Grid，但过多的 Block 会增加调度开销。更专业的写法是<strong>网格跨步循环</strong>。</p>
+<ul>
+<li><strong>解耦网格大小与数据大小</strong>：我们不再为每个元素分配一个线程，而是启动一个<strong>固定大小的 Grid</strong>（通常正好能填满 GPU 的所有流多处理器 SM 即可）。</li>
+<li><strong>跨步处理</strong>：每个线程处理完一个元素后，它会向前跳跃一个“整个 Grid 的跨度（Stride）”，去处理下一个元素，直到处理完整个数组。</li>
+</ul>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__global__
+<span class="pl-k">void</span> <span class="pl-en">addKernel</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">const</span> <span class="pl-k">double</span> *B, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N) {
+    <span class="pl-c"><span class="pl-c">//</span> 获取当前线程的起始索引</span>
+    <span class="pl-k">int</span> i = blockIdx.<span class="pl-smi">x</span> * blockDim.<span class="pl-smi">x</span> + threadIdx.<span class="pl-smi">x</span>;
+    <span class="pl-c"><span class="pl-c">//</span> 获取整个网格的总线程数作为跨度 (Stride)</span>
+    <span class="pl-k">int</span> stride = blockDim.<span class="pl-smi">x</span> * gridDim.<span class="pl-smi">x</span>;
+
+    <span class="pl-c"><span class="pl-c">//</span> 线程通过循环处理多个元素，每次跳跃 stride 个位置</span>
+    <span class="pl-k">for</span> (; i &lt; N; i += stride) {
+        C[i] = A[i] + B[i];
+    }
+}
+
+<span class="pl-c"><span class="pl-c">//</span> Host 端接口</span>
+<span class="pl-k">void</span> <span class="pl-en">add</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">const</span> <span class="pl-k">double</span> *B, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N) {
+    <span class="pl-k">int</span> blockSize = <span class="pl-c1">256</span>;
+    <span class="pl-c"><span class="pl-c">//</span> NVIDIA L40 有 142 个 SM，每个 SM 驻留几个 Block 就能跑满</span>
+    <span class="pl-c"><span class="pl-c">//</span> 这里我们限制最大 Block 数量为 1024 或 2048，不再随 N 无限增长</span>
+    <span class="pl-k">int</span> numBlocks = (N + blockSize - <span class="pl-c1">1</span>) / blockSize;
+    <span class="pl-k">if</span> (numBlocks &gt; <span class="pl-c1">1024</span>) {
+        numBlocks = <span class="pl-c1">1024</span>;
+    }
+
+    addKernel&lt;&lt;&lt;numBlocks, blockSize&gt;&gt;&gt;(A, B, C, N);
+    <span class="pl-c1">cudaDeviceSynchronize</span>();
+}</pre></div>
+<h2>优化2：向量化访存</h2>
+<p>可以通过向量化访存进一步减少CPU/GPU内部发出的访存指令数量<br>
+在循环中，每次循环读取一个 <code class="notranslate">double</code>（8 字节）。为了读取 32 字节，需要发射 4 条 Load 指令。<br>
+CUDA 提供了内置的向量类型。我们可以强制把普通的 <code class="notranslate">double</code> 指针转换成 <code class="notranslate">double4</code> 指针。<br>
+不过因为数组总长度 $N$ 未必是 4 的整数倍，所以我们在前面用 <code class="notranslate">double4</code> 跑完 $N/4$ 的主体部分后，剩下的几个零头（$N%4$）再用普通的标量方式处理。<br>
+具体见代码</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> 向量化访存 + 跨步循环 Kernel</span>
+__global__ <span class="pl-k">void</span> <span class="pl-en">add_kernel_vectorized</span>(<span class="pl-k">const</span> double4 *A_vec, <span class="pl-k">const</span> double4 *B_vec, double4 *C_vec, <span class="pl-k">int</span> N_vec)
+{
+    <span class="pl-k">int</span> i = blockIdx.<span class="pl-smi">x</span> * blockDim.<span class="pl-smi">x</span> + threadIdx.<span class="pl-smi">x</span>;
+    <span class="pl-k">int</span> stride = blockDim.<span class="pl-smi">x</span> * gridDim.<span class="pl-smi">x</span>;
+
+    <span class="pl-c"><span class="pl-c">//</span> 主体部分：每次处理 4 个 double</span>
+    <span class="pl-k">for</span> (; i &lt; N_vec; i += stride)
+    {
+        double4 a = A_vec[i];
+        double4 b = B_vec[i];
+        double4 c;
+        <span class="pl-c"><span class="pl-c">//</span> 逐分量相加</span>
+        c.<span class="pl-smi">x</span> = a.<span class="pl-smi">x</span> + b.<span class="pl-smi">x</span>;
+        c.<span class="pl-smi">y</span> = a.<span class="pl-smi">y</span> + b.<span class="pl-smi">y</span>;
+        c.<span class="pl-smi">z</span> = a.<span class="pl-smi">z</span> + b.<span class="pl-smi">z</span>;
+        c.<span class="pl-smi">w</span> = a.<span class="pl-smi">w</span> + b.<span class="pl-smi">w</span>;
+        C_vec[i] = c;
+    }
+}
+
+<span class="pl-c"><span class="pl-c">//</span> 处理剩余元素的 Kernel</span>
+__global__ <span class="pl-k">void</span> <span class="pl-en">add_kernel_tail</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">const</span> <span class="pl-k">double</span> *B, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N, <span class="pl-k">int</span> offset)
+{
+    <span class="pl-k">int</span> i = offset + blockIdx.<span class="pl-smi">x</span> * blockDim.<span class="pl-smi">x</span> + threadIdx.<span class="pl-smi">x</span>;
+    <span class="pl-k">if</span> (i &lt; N)
+    {
+        C[i] = A[i] + B[i];
+    }
+}
+
+<span class="pl-c"><span class="pl-c">//</span> Host 端接口</span>
+<span class="pl-k">void</span> <span class="pl-en">add</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">const</span> <span class="pl-k">double</span> *B, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N)
+{
+    <span class="pl-c"><span class="pl-c">//</span> 1. 计算有多少个完整的 double4 (即 N 的 1/4)</span>
+    <span class="pl-k">int</span> N_vec = N / <span class="pl-c1">4</span>;
+
+    <span class="pl-c"><span class="pl-c">//</span> 注意：cudaMalloc 分配的显存默认是 256 字节对齐的，所以安全地转换指针是没问题的</span>
+    <span class="pl-k">const</span> double4 *A_vec = <span class="pl-k">reinterpret_cast</span>&lt;<span class="pl-k">const</span> double4 *&gt;(A);
+    <span class="pl-k">const</span> double4 *B_vec = <span class="pl-k">reinterpret_cast</span>&lt;<span class="pl-k">const</span> double4 *&gt;(B);
+    double4 *C_vec = <span class="pl-k">reinterpret_cast</span>&lt;double4 *&gt;(C);
+
+    <span class="pl-k">int</span> blockSize = <span class="pl-c1">256</span>;
+    <span class="pl-c"><span class="pl-c">//</span> 适当设置 Grid 大小以跑满 L40</span>
+    <span class="pl-k">int</span> numBlocks = <span class="pl-c1">1024</span>;
+
+    <span class="pl-c"><span class="pl-c">//</span> 2. 启动向量化 Kernel 处理绝大部分数据</span>
+    <span class="pl-k">if</span> (N_vec &gt; <span class="pl-c1">0</span>)
+    {
+        <span class="pl-c"><span class="pl-c">//</span> 根据 N_vec 的大小动态调整 block 数量，防止 N_vec 很小的情况</span>
+        <span class="pl-k">int</span> blocks = (N_vec + blockSize - <span class="pl-c1">1</span>) / blockSize;
+        <span class="pl-k">if</span> (blocks &gt; numBlocks)
+            blocks = numBlocks;
+        add_kernel_vectorized&lt;&lt;&lt;blocks, blockSize&gt;&gt;&gt;(A_vec, B_vec, C_vec, N_vec);
+    }
+
+    <span class="pl-c"><span class="pl-c">//</span> 3. 处理不能被 4 整除的尾巴 (最多只有 3 个元素)</span>
+    <span class="pl-k">int</span> tail_elements = N % <span class="pl-c1">4</span>;
+    <span class="pl-k">if</span> (tail_elements &gt; <span class="pl-c1">0</span>)
+    {
+        <span class="pl-k">int</span> offset = N_vec * <span class="pl-c1">4</span>; <span class="pl-c"><span class="pl-c">//</span> 计算尾巴在原数组中的起始偏移量</span>
+        add_kernel_tail&lt;&lt;&lt;<span class="pl-c1">1</span>, tail_elements&gt;&gt;&gt;(A, B, C, N, offset);
+    }
+
+    <span class="pl-c1">cudaDeviceSynchronize</span>();
+}</pre></div>
+<h1>Stencil计算</h1>
+<h2>基础写法</h2>
+<p>每个线程负责计算一个 $C[i]$，通过一个 <code class="notranslate">for</code> 循环，直接去全局内存中把邻域内的元素读出来累加。<br>
+缺陷：假设 $radius = 16$，窗口大小为 31。这意味着全局内存中的每个元素会被 <strong>重复读取 31 次</strong></p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__global__ <span class="pl-k">void</span> <span class="pl-en">stencil_basic</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N, <span class="pl-k">int</span> radius) {
+    <span class="pl-c"><span class="pl-c">//</span> 1. 获取全局线程 ID</span>
+    <span class="pl-k">int</span> i = blockIdx.<span class="pl-smi">x</span> * blockDim.<span class="pl-smi">x</span> + threadIdx.<span class="pl-smi">x</span>;
+
+    <span class="pl-c"><span class="pl-c">//</span> 2. 确保不越界</span>
+    <span class="pl-k">if</span> (i &lt; N) {
+        <span class="pl-k">double</span> sum = <span class="pl-c1">0.0</span>;
+        <span class="pl-k">int</span> r = radius - <span class="pl-c1">1</span>; 
+
+        <span class="pl-c"><span class="pl-c">//</span> 3. 直接从全局内存读取并累加</span>
+        <span class="pl-k">for</span> (<span class="pl-k">int</span> j = -r; j &lt;= r; ++j) {
+            <span class="pl-k">int</span> idx = i + j;
+            <span class="pl-c"><span class="pl-c">//</span> 越界保护，处理矩阵边缘</span>
+            <span class="pl-k">double</span> val = (idx &gt;= <span class="pl-c1">0</span> &amp;&amp; idx &lt; N) ? A[idx] : <span class="pl-c1">0.0</span>;
+            sum += val;
+        }
+        C[i] = sum;
+    }
+}
+
+<span class="pl-k">void</span> <span class="pl-en">stencil</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N, <span class="pl-k">int</span> radius) {
+    <span class="pl-k">int</span> blockSize = <span class="pl-c1">256</span>;
+    <span class="pl-k">int</span> numBlocks = (N + blockSize - <span class="pl-c1">1</span>) / blockSize;
+    stencil_basic&lt;&lt;&lt;numBlocks, blockSize&gt;&gt;&gt;(A, C, N, radius);
+    <span class="pl-c1">cudaDeviceSynchronize</span>();
+}</pre></div>
+<h2>优化1：引入共享内存</h2>
+<p>为了解决重复读取的问题，我们引入 GPU 内部速度极快（接近寄存器）的<strong>共享内存</strong><br>
+我们让一个 Block 内的 256 个线程，<strong>齐心协力</strong>先从全局内存把它们需要的所有数据一次性搬到共享内存中。然后，所有的累加计算都在共享内存里完成。<br>
+由于最边缘的线程计算时需要用到 Block 外部的数据，所以共享内存的实际大小必须比 Block 的大小还要宽。宽度 = <code class="notranslate">BlockSize + 2 * (radius - 1)</code>。左右多出来的部分就叫 Halo。<br>
+<strong>分工搬运</strong>：</p>
+<ol>
+<li>所有线程搬运中间的 Main Data。</li>
+<li>最左边的几个线程负责搬运左边的 Halo。</li>
+<li>最右边的几个线程负责搬运右边的 Halo。<br>
+必须调用 <code class="notranslate">__syncthreads()</code>，确保此线程块内所有线程都把数据搬完后，才能开始计算。</li>
+</ol>
+<p>缺陷：</p>
+<ol>
+<li>搬运 Halo 的代码用了 <code class="notranslate">if (tid &lt; r)</code>。这会导致<strong>Warp 分支发散</strong></li>
+<li>读取边界数据的操作在内存上是不连续的，打破了<strong>合并访存 (Memory Coalescing)</strong> 的规则：相邻的线程（例如 thread 0 和 thread 1）访问相邻的内存地址（<code class="notranslate">A[0]</code> 和 <code class="notranslate">A[1]</code>）时，GPU 硬件会将这些请求合并成一次宽泛的内存事务，提高性能</li>
+</ol>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__global__ <span class="pl-k">void</span> <span class="pl-en">stencil_shared_naive</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N, <span class="pl-k">int</span> radius)
+{
+    <span class="pl-c"><span class="pl-c">//</span> 动态分配共享内存</span>
+    <span class="pl-k">extern</span> __shared__ <span class="pl-k">double</span> s_A[];
+
+    <span class="pl-k">int</span> tid = threadIdx.<span class="pl-smi">x</span>;                         <span class="pl-c"><span class="pl-c">//</span> Block 内部的本地 ID</span>
+    <span class="pl-k">int</span> i = blockIdx.<span class="pl-smi">x</span> * blockDim.<span class="pl-smi">x</span> + threadIdx.<span class="pl-smi">x</span>; <span class="pl-c"><span class="pl-c">//</span> 全局 ID</span>
+    <span class="pl-k">int</span> r = radius - <span class="pl-c1">1</span>;
+
+    <span class="pl-c"><span class="pl-c">//</span> 1. 协作搬运：主数据区</span>
+    <span class="pl-k">if</span> (i &lt; N)
+    {
+        s_A[r + tid] = A[i];
+    }
+    <span class="pl-k">else</span>
+    {
+        s_A[r + tid] = <span class="pl-c1">0.0</span>;
+    }
+
+    <span class="pl-c"><span class="pl-c">//</span> 2. 协作搬运：左侧 Halo</span>
+    <span class="pl-k">if</span> (tid &lt; r)
+    {
+        <span class="pl-k">int</span> left_idx = i - r;
+        s_A[tid] = (left_idx &gt;= <span class="pl-c1">0</span>) ? A[left_idx] : <span class="pl-c1">0.0</span>;
+    }
+
+    <span class="pl-c"><span class="pl-c">//</span> 3. 协作搬运：右侧 Halo</span>
+    <span class="pl-k">if</span> (tid &gt;= blockDim.<span class="pl-smi">x</span> - r)
+    {
+        <span class="pl-k">int</span> right_idx = i + r;
+        s_A[r + tid + r] = (right_idx &lt; N) ? A[right_idx] : <span class="pl-c1">0.0</span>;
+    }
+
+    <span class="pl-c"><span class="pl-c">//</span> 4. 等待所有线程（同一block内线程）搬运完毕</span>
+    <span class="pl-c1">__syncthreads</span>();
+
+    <span class="pl-c"><span class="pl-c">//</span> 5. 在高速的共享内存中完成 Stencil 计算</span>
+    <span class="pl-k">if</span> (i &lt; N)
+    {
+        <span class="pl-k">double</span> sum = <span class="pl-c1">0.0</span>;
+        <span class="pl-k">for</span> (<span class="pl-k">int</span> j = -r; j &lt;= r; ++j)
+        {
+            sum += s_A[r + tid + j];
+        }
+        C[i] = sum;
+    }
+}
+
+<span class="pl-k">void</span> <span class="pl-en">stencil</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N, <span class="pl-k">int</span> radius)
+{
+    <span class="pl-k">int</span> blockSize = <span class="pl-c1">256</span>;
+    <span class="pl-k">int</span> numBlocks = (N + blockSize - <span class="pl-c1">1</span>) / blockSize;
+    <span class="pl-c"><span class="pl-c">//</span> 共享内存大小 = blockSize + 2 * (radius - 1)，用于存放主数据区 + 左右 halo</span>
+    <span class="pl-k">int</span> sharedMemSize = (blockSize + <span class="pl-c1">2</span> * (radius - <span class="pl-c1">1</span>)) * <span class="pl-k">sizeof</span>(<span class="pl-k">double</span>);
+    stencil_shared_naive&lt;&lt;&lt;numBlocks, blockSize, sharedMemSize&gt;&gt;&gt;(A, C, N, radius);
+    <span class="pl-c1">cudaDeviceSynchronize</span>();
+}</pre></div>
+<h2>优化2：跨步循环与循环展开</h2>
+<p>为消除优化1中的Warp分支发散问题，我们不再让线程“按职责”去搬数据。我们把共享内存看作一个长度为 <code class="notranslate">shared_size</code> 的一维数组。让 Block 里的所有线程组成一个<strong>跨步循环 (Stride Loop)</strong>，像扫地机一样从头扫到尾。这样写，所有的内存读取指令天然 100% 连续对齐（Coalesced），完全消除了 <code class="notranslate">if-else</code> 带来的线程发散。<br>
+此外，我们使用<code class="notranslate">#pragma unroll</code>强制编译器把累加的 <code class="notranslate">for</code> 循环展开成一长串 <code class="notranslate">+</code> 号，榨干指令级并行度，这种优化在小循环场景下能起到不错的效果。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__global__ <span class="pl-k">void</span> <span class="pl-en">stencil_shared_coalesced</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N, <span class="pl-k">int</span> radius)
+{
+    <span class="pl-k">extern</span> __shared__ <span class="pl-k">double</span> s_A[];
+
+    <span class="pl-k">int</span> tid = threadIdx.<span class="pl-smi">x</span>;
+    <span class="pl-k">int</span> r = radius - <span class="pl-c1">1</span>;
+    <span class="pl-c"><span class="pl-c">//</span> 共享内存的总大小</span>
+    <span class="pl-k">int</span> shared_size = blockDim.<span class="pl-smi">x</span> + <span class="pl-c1">2</span> * r;
+    <span class="pl-c"><span class="pl-c">//</span> 当前 Block 负责的全局起始位置</span>
+    <span class="pl-k">int</span> block_start = blockIdx.<span class="pl-smi">x</span> * blockDim.<span class="pl-smi">x</span>;
+
+    <span class="pl-c"><span class="pl-c">//</span> 1. 无发散、完全合并的共享内存加载 (绝杀技巧)</span>
+    <span class="pl-c"><span class="pl-c">//</span> 无论 shared_size 多大，所有线程共同参与，循环填充</span>
+    <span class="pl-k">for</span> (<span class="pl-k">int</span> j = tid; j &lt; shared_size; j += blockDim.<span class="pl-smi">x</span>)
+    {
+        <span class="pl-c"><span class="pl-c">//</span> 计算当前要加载的全局索引 (向左偏移 r)</span>
+        <span class="pl-k">int</span> global_idx = block_start - r + j;
+
+        <span class="pl-c"><span class="pl-c">//</span> 统一处理边界</span>
+        <span class="pl-k">if</span> (global_idx &gt;= <span class="pl-c1">0</span> &amp;&amp; global_idx &lt; N)
+        {
+            s_A[j] = A[global_idx];
+        }
+        <span class="pl-k">else</span>
+        {
+            s_A[j] = <span class="pl-c1">0.0</span>;
+        }
+    }
+
+    <span class="pl-c"><span class="pl-c">//</span> 必须同步，等待缓冲区填满</span>
+    <span class="pl-c1">__syncthreads</span>();
+
+    <span class="pl-c"><span class="pl-c">//</span> 2. 高效计算</span>
+    <span class="pl-k">int</span> i = block_start + tid;
+    <span class="pl-k">if</span> (i &lt; N)
+    {
+        <span class="pl-k">double</span> sum = <span class="pl-c1">0.0</span>;
+<span class="pl-c"><span class="pl-c">//</span> 使用 #pragma unroll 提示编译器展开循环，减少跳转开销</span>
+#<span class="pl-k">pragma</span> unroll
+        <span class="pl-k">for</span> (<span class="pl-k">int</span> j = -r; j &lt;= r; ++j)
+        {
+            sum += s_A[tid + j + r];
+        }
+        C[i] = sum;
+    }
+}
+
+<span class="pl-k">void</span> <span class="pl-en">stencil</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N, <span class="pl-k">int</span> radius)
+{
+    <span class="pl-k">int</span> blockSize = <span class="pl-c1">256</span>;
+    <span class="pl-k">int</span> numBlocks = (N + blockSize - <span class="pl-c1">1</span>) / blockSize;
+
+    <span class="pl-c"><span class="pl-c">//</span> 动态计算所需的共享内存大小（字节数）</span>
+    <span class="pl-k">int</span> r = radius - <span class="pl-c1">1</span>;
+    <span class="pl-c1">size_t</span> shared_bytes = (blockSize + <span class="pl-c1">2</span> * r) * <span class="pl-k">sizeof</span>(<span class="pl-k">double</span>);
+
+    stencil_shared_coalesced&lt;&lt;&lt;numBlocks, blockSize, shared_bytes&gt;&gt;&gt;(A, C, N, radius);
+    <span class="pl-c1">cudaDeviceSynchronize</span>();
+}</pre></div>
+<h1>reduce</h1>
+<h2>基础写法</h2>
+<p>每个 Block 将自己负责的数据搬入共享内存，然后在共享内存中两两相加，直到只剩下一个总和，最后再将所有block的这个总和全部加在一起。<br>
+例如：</p>
+<ul>
+<li>第 1 轮：线程 0 计算 <code class="notranslate">sdata[0] += sdata[1]</code>；线程 2 计算 <code class="notranslate">sdata[2] += sdata[3]</code>...（跨度 stride = 1）</li>
+<li>第 2 轮：线程 0 计算 <code class="notranslate">sdata[0] += sdata[2]</code>；线程 4 计算 <code class="notranslate">sdata[4] += sdata[6]</code>...（跨度 stride = 2）</li>
+<li>以此类推<br>
+缺陷：GPU 调度是以 Warp（32 个线程）为单位的。在第一轮中，线程 0, 2, 4... 在干活，而线程 1, 3, 5... 在闲置。同一个 Warp 内一半干活一半发呆，导致计算效率直接减半。<br>
+<strong>Host 端注意点</strong>：因为 Kernel 内部最后使用的是 <code class="notranslate">atomicAdd(C, sdata[0])</code>，如果 <code class="notranslate">C</code> 的初始值不是 0，结果就会错。所以必须在 Host 端调用 <code class="notranslate">cudaMemset</code> 将 <code class="notranslate">C</code> 清零。</li>
+</ul>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> --- Kernel 函数 ---</span>
+__global__ <span class="pl-k">void</span> <span class="pl-en">reduce_kernel_basic</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N)
+{
+    <span class="pl-c"><span class="pl-c">//</span> 动态共享内存，由 Host 端在 &lt;&lt;&lt; &gt;&gt;&gt; 中指定大小</span>
+    <span class="pl-k">extern</span> __shared__ <span class="pl-k">double</span> sdata[];
+
+    <span class="pl-k">int</span> tid = threadIdx.<span class="pl-smi">x</span>;
+    <span class="pl-k">int</span> i = blockIdx.<span class="pl-smi">x</span> * blockDim.<span class="pl-smi">x</span> + threadIdx.<span class="pl-smi">x</span>;
+
+    <span class="pl-c"><span class="pl-c">//</span> 将数据从全局内存加载到共享内存</span>
+    sdata[tid] = (i &lt; N) ? A[i] : <span class="pl-c1">0.0</span>;
+    <span class="pl-c1">__syncthreads</span>(); <span class="pl-c"><span class="pl-c">//</span> 等待所有线程加载完毕</span>
+
+    <span class="pl-c"><span class="pl-c">//</span> 交错寻址的树状归约</span>
+    <span class="pl-k">for</span> (<span class="pl-k">int</span> stride = <span class="pl-c1">1</span>; stride &lt; blockDim.<span class="pl-smi">x</span>; stride *= <span class="pl-c1">2</span>)
+    {
+        <span class="pl-k">if</span> (tid % (<span class="pl-c1">2</span> * stride) == <span class="pl-c1">0</span>)
+        {
+            sdata[tid] += sdata[tid + stride];
+        }
+        <span class="pl-c1">__syncthreads</span>(); <span class="pl-c"><span class="pl-c">//</span> 等待这一层级所有人加完</span>
+    }
+
+    <span class="pl-c"><span class="pl-c">//</span> 每个 Block 的 0 号线程将局部和累加到全局 C[0]</span>
+    <span class="pl-k">if</span> (tid == <span class="pl-c1">0</span>)
+    {
+        <span class="pl-c1">atomicAdd</span>(C, sdata[<span class="pl-c1">0</span>]);
+    }
+}
+
+<span class="pl-c"><span class="pl-c">//</span> --- Host 端函数 ---</span>
+<span class="pl-k">void</span> <span class="pl-en">reduce</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N)
+{
+    <span class="pl-c"><span class="pl-c">//</span> 关键：规约的全局输出必须初始化为 0</span>
+    <span class="pl-c1">cudaMemset</span>(C, <span class="pl-c1">0</span>, <span class="pl-k">sizeof</span>(<span class="pl-k">double</span>));
+
+    <span class="pl-k">int</span> blockSize = <span class="pl-c1">256</span>;
+    <span class="pl-k">int</span> numBlocks = (N + blockSize - <span class="pl-c1">1</span>) / blockSize;
+    <span class="pl-c"><span class="pl-c">//</span> 计算动态共享内存的字节数</span>
+    <span class="pl-c1">size_t</span> sharedSize = blockSize * <span class="pl-k">sizeof</span>(<span class="pl-k">double</span>);
+
+    reduce_kernel_basic&lt;&lt;&lt;numBlocks, blockSize, sharedSize&gt;&gt;&gt;(A, C, N);
+    <span class="pl-c1">cudaDeviceSynchronize</span>();
+}</pre></div>
+<h2>优化1：连续寻址</h2>
+<p>为了解决交错寻址导致的 Warp 发散，我们改变“配对”的逻辑，让跨度从大到小递减。<br>
+假设 Block 有 256 个线程：</p>
+<ul>
+<li>第 1 轮：线程 0~127 活跃。线程 0 计算 <code class="notranslate">sdata[0] += sdata[128]</code>，线程 1 计算 <code class="notranslate">sdata[1] += sdata[129]</code>...（跨度 stride = 128）</li>
+<li>第 2 轮：线程 0~63 活跃。跨度 stride = 64。</li>
+<li>以此类推<br>
+这样以来的好处是可以在前几轮实现前几个warp的满载运行</li>
+</ul>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> --- Kernel 函数 ---</span>
+__global__ <span class="pl-k">void</span> <span class="pl-en">reduce_kernel_opt1</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N)
+{
+    <span class="pl-k">extern</span> __shared__ <span class="pl-k">double</span> sdata[];
+
+    <span class="pl-k">int</span> tid = threadIdx.<span class="pl-smi">x</span>;
+    <span class="pl-k">int</span> i = blockIdx.<span class="pl-smi">x</span> * blockDim.<span class="pl-smi">x</span> + threadIdx.<span class="pl-smi">x</span>;
+
+    sdata[tid] = (i &lt; N) ? A[i] : <span class="pl-c1">0.0</span>;
+    <span class="pl-c1">__syncthreads</span>();
+
+    <span class="pl-c"><span class="pl-c">//</span> 连续寻址的树状归约：stride 从块大小的一半开始，每次减半</span>
+    <span class="pl-k">for</span> (<span class="pl-k">int</span> stride = blockDim.<span class="pl-smi">x</span> / <span class="pl-c1">2</span>; stride &gt; <span class="pl-c1">0</span>; stride &gt;&gt;= <span class="pl-c1">1</span>)
+    {
+        <span class="pl-k">if</span> (tid &lt; stride)
+        {
+            sdata[tid] += sdata[tid + stride];
+        }
+        <span class="pl-c1">__syncthreads</span>();
+    }
+
+    <span class="pl-k">if</span> (tid == <span class="pl-c1">0</span>)
+    {
+        <span class="pl-c1">atomicAdd</span>(C, sdata[<span class="pl-c1">0</span>]);
+    }
+}
+
+<span class="pl-c"><span class="pl-c">//</span> --- Host 端函数 ---</span>
+<span class="pl-k">void</span> <span class="pl-en">reduce</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N)
+{
+    <span class="pl-c1">cudaMemset</span>(C, <span class="pl-c1">0</span>, <span class="pl-k">sizeof</span>(<span class="pl-k">double</span>));
+
+    <span class="pl-k">int</span> blockSize = <span class="pl-c1">256</span>;
+    <span class="pl-k">int</span> numBlocks = (N + blockSize - <span class="pl-c1">1</span>) / blockSize;
+    <span class="pl-c1">size_t</span> sharedSize = blockSize * <span class="pl-k">sizeof</span>(<span class="pl-k">double</span>);
+
+    reduce_kernel_opt1&lt;&lt;&lt;numBlocks, blockSize, sharedSize&gt;&gt;&gt;(A, C, N);
+    <span class="pl-c1">cudaDeviceSynchronize</span>();
+}</pre></div>
+<h2>优化2：网格跨步循环+引入寄存器</h2>
+<p>目前的写法是每个线程只处理 1 个元素。如果 $N$ 很大，启动太多 Block 会增加 <code class="notranslate">atomicAdd</code> 的竞争和系统调度开销，因此，我们做出下面的优化：</p>
+<ul>
+<li>
+<strong>提升计算密度</strong>：我们引入上一题向量加法中讲过的 <strong>网格跨步循环 (Grid-Stride Loop)</strong>。</li>
+<li>
+<strong>寄存器缓存</strong>：在数据还没放进共享内存之前，就先在线程的<strong>私有寄存器</strong>里用 <code class="notranslate">while</code> 循环把多个全局内存元素加起来。</li>
+<li>
+<strong>Host 端调整</strong>：我们将最大 Block 数量限制为 1024。这意味着无论 $N$ 是一百万还是一百亿，都只会有 1024 个 Block 去竞争最后的 <code class="notranslate">atomicAdd</code>，大大缓解了写入冲突。</li>
+</ul>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> --- Kernel 函数 ---</span>
+__global__ <span class="pl-k">void</span> <span class="pl-en">reduce_kernel_opt2</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N)
+{
+    <span class="pl-k">extern</span> __shared__ <span class="pl-k">double</span> sdata[];
+
+    <span class="pl-k">int</span> tid = threadIdx.<span class="pl-smi">x</span>;
+    <span class="pl-k">int</span> i = blockIdx.<span class="pl-smi">x</span> * blockDim.<span class="pl-smi">x</span> + threadIdx.<span class="pl-smi">x</span>;
+    <span class="pl-k">int</span> grid_stride = blockDim.<span class="pl-smi">x</span> * gridDim.<span class="pl-smi">x</span>;
+
+    <span class="pl-c"><span class="pl-c">//</span> 1. 加载时归约：用寄存器变量 sum 收集跨步元素</span>
+    <span class="pl-k">double</span> sum = <span class="pl-c1">0.0</span>;
+    <span class="pl-k">for</span> (; i &lt; N; i += grid_stride)
+    {
+        sum += A[i];
+    }
+
+    <span class="pl-c"><span class="pl-c">//</span> 2. 将寄存器里的局部和存入共享内存</span>
+    sdata[tid] = sum;
+    <span class="pl-c1">__syncthreads</span>();
+
+    <span class="pl-c"><span class="pl-c">//</span> 3. 块内共享内存归约 (连续寻址)</span>
+    <span class="pl-k">for</span> (<span class="pl-k">int</span> stride = blockDim.<span class="pl-smi">x</span> / <span class="pl-c1">2</span>; stride &gt; <span class="pl-c1">0</span>; stride &gt;&gt;= <span class="pl-c1">1</span>)
+    {
+        <span class="pl-k">if</span> (tid &lt; stride)
+        {
+            sdata[tid] += sdata[tid + stride];
+        }
+        <span class="pl-c1">__syncthreads</span>();
+    }
+
+    <span class="pl-k">if</span> (tid == <span class="pl-c1">0</span>)
+    {
+        <span class="pl-c1">atomicAdd</span>(C, sdata[<span class="pl-c1">0</span>]);
+    }
+}
+
+<span class="pl-c"><span class="pl-c">//</span> --- Host 端函数 ---</span>
+<span class="pl-k">void</span> <span class="pl-en">reduce</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N)
+{
+    <span class="pl-c1">cudaMemset</span>(C, <span class="pl-c1">0</span>, <span class="pl-k">sizeof</span>(<span class="pl-k">double</span>));
+
+    <span class="pl-k">int</span> blockSize = <span class="pl-c1">256</span>;
+    <span class="pl-c"><span class="pl-c">//</span> 限制最大 Block 数量，强迫每个线程在跨步循环中多干点活</span>
+    <span class="pl-k">int</span> numBlocks = <span class="pl-c1">std::min</span>((N + blockSize - <span class="pl-c1">1</span>) / blockSize, <span class="pl-c1">1024</span>);
+    <span class="pl-c1">size_t</span> sharedSize = blockSize * <span class="pl-k">sizeof</span>(<span class="pl-k">double</span>);
+
+    reduce_kernel_opt2&lt;&lt;&lt;numBlocks, blockSize, sharedSize&gt;&gt;&gt;(A, C, N);
+    <span class="pl-c1">cudaDeviceSynchronize</span>();
+}
+</pre></div>
+<h2>优化3：Warp Shuffle 原语</h2>
+<p><code class="notranslate">__syncthreads()</code> 依然存在极大的性能开销。<br>
+现代 NVIDIA 显卡支持 <strong>Warp Shuffle (洗牌)</strong> 指令。它允许同一个 Warp（32个线程）里的线程<strong>直接读取互相的寄存器</strong>，完全不需要走共享内存，也不需要 <code class="notranslate">__syncthreads()</code> 同步<br>
+<code class="notranslate">__shfl_down_sync(0xffffffff, val, offset)</code>：这条指令让当前线程直接向比它 ID 大 <code class="notranslate">offset</code> 的线程索要 <code class="notranslate">val</code> 的值。<br>
+<strong>终极流程</strong>：</p>
+<ol>
+<li><strong>网格跨步</strong>求和到寄存器 <code class="notranslate">sum</code>。</li>
+<li><strong>Warp 内部</strong>通过 Shuffle 指令折叠 <code class="notranslate">sum</code>。</li>
+<li>每个 Warp 只需要把这 1 个最终结果写入共享内存（不再需要 256 大小的共享内存，只需要 32 大小）。</li>
+<li>最后一个 Warp 读取这部分共享内存，再做一次 Shuffle 归约，得到整个 Block 的总和。</li>
+</ol>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">define</span> <span class="pl-en">WARP_SIZE</span> <span class="pl-c1">32</span>
+
+<span class="pl-c"><span class="pl-c">//</span> Warp 级洗牌归约内联函数 (完全在寄存器中发生，速度极快)</span>
+__inline__ __device__ <span class="pl-k">double</span> <span class="pl-en">warpReduceSum</span>(<span class="pl-k">double</span> val)
+{
+    <span class="pl-c"><span class="pl-c">//</span> 每次 offset 减半：16, 8, 4, 2, 1</span>
+    <span class="pl-k">for</span> (<span class="pl-k">int</span> offset = WARP_SIZE / <span class="pl-c1">2</span>; offset &gt; <span class="pl-c1">0</span>; offset /= <span class="pl-c1">2</span>)
+    {
+        val += <span class="pl-c1">__shfl_down_sync</span>(<span class="pl-c1">0xffffffff</span>, val, offset);
+    }
+    <span class="pl-k">return</span> val;
+}
+
+<span class="pl-c"><span class="pl-c">//</span> --- Kernel 函数 ---</span>
+__global__ <span class="pl-k">void</span> <span class="pl-en">reduce_kernel_final</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N)
+{
+    <span class="pl-c"><span class="pl-c">//</span> 静态分配共享内存：一个 Block 最多 1024 个线程，即最多 32 个 Warp</span>
+    __shared__ <span class="pl-k">double</span> shared_warp_sums[<span class="pl-c1">32</span>];
+
+    <span class="pl-k">int</span> tid = threadIdx.<span class="pl-smi">x</span>;
+    <span class="pl-k">int</span> lane = tid % WARP_SIZE;       <span class="pl-c"><span class="pl-c">//</span> Warp 内的局部 ID (0~31)</span>
+    <span class="pl-k">int</span> wid = tid / WARP_SIZE;        <span class="pl-c"><span class="pl-c">//</span> Warp 的 ID (0~31)</span>
+    <span class="pl-k">int</span> i = blockIdx.<span class="pl-smi">x</span> * blockDim.<span class="pl-smi">x</span> + threadIdx.<span class="pl-smi">x</span>;
+    <span class="pl-k">int</span> grid_stride = blockDim.<span class="pl-smi">x</span> * gridDim.<span class="pl-smi">x</span>;
+
+    <span class="pl-c"><span class="pl-c">//</span> 1. 加载时归约 (Grid-Stride Loop)</span>
+    <span class="pl-k">double</span> sum = <span class="pl-c1">0.0</span>;
+    <span class="pl-k">for</span> (; i &lt; N; i += grid_stride)
+    {
+        sum += A[i];
+    }
+
+    <span class="pl-c"><span class="pl-c">//</span> 2. Warp 内洗牌归约 (无共享内存读取，无 syncthreads)</span>
+    sum = <span class="pl-c1">warpReduceSum</span>(sum);
+
+    <span class="pl-c"><span class="pl-c">//</span> 3. 每个 Warp 的 0 号线程将部分和存入共享内存</span>
+    <span class="pl-k">if</span> (lane == <span class="pl-c1">0</span>)
+    {
+        shared_warp_sums[wid] = sum;
+    }
+
+    <span class="pl-c"><span class="pl-c">//</span> 必须同步一次，等待所有 Warp 把自己的总和写进共享内存</span>
+    <span class="pl-c1">__syncthreads</span>();
+
+    <span class="pl-c"><span class="pl-c">//</span> 4. 让第一个 Warp 负责最后的规约</span>
+    <span class="pl-c"><span class="pl-c">//</span> 共有 blockDim.x / WARP_SIZE 个有效 Warp 数据需要规约</span>
+    <span class="pl-k">int</span> num_warps = blockDim.<span class="pl-smi">x</span> / WARP_SIZE;
+    <span class="pl-k">if</span> (wid == <span class="pl-c1">0</span>)
+    {
+        <span class="pl-c"><span class="pl-c">//</span> 读取共享内存，如果超出了活跃 warp 数量，则补 0</span>
+        sum = (lane &lt; num_warps) ? shared_warp_sums[lane] : <span class="pl-c1">0.0</span>;
+        <span class="pl-c"><span class="pl-c">//</span> 最后一次 Warp 洗牌归约</span>
+        sum = <span class="pl-c1">warpReduceSum</span>(sum);
+    }
+
+    <span class="pl-c"><span class="pl-c">//</span> 5. Block 0 号线程使用原子操作汇聚到全局结果</span>
+    <span class="pl-k">if</span> (tid == <span class="pl-c1">0</span>)
+    {
+        <span class="pl-c1">atomicAdd</span>(C, sum);
+    }
+}
+
+<span class="pl-c"><span class="pl-c">//</span> --- Host 端函数 ---</span>
+<span class="pl-k">void</span> <span class="pl-en">reduce</span>(<span class="pl-k">const</span> <span class="pl-k">double</span> *A, <span class="pl-k">double</span> *C, <span class="pl-k">int</span> N)
+{
+    <span class="pl-c"><span class="pl-c">//</span> 初始化输出为 0</span>
+    <span class="pl-c1">cudaMemset</span>(C, <span class="pl-c1">0</span>, <span class="pl-k">sizeof</span>(<span class="pl-k">double</span>));
+
+    <span class="pl-k">int</span> blockSize = <span class="pl-c1">256</span>;
+    <span class="pl-c"><span class="pl-c">//</span> 限制 block 数量以利用 Grid-Stride</span>
+    <span class="pl-k">int</span> numBlocks = <span class="pl-c1">std::min</span>((N + blockSize - <span class="pl-c1">1</span>) / blockSize, <span class="pl-c1">1024</span>);
+
+    <span class="pl-c"><span class="pl-c">//</span> 注意：最终版代码内部使用了静态共享内存，不需要在调用时传递 sharedSize</span>
+    reduce_kernel_final&lt;&lt;&lt;numBlocks, blockSize&gt;&gt;&gt;(A, C, N);
+    <span class="pl-c1">cudaDeviceSynchronize</span>();
+}
+</pre></div>
+<h1>最终得分</h1></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script><script>MathJax = {tex: {inlineMath: [["$", "$"]]}};</script><script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</html>
