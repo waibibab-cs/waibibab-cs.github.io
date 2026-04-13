@@ -669,3 +669,4 @@ void reduce(const double *A, double *C, int N)
 
 ```
 # 最终得分
+![image.png](https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260413110205.png)
