@@ -442,5 +442,15 @@ correctness score : 20.000 / 20.000
 performance score : 43.767 / 80.000
 total score       : 63.767 / 100.000
 ```
-# 最终得分
-上述得分测试均是在本地测试环境（11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz）下测的，把代码上传至实验平台（Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz）上得分如下：
+# 最终错误修改与得分
+上述得分测试均是在本地测试环境（11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz）下测的，把代码上传至实验平台（Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz）后发现一直runtime error
+
+最终的解决办法是将Makefile的GEMM编译语句改为：
+```bash
+GEMM_CXXFLAGS ?= -O3 -march=icelake-server -fopenmp
+```
+可能的原因：`-march=icelake-server` 和 `-march=native` 的核心区别在于：前者是显式指定固定的 CPU 架构（Ice Lake 服务器版），后者是让编译器自动检测并使用当前编译机器的 CPU 架构，但评测系统的编译节点和评测节点如果不同，会导致不兼容
+
+得分：
+![image.png](https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260413105953.png)
+
