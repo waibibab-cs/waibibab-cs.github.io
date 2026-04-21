@@ -1,0 +1,1092 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="# 题目描述
+这是一道 CPU 汇编优化题。">
+<meta property="og:title" content="Conv1d算子的汇编优化">
+<meta property="og:description" content="# 题目描述
+这是一道 CPU 汇编优化题。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/Conv1d-suan-zi-de-hui-bian-you-hua.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>Conv1d算子的汇编优化</title>
+<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">Conv1d算子的汇编优化</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/37" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><h1>题目描述</h1>
+<p>这是一道 CPU 汇编优化题。你将拿到一个使用 C++ 和 Make 构建的小项目，你的任务是在保持结果正确的前提下，对其中的 1D 卷积算子进行优化，使程序尽可能快。</p>
+<p>一维卷积（1D Convolution）是信号处理、深度学习等领域中最基础的操作之一。它描述了一个输入信号与一个卷积核（滤波器）之间的运算关系。</p>
+<p>其核心计算过程可表示为：</p>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260420150259.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260420150259.png" alt="image.png" style="max-width: 100%;"></a><br>
+本题实现的是标准的 1D 卷积运算：</p>
+<pre lang="text" class="notranslate"><code class="notranslate">out = in (*) weight
+</code></pre>
+<p>其中：</p>
+<ul>
+<li><code class="notranslate">in</code> 的长度为 N</li>
+<li><code class="notranslate">weight</code> 的长度为 K</li>
+<li><code class="notranslate">out</code> 的长度为 N - K + 1</li>
+<li>所有数组均按行优先存储</li>
+<li>数据类型固定为 <code class="notranslate">float</code><br>
+示例</li>
+</ul>
+<pre class="notranslate"><code class="notranslate">输入 in:    [1, 2, 3, 4, 5]      (N=5)
+卷积核 weight: [1, 0, -1]         (K=3)
+
+输出 out:   [1*1+2*0+3*(-1), 2*1+3*0+4*(-1), 3*1+4*0+5*(-1)]
+          = [-2, -2, -2]          (长度为 5-3+1=3)
+</code></pre>
+<h2>项目结构</h2>
+<p>代码目录如下：</p>
+<pre lang="text" class="notranslate"><code class="notranslate">.
+├── data
+│   └── cases.in *
+├── include
+│   └── conv1d.h *
+├── Makefile *
+├── run.sh *
+├── README.md
+└── src
+    ├── conv1d_kernel.s
+    └── main.cpp *
+</code></pre>
+<p>标有星号的文件/文件夹是<strong>不可更改</strong>的。你必须在不修改这些文件的前提下进行优化，保持它们的接口和行为不变。<br>
+其中：</p>
+<ul>
+<li><code class="notranslate">include/conv1d.h</code> 声明了汇编函数接口（仅供参考，并没有被直接包含在 C++ 代码中）</li>
+<li><code class="notranslate">src/conv1d_kernel.s</code> 是<strong>你需要编辑的汇编文件</strong></li>
+<li><code class="notranslate">src/main.cpp</code> 负责 reference 计算、正确性校验、测速和评分</li>
+<li><code class="notranslate">data/cases.in</code> 是公开测试集<br>
+你要修改的文件在 <code class="notranslate">src/conv1d_kernel.s</code>，你可以完全重写这个文件的内容，但必须保持接口不变。</li>
+</ul>
+<h2>实现要求</h2>
+<p>你需要实现并优化如下接口：</p>
+<div class="highlight highlight-source-assembly"><pre class="notranslate"><span class="pl-en">.globl conv1d_asm</span>
+<span class="pl-en">.type conv1d_asm</span><span class="pl-s1">,</span><span class="pl-en"> @function</span></pre></div>
+<p>函数签名（C语言视角）：</p>
+<div class="highlight highlight-source-c"><pre class="notranslate"><span class="pl-smi">void</span> <span class="pl-en">conv1d_asm</span>(<span class="pl-k">const</span> <span class="pl-smi">float</span><span class="pl-c1">*</span> <span class="pl-s1">in</span>, <span class="pl-k">const</span> <span class="pl-smi">float</span><span class="pl-c1">*</span> <span class="pl-s1">weight</span>, <span class="pl-smi">float</span><span class="pl-c1">*</span> <span class="pl-s1">out</span>, <span class="pl-smi">int</span> <span class="pl-c1">N</span>, <span class="pl-smi">int</span> <span class="pl-c1">K</span>);</pre></div>
+<p>参数传递（System V AMD64 ABI）：</p>
+<ul>
+<li><code class="notranslate">%rdi</code> = in (输入数组指针，float*)</li>
+<li><code class="notranslate">%rsi</code> = weight (卷积核指针，float*)</li>
+<li><code class="notranslate">%rdx</code> = out (输出数组指针，float*)</li>
+<li><code class="notranslate">%ecx</code> = N (输入数组长度，int)</li>
+<li><code class="notranslate">%r8d</code> = K (卷积核长度，int)<br>
+输出长度 = N - K + 1<br>
+要求：</li>
+<li>保持接口不变</li>
+<li>输出结果与参考实现足够接近</li>
+<li>可以任意修改 <code class="notranslate">conv1d_kernel.s</code> 的实现方式</li>
+<li>必须使用汇编语言实现（ATT 格式）<br>
+禁止事项：</li>
+<li>不允许修改题目给定的输入规模文件来规避测试</li>
+<li>不允许通过识别特定输入规模或特定数据内容做针对性特化</li>
+<li>不允许提交错误结果或伪造性能数据</li>
+<li>不允许使用已有高性能计算库</li>
+</ul>
+<h2>构建与运行</h2>
+<p>构建：</p>
+<div class="highlight highlight-source-shell"><pre class="notranslate">make</pre></div>
+<p>读取公开测试集直接运行：</p>
+<div class="highlight highlight-source-shell"><pre class="notranslate">./conv1d_bench data/cases.in</pre></div>
+<p>测试单个 case：</p>
+<div class="highlight highlight-source-shell"><pre class="notranslate">./conv1d_bench 65536 64</pre></div>
+<h2>评分标准</h2>
+<p>总分为 <code class="notranslate">100</code> 分：</p>
+<ul>
+<li>正确性：<code class="notranslate">20</code> 分</li>
+<li>性能：<code class="notranslate">80</code> 分<br>
+评分方式如下：</li>
+</ul>
+<ol>
+<li>所有公开测试 case 都正确，才能拿到正确性分。</li>
+<li>每个 case 单独计算相对 reference 的加速比。</li>
+<li>不同规模的 case 使用不同的性能阈值。</li>
+<li>每个 case 先得到一个单独的性能分，再按权重汇总为最终的 <code class="notranslate">80</code> 分性能分。<br>
+程序运行时会输出：</li>
+</ol>
+<ul>
+<li>每个 case 的 reference 时间</li>
+<li>每个 case 的实现时间</li>
+<li>每个 case 的加速比</li>
+<li>每个 case 的性能得分</li>
+<li>最终总分</li>
+</ul>
+<h2>提交方式</h2>
+<p>请直接提交你的汇编程序，我们会通过<code class="notranslate">run.sh</code>运行你的代码：</p>
+<h2>平台说明</h2>
+<p>测试平台为 Intel(R) Xeon(R) Gold 6338 CPU @ 2.00GHz，支持 AVX-512 指令集。</p>
+<p>我们有足够的时间限制和空间限制，请忽略页面上的时间和空间限制，当然，运行时间过长和内存占用过多会被杀死。</p>
+<h2>汇编编程资源</h2>
+<p>常用指令参考<br>
+<strong>数据移动：</strong></p>
+<ul>
+<li><code class="notranslate">movss</code> - 移动标量单精度浮点数</li>
+<li><code class="notranslate">movaps</code> - 移动对齐的 128-bit 打包单精度浮点数</li>
+<li><code class="notranslate">vmovaps</code> - AVX 版本的 movaps（256-bit/512-bit）<br>
+<strong>算术运算：</strong></li>
+<li><code class="notranslate">addss/mulss</code> - 标量加法/乘法</li>
+<li><code class="notranslate">addps/mulps</code> - 打包（4个float）加法/乘法</li>
+<li><code class="notranslate">vaddps/vmulps</code> - AVX 版本的打包加法/乘法（8个float）<br>
+<strong>FMA（乘加融合）：</strong></li>
+<li><code class="notranslate">vfmadd231ps</code> - 乘加融合: dst = src1 * src2 + dst<br>
+<strong>寄存器：</strong></li>
+<li>SSE: <code class="notranslate">xmm0</code> - <code class="notranslate">xmm15</code> (128-bit)</li>
+<li>AVX: <code class="notranslate">ymm0</code> - <code class="notranslate">ymm15</code> (256-bit)</li>
+<li>AVX-512: <code class="notranslate">zmm0</code> - <code class="notranslate">zmm31</code> (512-bit)</li>
+</ul>
+<blockquote>
+<p>Tips: 利用反汇编工具你可以获得一份还不错的参考版本</p>
+</blockquote>
+<h1>前提知识学习</h1>
+<p><a href="https://waibibab-cs.github.io/post/CSAPP-di-san-zhang-bi-ji-%EF%BC%9A-cheng-xu-de-ji-qi-ji-biao-shi.html" rel="nofollow">csapp第三章笔记</a><br>
+附16个寄存器（GPR）表格：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260420113948.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260420113948.png" alt="image.png" style="max-width: 100%;"></a><br>
+除了这些通用寄存器之外，还有一些是SIMD专用寄存器，例如XMM寄存器，他们的比较如下所示：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260420152718.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260420152718.png" alt="image.png" style="max-width: 100%;"></a><br>
+附寻址模式表：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260420114009.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260420114009.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h1>基础写法（baseline）</h1>
+<p>将main.cpp使用-O1选项（若使用-O3可能会导致内联优化而找不到ref_conv1d这个函数）汇编得到main.s，然后参考其中ref_conv1d的汇编代码，可以修改得到baseline代码并加入conv1d_kernel.s中，具体的代码和注释如下所示：</p>
+<div class="highlight highlight-source-assembly"><pre class="notranslate"><span class="pl-en">	.text</span>
+<span class="pl-en">	.globl conv1d_asm</span>
+<span class="pl-en">	.type conv1d_asm</span><span class="pl-s1">,</span><span class="pl-en"> @function</span>
+
+<span class="pl-en"># void conv1d_asm(const</span> <span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-k">in</span><span class="pl-s1">,</span><span class="pl-en"> const</span> <span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en"> weight</span><span class="pl-s1">,</span> <span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-k">out</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-k">int</span><span class="pl-en"> N</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-k">int</span><span class="pl-en"> K)</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 版本：Baseline（根据O1 编译的 ref_conv1d 反汇编修改）</span>
+<span class="pl-en"># 策略：标量双重循环，逐元素计算 </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">]</span><span class="pl-en"> = sum_{j=</span><span class="pl-c1">0</span><span class="pl-en">}^{K</span><span class="pl-s1">-</span><span class="pl-c1">1</span><span class="pl-en">} </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> </span><span class="pl-s1">*</span><span class="pl-en"> weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 寄存器分配（System V AMD64 ABI 入参）：</span>
+<span class="pl-en">#   %</span><span class="pl-v">rdi</span><span class="pl-en"> = </span><span class="pl-k">in</span><span class="pl-en">      (输入数组首地址，</span><span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en">)</span>
+<span class="pl-en">#   %</span><span class="pl-v">rsi</span><span class="pl-en"> = weight  (卷积核首地址，</span><span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en">)</span>
+<span class="pl-en">#   %</span><span class="pl-v">rdx</span><span class="pl-en"> = </span><span class="pl-k">out</span><span class="pl-en">     (输出数组首地址，</span><span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en">)</span>
+<span class="pl-en">#   %</span><span class="pl-v">ecx</span><span class="pl-en"> = N       (输入数组长度，</span><span class="pl-k">int</span><span class="pl-en">)</span>
+<span class="pl-en">#   %</span><span class="pl-v">r8d</span><span class="pl-en"> = K       (卷积核长度，</span><span class="pl-k">int</span><span class="pl-en">)</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 内部寄存器分配：</span>
+<span class="pl-en">#   %</span><span class="pl-v">r10d</span><span class="pl-en"> = out_len = N </span><span class="pl-s1">-</span><span class="pl-en"> K </span><span class="pl-s1">+</span><span class="pl-en"> </span><span class="pl-c1">1</span><span class="pl-en">  (输出数组长度)</span>
+<span class="pl-en">#   %</span><span class="pl-v">r9d</span><span class="pl-en">  = i                   (外层循环变量，输出索引)</span>
+<span class="pl-en">#   %</span><span class="pl-v">rax</span><span class="pl-en">  = j / 索引偏移        (内层循环变量，同时是 </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> / weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> 的偏移)</span>
+<span class="pl-en">#   %</span><span class="pl-v">rcx</span><span class="pl-en">  = K                   (内层循环上界，每次重新加载)</span>
+<span class="pl-en">#   %</span><span class="pl-v">r10</span><span class="pl-en">  = out_len             (外层循环上界)</span>
+<span class="pl-en">#   %</span><span class="pl-v">xmm0</span><span class="pl-en"> = weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> </span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en">   (当前乘积，临时)</span>
+<span class="pl-en">#   %</span><span class="pl-v">xmm1</span><span class="pl-en"> = sum                 (累加器)</span>
+
+<span class="pl-en">conv1d_asm:</span>
+<span class="pl-en">	</span><span class="pl-k">endbr64</span><span class="pl-en">                     # Intel CET 边界检查（兼容近代</span> <span class="pl-c1">CPU</span><span class="pl-en">）</span>
+
+<span class="pl-en">	# 计算 out_len = N </span><span class="pl-s1">-</span><span class="pl-en"> K，检查 N &lt; K 的退化情况</span>
+<span class="pl-en">	subl  %</span><span class="pl-v">r8d</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">ecx</span><span class="pl-en">            # </span><span class="pl-v">ecx</span><span class="pl-en"> = N </span><span class="pl-s1">-</span><span class="pl-en"> K（按 </span><span class="pl-k">int</span><span class="pl-en"> 运算）</span>
+<span class="pl-en">	</span><span class="pl-k">js</span><span class="pl-en">    .Lend                 # if (N &lt; K) return</span>
+
+<span class="pl-en">	leal  </span><span class="pl-c1">1</span><span class="pl-en">(%</span><span class="pl-v">rcx</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r10d</span><span class="pl-en">        # </span><span class="pl-v">r10d</span><span class="pl-en"> = (N</span><span class="pl-s1">-</span><span class="pl-en">K) </span><span class="pl-s1">+</span><span class="pl-en"> </span><span class="pl-c1">1</span><span class="pl-en"> = out_len</span>
+<span class="pl-en">	movl</span>  <span class="pl-c1">$</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9d</span><span class="pl-en">              # </span><span class="pl-v">r9d</span><span class="pl-en"> = i = </span><span class="pl-c1">0</span><span class="pl-en">（外层循环变量）</span>
+<span class="pl-en">	movl  %</span><span class="pl-v">r8d</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">ecx</span><span class="pl-en">            # </span><span class="pl-v">ecx</span><span class="pl-en"> = K（内层循环上界，每次内层循环不重置它）</span>
+<span class="pl-en">	</span><span class="pl-k">jmp</span><span class="pl-en">   .Louter_setup</span>
+
+<span class="pl-en"># =============================================================</span>
+<span class="pl-en"># 内层循环：计算 </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">]</span><span class="pl-en"> = sum_{j=</span><span class="pl-c1">0</span><span class="pl-en">}^{K</span><span class="pl-s1">-</span><span class="pl-c1">1</span><span class="pl-en">} </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> </span><span class="pl-s1">*</span><span class="pl-en"> weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span>
+<span class="pl-en"># %</span><span class="pl-v">rax</span><span class="pl-en"> = j（</span><span class="pl-c1">0</span><span class="pl-en">..K</span><span class="pl-s1">-</span><span class="pl-c1">1</span><span class="pl-en">），%</span><span class="pl-v">xmm1</span><span class="pl-en"> = sum</span>
+<span class="pl-en"># =============================================================</span>
+<span class="pl-en">.Linner:</span>
+<span class="pl-en">	</span><span class="pl-k">movss</span><span class="pl-en"> (%</span><span class="pl-v">rsi</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm0</span><span class="pl-en">  # </span><span class="pl-v">xmm0</span><span class="pl-en"> = weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span>
+<span class="pl-en">	</span><span class="pl-k">mulss</span><span class="pl-en"> (%</span><span class="pl-v">rdi</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm0</span><span class="pl-en"> # </span><span class="pl-v">xmm0</span><span class="pl-en"> </span><span class="pl-s1">*</span><span class="pl-en">= </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">]</span>
+<span class="pl-en">	</span><span class="pl-k">addss</span><span class="pl-en"> %</span><span class="pl-v">xmm0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm1</span><span class="pl-en">          # sum </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-v">xmm0</span>
+<span class="pl-en">	addq</span>  <span class="pl-c1">$</span><span class="pl-c1">1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span><span class="pl-en">             # j</span><span class="pl-s1">++</span>
+<span class="pl-en">	cmpq  %</span><span class="pl-v">rcx</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span>
+<span class="pl-en">	</span><span class="pl-k">jne</span><span class="pl-en">   .Linner              # j != K 则继续</span>
+
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en"># 存储结果并准备下一次外层迭代</span>
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en">.Lstore_result:</span>
+<span class="pl-en">	</span><span class="pl-k">movss</span><span class="pl-en"> %</span><span class="pl-v">xmm1</span><span class="pl-s1">,</span><span class="pl-en"> (%</span><span class="pl-v">rdx</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">r9</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)  # </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">]</span><span class="pl-en"> = sum</span>
+<span class="pl-en">	addq</span>  <span class="pl-c1">$</span><span class="pl-c1">1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span><span class="pl-en">              # i</span><span class="pl-s1">++</span>
+<span class="pl-en">	addq</span>  <span class="pl-c1">$</span><span class="pl-c1">4</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rdi</span><span class="pl-en">             # </span><span class="pl-k">in</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-c1">1</span><span class="pl-en">（指向下一个 </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">]</span><span class="pl-en">）</span>
+<span class="pl-en">	cmpq  %</span><span class="pl-v">r10</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span>
+<span class="pl-en">	</span><span class="pl-k">je</span><span class="pl-en">    .Lend                # i == out_len 则结束</span>
+
+<span class="pl-en"># =============================================================</span>
+<span class="pl-en"># 外层循环初始化：重置 j=</span><span class="pl-c1">0</span><span class="pl-en"> 和 sum=</span><span class="pl-c1">0</span>
+<span class="pl-en"># =============================================================</span>
+<span class="pl-en">.Louter_setup:</span>
+<span class="pl-en">	movl</span>  <span class="pl-c1">$</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">eax</span><span class="pl-en">             # </span><span class="pl-v">rax</span><span class="pl-en"> = j = </span><span class="pl-c1">0</span>
+<span class="pl-en">	</span><span class="pl-k">pxor</span><span class="pl-en">  %</span><span class="pl-v">xmm1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm1</span><span class="pl-en">         # </span><span class="pl-v">xmm1</span><span class="pl-en"> = sum = </span><span class="pl-c1">0</span><span class="pl-en">.0f（清零累加器）</span>
+<span class="pl-en">	testl %</span><span class="pl-v">r8d</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r8d</span><span class="pl-en">           # if K == </span><span class="pl-c1">0</span>
+<span class="pl-en">	</span><span class="pl-k">jg</span><span class="pl-en">    .Linner              # K &gt; </span><span class="pl-c1">0</span><span class="pl-en"> 则进入内层循环</span>
+<span class="pl-en">	</span><span class="pl-k">jmp</span><span class="pl-en">   .Lstore_result       # K == </span><span class="pl-c1">0</span><span class="pl-en"> 直接存储（sum 仍为 </span><span class="pl-c1">0</span><span class="pl-en">）</span>
+
+<span class="pl-en">.Lend:</span>
+<span class="pl-en">	</span><span class="pl-k">ret</span>
+
+<span class="pl-en">.</span><span class="pl-c1">section</span><span class="pl-en"> .note.GNU</span><span class="pl-s1">-</span><span class="pl-en">stack</span><span class="pl-s1">,</span><span class="pl-s">""</span><span class="pl-s1">,</span><span class="pl-en">@progbits</span>
+</pre></div>
+<p>由于这段代码优化等级不如main函数中的原始代码（-O3），经过测试（<code class="notranslate">./conv1d_bench 524288 64</code>），加速比只有0.6左右，这应该属于正常现象。</p>
+<h1>优化1：AVX2向量化</h1>
+<p>将最外层循环按 8 展开，使用 256-bit 的 <code class="notranslate">ymm</code> 寄存器。内层循环中，我们将单个权重 <code class="notranslate">weight[j]</code> 广播到全部 8 个通道，然后使用 FMA 指令 (<code class="notranslate">vfmadd231ps</code>) 进行融合乘加。这不仅减少了指令数，还消除了中间截断误差。为保证对齐安全，统一使用 <code class="notranslate">vmovups</code> 加载数据。代码和详细的注释如下：</p>
+<div class="highlight highlight-source-assembly"><pre class="notranslate"><span class="pl-en">	.text</span>
+<span class="pl-en">	.globl conv1d_asm</span>
+<span class="pl-en">	.type conv1d_asm</span><span class="pl-s1">,</span><span class="pl-en"> @function</span>
+
+<span class="pl-en"># void conv1d_asm(const</span> <span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-k">in</span><span class="pl-s1">,</span><span class="pl-en"> const</span> <span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en"> weight</span><span class="pl-s1">,</span> <span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-k">out</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-k">int</span><span class="pl-en"> N</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-k">int</span><span class="pl-en"> K)</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 版本：AVX2 基础向量化（1x8 展开）</span><span class="pl-s1">+</span><span class="pl-en"> FMA 融合乘加</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 策略：</span>
+<span class="pl-en">#   </span><span class="pl-s1">-</span><span class="pl-en"> 外层循环按 </span><span class="pl-c1">8</span><span class="pl-en"> 展开，使用 </span><span class="pl-c1">256</span><span class="pl-s1">-</span><span class="pl-en">bit ymm 寄存器一次并行计算 </span><span class="pl-c1">8</span><span class="pl-en"> 个 </span><span class="pl-k">out</span><span class="pl-en"> 元素</span>
+<span class="pl-en">#   </span><span class="pl-s1">-</span><span class="pl-en"> 内层循环：对每个 weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en">，将其广播（</span><span class="pl-k">vbroadcastss</span><span class="pl-en">）到全部 </span><span class="pl-c1">8</span><span class="pl-en"> 个通道，</span>
+<span class="pl-en">#     再与对应的 </span><span class="pl-c1">8</span><span class="pl-en"> 个 </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j..i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">7</span><span class="pl-s1">]</span><span class="pl-en"> 向量做 </span><span class="pl-k">vfmadd231ps</span><span class="pl-en"> 融合乘加</span>
+<span class="pl-en">#   </span><span class="pl-s1">-</span><span class="pl-en"> 收尾处理：out_len 不是 </span><span class="pl-c1">8</span><span class="pl-en"> 的倍数时，用标量 SSE 逐个处理剩余元素</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 寄存器分配（System V AMD64 ABI 入参）：</span>
+<span class="pl-en">#   %</span><span class="pl-v">rdi</span><span class="pl-en"> = </span><span class="pl-k">in</span><span class="pl-en">      (输入数组首地址，</span><span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en">)</span>
+<span class="pl-en">#   %</span><span class="pl-v">rsi</span><span class="pl-en"> = weight  (卷积核首地址，</span><span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en">)</span>
+<span class="pl-en">#   %</span><span class="pl-v">rdx</span><span class="pl-en"> = </span><span class="pl-k">out</span><span class="pl-en">     (输出数组首地址，</span><span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en">)</span>
+<span class="pl-en">#   %</span><span class="pl-v">ecx</span><span class="pl-en"> = N       (输入数组长度，</span><span class="pl-k">int</span><span class="pl-en">)</span>
+<span class="pl-en">#   %</span><span class="pl-v">r8d</span><span class="pl-en"> = K       (卷积核长度，</span><span class="pl-k">int</span><span class="pl-en">)</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 内部寄存器分配：</span>
+<span class="pl-en">#   %</span><span class="pl-v">r10d</span><span class="pl-en"> = out_len = N </span><span class="pl-s1">-</span><span class="pl-en"> K </span><span class="pl-s1">+</span><span class="pl-en"> </span><span class="pl-c1">1</span><span class="pl-en">   (输出长度，</span><span class="pl-c1">32</span><span class="pl-s1">-</span><span class="pl-en">bit)</span>
+<span class="pl-en">#   %</span><span class="pl-v">r10</span><span class="pl-en">  = out_len (</span><span class="pl-c1">64</span><span class="pl-en">位版)</span>
+<span class="pl-en">#   %</span><span class="pl-v">r8</span><span class="pl-en">   = K       (</span><span class="pl-c1">64</span><span class="pl-en">位版)</span>
+<span class="pl-en">#   %</span><span class="pl-v">r9</span><span class="pl-en">   = i      (外层循环变量：当前处理的输出位置索引)</span>
+<span class="pl-en">#   %</span><span class="pl-v">rax</span><span class="pl-en">  = j      (内层循环变量：卷积核偏移)</span>
+<span class="pl-en">#   %</span><span class="pl-v">r11</span><span class="pl-en">  = vec_end (向量化循环的最大 i 值，= out_len &amp; ~</span><span class="pl-c1">7</span><span class="pl-en">，向下按 </span><span class="pl-c1">8</span><span class="pl-en"> 对齐)</span>
+<span class="pl-en">#   %</span><span class="pl-v">ymm0</span><span class="pl-en"> = broadcast weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en">   (</span><span class="pl-c1">8</span><span class="pl-en"> 通道广播后的权重向量)</span>
+<span class="pl-en">#   %</span><span class="pl-v">ymm1</span><span class="pl-en"> = sum_vec               (</span><span class="pl-c1">8</span><span class="pl-en"> 元素 SIMD 累加向量)</span>
+<span class="pl-en">#   %</span><span class="pl-v">ymm2</span><span class="pl-en"> = in_vec                (</span><span class="pl-c1">8</span><span class="pl-en"> 通道输入向量 </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j .. i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">7</span><span class="pl-s1">]</span><span class="pl-en">)</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 算法流程：</span>
+<span class="pl-en">#   out_len = N </span><span class="pl-s1">-</span><span class="pl-en"> K </span><span class="pl-s1">+</span><span class="pl-en"> </span><span class="pl-c1">1</span>
+<span class="pl-en">#   vec_end = out_len &amp; ~</span><span class="pl-c1">7</span><span class="pl-en">        # 向下按 </span><span class="pl-c1">8</span><span class="pl-en"> 对齐的边界</span>
+<span class="pl-en">#</span>
+<span class="pl-en">#   # </span><span class="pl-s1">---</span><span class="pl-en"> 向量化路径：每次处理 </span><span class="pl-c1">8</span><span class="pl-en"> 个 </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i..i</span><span class="pl-s1">+</span><span class="pl-c1">7</span><span class="pl-s1">]</span><span class="pl-en"> 并行 </span><span class="pl-s1">---</span>
+<span class="pl-en">#   for i </span><span class="pl-k">in</span><span class="pl-en"> </span><span class="pl-s1">[</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> vec_end</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-c1">8</span><span class="pl-en">):</span>
+<span class="pl-en">#       sum_vec = {</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-c1">0</span><span class="pl-en">}</span>
+<span class="pl-en">#       for j </span><span class="pl-k">in</span><span class="pl-en"> </span><span class="pl-s1">[</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> K):</span>
+<span class="pl-en">#           w_bc  = broadcast(weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en">)        # </span><span class="pl-k">vbroadcastss</span><span class="pl-en"> → </span><span class="pl-v">ymm0</span>
+<span class="pl-en">#           in_v  = </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j .. i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">7</span><span class="pl-s1">]</span><span class="pl-en">            # </span><span class="pl-k">vmovups</span><span class="pl-en"> → </span><span class="pl-v">ymm2</span>
+<span class="pl-en">#           sum_vec </span><span class="pl-s1">+</span><span class="pl-en">= w_bc </span><span class="pl-s1">*</span><span class="pl-en"> in_v            # </span><span class="pl-k">vfmadd231ps</span>
+<span class="pl-en">#       </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i..i</span><span class="pl-s1">+</span><span class="pl-c1">7</span><span class="pl-s1">]</span><span class="pl-en"> = sum_vec                  # </span><span class="pl-k">vmovups</span><span class="pl-en"> → mem</span>
+<span class="pl-en">#       i </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-c1">8</span>
+<span class="pl-en">#</span>
+<span class="pl-en">#   # </span><span class="pl-s1">---</span><span class="pl-en"> 标量收尾路径：处理剩余 </span><span class="pl-s1">[</span><span class="pl-en">vec_end</span><span class="pl-s1">,</span><span class="pl-en"> out_len) </span><span class="pl-s1">---</span>
+<span class="pl-en">#   for i </span><span class="pl-k">in</span><span class="pl-en"> </span><span class="pl-s1">[</span><span class="pl-en">vec_end</span><span class="pl-s1">,</span><span class="pl-en"> out_len):</span>
+<span class="pl-en">#       sum = </span><span class="pl-c1">0</span>
+<span class="pl-en">#       for j </span><span class="pl-k">in</span><span class="pl-en"> </span><span class="pl-s1">[</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> K):</span>
+<span class="pl-en">#           sum </span><span class="pl-s1">+</span><span class="pl-en">= weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> </span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">]</span>
+<span class="pl-en">#       </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">]</span><span class="pl-en"> = sum</span>
+
+<span class="pl-en">conv1d_asm:</span>
+<span class="pl-en">	</span><span class="pl-k">endbr64</span><span class="pl-en">                        # Intel CET 边界检查（近代</span> <span class="pl-c1">CPU</span> <span class="pl-en">兼容）</span>
+
+<span class="pl-en">	# </span><span class="pl-s1">------------------------------------------------------------</span>
+<span class="pl-en">	# 边界检查，计算 out_len = N </span><span class="pl-s1">-</span><span class="pl-en"> K </span><span class="pl-s1">+</span><span class="pl-en"> </span><span class="pl-c1">1</span>
+<span class="pl-en">	# subl:  </span><span class="pl-v">ecx</span><span class="pl-en"> = N </span><span class="pl-s1">-</span><span class="pl-en"> K（</span><span class="pl-c1">32</span><span class="pl-en"> 位减法）</span>
+<span class="pl-en">	# </span><span class="pl-k">js</span><span class="pl-en">:    if (N &lt; K) → 无输出，直接返回</span>
+<span class="pl-en">	# leal:  </span><span class="pl-v">r10d</span><span class="pl-en"> = (N </span><span class="pl-s1">-</span><span class="pl-en"> K) </span><span class="pl-s1">+</span><span class="pl-en"> </span><span class="pl-c1">1</span><span class="pl-en"> = out_len</span>
+<span class="pl-en">	# movslq: 扩展到 </span><span class="pl-c1">64</span><span class="pl-en"> 位，用于后续的指针/索引运算</span>
+<span class="pl-en">	# </span><span class="pl-s1">------------------------------------------------------------</span>
+<span class="pl-en">	subl   %</span><span class="pl-v">r8d</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">ecx</span><span class="pl-en">             # </span><span class="pl-v">ecx</span><span class="pl-en"> = N </span><span class="pl-s1">-</span><span class="pl-en"> K</span>
+<span class="pl-en">	</span><span class="pl-k">js</span><span class="pl-en">     .Lend_v1                # if (N &lt; K) return</span>
+
+<span class="pl-en">	leal   </span><span class="pl-c1">1</span><span class="pl-en">(%</span><span class="pl-v">rcx</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r10d</span><span class="pl-en">         # </span><span class="pl-v">r10d</span><span class="pl-en"> = out_len = N </span><span class="pl-s1">-</span><span class="pl-en"> K </span><span class="pl-s1">+</span><span class="pl-en"> </span><span class="pl-c1">1</span>
+
+<span class="pl-en">	# 扩展到 </span><span class="pl-c1">64</span><span class="pl-en"> 位以进行安全的指针/索引运算</span>
+<span class="pl-en">	movslq %</span><span class="pl-v">r10d</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r10</span><span class="pl-en">             # </span><span class="pl-v">r10</span><span class="pl-en"> = out_len (</span><span class="pl-c1">64</span><span class="pl-s1">-</span><span class="pl-en">bit)</span>
+<span class="pl-en">	movslq %</span><span class="pl-v">r8d</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r8</span><span class="pl-en">               # </span><span class="pl-v">r8</span><span class="pl-en">  = K (</span><span class="pl-c1">64</span><span class="pl-s1">-</span><span class="pl-en">bit)</span>
+
+<span class="pl-en">	</span><span class="pl-k">movq</span>   <span class="pl-c1">$</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span><span class="pl-en">                 # </span><span class="pl-v">r9</span><span class="pl-en"> = i = </span><span class="pl-c1">0</span><span class="pl-en">（</span><span class="pl-k">out</span><span class="pl-en"> 的写索引）</span>
+
+<span class="pl-en">	# </span><span class="pl-s1">------------------------------------------------------------</span>
+<span class="pl-en">	# 计算 </span><span class="pl-c1">8</span><span class="pl-en"> 元素向量块的边界：vec_end = out_len &amp; ~</span><span class="pl-c1">7</span>
+<span class="pl-en">	# 向下按 </span><span class="pl-c1">8</span><span class="pl-en"> 对齐，剩余不足 </span><span class="pl-c1">8</span><span class="pl-en"> 个的元素走标量路径</span>
+<span class="pl-en">	# 例如 out_len=</span><span class="pl-c1">10</span><span class="pl-en"> 时，vec_end=</span><span class="pl-c1">8</span><span class="pl-en">，剩余 </span><span class="pl-c1">2</span><span class="pl-en"> 个走标量</span>
+<span class="pl-en">	# </span><span class="pl-s1">------------------------------------------------------------</span>
+<span class="pl-en">	</span><span class="pl-k">movq</span><span class="pl-en">   %</span><span class="pl-v">r10</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r11</span><span class="pl-en">              # </span><span class="pl-v">r11</span><span class="pl-en"> = out_len</span>
+<span class="pl-en">	andq   $</span><span class="pl-s1">-</span><span class="pl-c1">8</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r11</span><span class="pl-en">                # </span><span class="pl-v">r11</span><span class="pl-en"> = vec_end = floor(out_len/</span><span class="pl-c1">8</span><span class="pl-en">)</span><span class="pl-s1">*</span><span class="pl-c1">8</span>
+<span class="pl-en">	cmpq</span>   <span class="pl-c1">$</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r11</span>
+<span class="pl-en">	</span><span class="pl-k">je</span><span class="pl-en">     .Lscalar_setup_v1        # out_len &lt; </span><span class="pl-c1">8</span><span class="pl-en">，直接走标量路径</span>
+
+<span class="pl-en"># =============================================================</span>
+<span class="pl-en"># 向量化外层循环：i = </span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-c1">8</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-c1">16</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-c1">24</span><span class="pl-s1">,</span><span class="pl-en"> ... 直到 vec_end</span>
+<span class="pl-en"># 每次处理 </span><span class="pl-c1">8</span><span class="pl-en"> 个连续的 </span><span class="pl-k">out</span><span class="pl-en"> 元素</span>
+<span class="pl-en"># =============================================================</span>
+<span class="pl-en">.Lvec8_loop_v1:</span>
+<span class="pl-en">	# </span><span class="pl-v">ymm1</span><span class="pl-en"> = sum_vec = {</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-c1">0</span><span class="pl-en">}，</span><span class="pl-c1">8</span><span class="pl-en"> 通道累加器清零</span>
+<span class="pl-en">	vxorps %</span><span class="pl-v">ymm1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">ymm1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">ymm1</span>
+
+<span class="pl-en">	</span><span class="pl-k">movq</span>   <span class="pl-c1">$</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span><span class="pl-en">                # j = </span><span class="pl-c1">0</span><span class="pl-en">，内层循环偏移归零</span>
+<span class="pl-en">	testq  %</span><span class="pl-v">r8</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r8</span><span class="pl-en">                 # if K == </span><span class="pl-c1">0</span>
+<span class="pl-en">	</span><span class="pl-k">jle</span><span class="pl-en">    .Lvec8_store_v1          # K == </span><span class="pl-c1">0</span><span class="pl-en"> 跳过内层循环，直接写 </span><span class="pl-c1">0</span>
+
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en"># 向量化内层循环：j = </span><span class="pl-c1">0</span><span class="pl-en"> .. K</span><span class="pl-s1">-</span><span class="pl-c1">1</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 对每个 weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> 执行：</span>
+<span class="pl-en">#   </span><span class="pl-c1">1</span><span class="pl-en">. </span><span class="pl-k">vbroadcastss</span><span class="pl-en">: 将 weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> 广播到 </span><span class="pl-v">ymm0</span><span class="pl-en"> 的全部 </span><span class="pl-c1">8</span><span class="pl-en"> 个通道</span>
+<span class="pl-en">#      </span><span class="pl-v">ymm0</span><span class="pl-en"> = {weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">],</span><span class="pl-en"> weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">],</span><span class="pl-en"> ...</span><span class="pl-s1">,</span><span class="pl-en"> weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en">}</span>
+<span class="pl-en">#   </span><span class="pl-c1">2</span><span class="pl-en">. </span><span class="pl-k">vmovups</span><span class="pl-en">:      加载 </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j .. i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">7</span><span class="pl-s1">]</span><span class="pl-en"> 到 </span><span class="pl-v">ymm2</span>
+<span class="pl-en">#   </span><span class="pl-c1">3</span><span class="pl-en">. </span><span class="pl-k">vfmadd231ps</span><span class="pl-en">:  </span><span class="pl-v">ymm1</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-v">ymm0</span><span class="pl-en"> </span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-v">ymm2</span>
+<span class="pl-en">#      即 sum_vec</span><span class="pl-s1">[</span><span class="pl-en">k</span><span class="pl-s1">]</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en">= weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> </span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-en">k</span><span class="pl-s1">]</span><span class="pl-en">，对全部 k=</span><span class="pl-c1">0</span><span class="pl-en">..</span><span class="pl-c1">7</span><span class="pl-en"> 同时生效</span>
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en">.Lvec8_inner_v1:</span>
+<span class="pl-en">	# </span><span class="pl-k">vbroadcastss</span><span class="pl-en">: 将 weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> 广播到 </span><span class="pl-c1">8</span><span class="pl-en"> 通道</span>
+<span class="pl-en">	# 源: (%</span><span class="pl-v">rsi</span><span class="pl-s1">+</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">*</span><span class="pl-c1">4</span><span class="pl-en">)，即 weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> 的地址</span>
+<span class="pl-en">	# </span><span class="pl-v">ymm0</span><span class="pl-en"> = {w</span><span class="pl-s1">,</span><span class="pl-en"> w</span><span class="pl-s1">,</span><span class="pl-en"> w</span><span class="pl-s1">,</span><span class="pl-en"> w</span><span class="pl-s1">,</span><span class="pl-en"> w</span><span class="pl-s1">,</span><span class="pl-en"> w</span><span class="pl-s1">,</span><span class="pl-en"> w</span><span class="pl-s1">,</span><span class="pl-en"> w}（</span><span class="pl-c1">8</span><span class="pl-en"> 个相同的</span> <span class="pl-c1">float</span><span class="pl-en">）</span>
+<span class="pl-en">	</span><span class="pl-k">vbroadcastss</span><span class="pl-en"> (%</span><span class="pl-v">rsi</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">ymm0</span>
+
+<span class="pl-en">	# </span><span class="pl-k">vmovups</span><span class="pl-en">: 加载 </span><span class="pl-c1">8</span><span class="pl-en"> 个连续的</span> <span class="pl-c1">float</span><span class="pl-en">（内存不需要对齐）</span>
+<span class="pl-en">	# 地址: (%</span><span class="pl-v">rdi</span><span class="pl-s1">+</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">*</span><span class="pl-c1">4</span><span class="pl-en">)，即 </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> 的地址</span>
+<span class="pl-en">	# </span><span class="pl-v">ymm2</span><span class="pl-en"> = {</span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">0</span><span class="pl-s1">],</span><span class="pl-en"> ...</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">7</span><span class="pl-s1">]</span><span class="pl-en">}</span>
+<span class="pl-en">	</span><span class="pl-k">vmovups</span><span class="pl-en"> (%</span><span class="pl-v">rdi</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">ymm2</span>
+
+<span class="pl-en">	# </span><span class="pl-k">vfmadd231ps</span><span class="pl-en">: 融合乘加（</span><span class="pl-c1">3</span><span class="pl-en"> 操作数 FMA）</span>
+<span class="pl-en">	# 语义: </span><span class="pl-v">ymm1</span><span class="pl-en"> = </span><span class="pl-v">ymm1</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en"> </span><span class="pl-v">ymm0</span><span class="pl-en"> </span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-v">ymm2</span>
+<span class="pl-en">	# 等价: sum_vec</span><span class="pl-s1">[</span><span class="pl-en">k</span><span class="pl-s1">]</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en">= broadcast(weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en">)</span><span class="pl-s1">[</span><span class="pl-en">k</span><span class="pl-s1">]</span><span class="pl-en"> </span><span class="pl-s1">*</span><span class="pl-en"> in_vec</span><span class="pl-s1">[</span><span class="pl-en">k</span><span class="pl-s1">]</span>
+<span class="pl-en">	</span><span class="pl-k">vfmadd231ps</span><span class="pl-en"> %</span><span class="pl-v">ymm0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">ymm2</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">ymm1</span>
+
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span><span class="pl-en">                # j</span><span class="pl-s1">++</span>
+<span class="pl-en">	cmpq   %</span><span class="pl-v">r8</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span><span class="pl-en">                # j &lt; K ?</span>
+<span class="pl-en">	</span><span class="pl-k">jl</span><span class="pl-en">     .Lvec8_inner_v1          # j &lt; K，继续内层循环</span>
+
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en"># 存储向量化结果：一次写入 </span><span class="pl-c1">8</span><span class="pl-en"> 个</span> <span class="pl-c1">float</span> <span class="pl-en">到 </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i..i</span><span class="pl-s1">+</span><span class="pl-c1">7</span><span class="pl-s1">]</span>
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en">.Lvec8_store_v1:</span>
+<span class="pl-en">	# </span><span class="pl-k">vmovups</span><span class="pl-en">: 将 </span><span class="pl-v">ymm1</span><span class="pl-en">（</span><span class="pl-c1">8</span><span class="pl-en"> 个</span> <span class="pl-c1">float</span><span class="pl-en">）写入内存</span>
+<span class="pl-en">	# 地址: (%</span><span class="pl-v">rdx</span><span class="pl-s1">+</span><span class="pl-en">%</span><span class="pl-v">r9</span><span class="pl-s1">*</span><span class="pl-c1">4</span><span class="pl-en">)，即 </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">]</span><span class="pl-en"> 的地址</span>
+<span class="pl-en">	</span><span class="pl-k">vmovups</span><span class="pl-en"> %</span><span class="pl-v">ymm1</span><span class="pl-s1">,</span><span class="pl-en"> (%</span><span class="pl-v">rdx</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">r9</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)    # </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i..i</span><span class="pl-s1">+</span><span class="pl-c1">7</span><span class="pl-s1">]</span><span class="pl-en"> = sum_vec</span>
+
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">8</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span><span class="pl-en">                 # i </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-c1">8</span>
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">32</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rdi</span><span class="pl-en">               # ★ </span><span class="pl-k">in</span><span class="pl-en"> 指针右移 </span><span class="pl-c1">8</span><span class="pl-s1">*</span><span class="pl-c1">4</span><span class="pl-en">=</span><span class="pl-c1">32</span><span class="pl-en"> 字节</span>
+<span class="pl-en">	                               # </span><span class="pl-k">in</span><span class="pl-en"> 原本指向 </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">]</span><span class="pl-en">，下一轮要指向 </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-c1">8</span><span class="pl-s1">]</span>
+<span class="pl-en">	                               # 所以 </span><span class="pl-k">in</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-c1">8</span><span class="pl-en">，等价于 </span><span class="pl-k">in</span><span class="pl-en"> = &amp;</span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-c1">8</span><span class="pl-s1">]</span>
+
+<span class="pl-en">	cmpq   %</span><span class="pl-v">r11</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span><span class="pl-en">               # i &lt; vec_end ?</span>
+<span class="pl-en">	</span><span class="pl-k">jl</span><span class="pl-en">     .Lvec8_loop_v1          # i &lt; vec_end，继续向量化循环</span>
+
+<span class="pl-en"># =============================================================</span>
+<span class="pl-en"># 标量收尾循环：处理 out_len 不是 </span><span class="pl-c1">8</span><span class="pl-en"> 的倍数时剩余的 </span><span class="pl-s1">[</span><span class="pl-en">vec_end</span><span class="pl-s1">,</span><span class="pl-en"> out_len)</span>
+<span class="pl-en"># =============================================================</span>
+<span class="pl-en">.Lscalar_setup_v1:</span>
+<span class="pl-en">	cmpq   %</span><span class="pl-v">r10</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span><span class="pl-en">               # i &gt;= out_len ?</span>
+<span class="pl-en">	</span><span class="pl-k">jge</span><span class="pl-en">    .Lend_v1                # 已全部处理完，退出</span>
+
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en"># 标量外层循环：每次计算一个 </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">]</span>
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en">.Lscalar_loop_v1:</span>
+<span class="pl-en">	# </span><span class="pl-v">xmm1</span><span class="pl-en"> = sum = </span><span class="pl-c1">0</span><span class="pl-en">，标量累加器清零</span>
+<span class="pl-en">	vxorps %</span><span class="pl-v">xmm1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm1</span>
+
+<span class="pl-en">	</span><span class="pl-k">movq</span>   <span class="pl-c1">$</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span><span class="pl-en">                # j = </span><span class="pl-c1">0</span>
+<span class="pl-en">	testq  %</span><span class="pl-v">r8</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r8</span><span class="pl-en">                 # if K == </span><span class="pl-c1">0</span>
+<span class="pl-en">	</span><span class="pl-k">jle</span><span class="pl-en">    .Lscalar_store_v1        # K == </span><span class="pl-c1">0</span><span class="pl-en"> 直接写 </span><span class="pl-c1">0</span>
+
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en"># 标量内层循环：j = </span><span class="pl-c1">0</span><span class="pl-en"> .. K</span><span class="pl-s1">-</span><span class="pl-c1">1</span><span class="pl-en">，逐个累加</span>
+<span class="pl-en"># 注意：</span><span class="pl-v">rdi</span><span class="pl-en"> 在向量化阶段已被修改（</span><span class="pl-k">in</span><span class="pl-en"> 指针右移了 vec_end</span><span class="pl-s1">*</span><span class="pl-c1">4</span><span class="pl-en"> 字节）</span>
+<span class="pl-en"># 所以 </span><span class="pl-k">in</span><span class="pl-en"> 的地址 = </span><span class="pl-v">rdi</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en"> </span><span class="pl-v">rax</span><span class="pl-s1">*</span><span class="pl-c1">4</span><span class="pl-en">，即当前 </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> 的位置</span>
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en">.Lscalar_inner_v1:</span>
+<span class="pl-en">	# 加载 weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> 到 </span><span class="pl-v">xmm0</span>
+<span class="pl-en">	</span><span class="pl-k">vmovss</span><span class="pl-en"> (%</span><span class="pl-v">rsi</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm0</span><span class="pl-en">    # </span><span class="pl-v">xmm0</span><span class="pl-en"> = weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span>
+
+<span class="pl-en">	# 加载 </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> 到 </span><span class="pl-v">xmm2</span>
+<span class="pl-en">	</span><span class="pl-k">vmovss</span><span class="pl-en"> (%</span><span class="pl-v">rdi</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm2</span><span class="pl-en">   # </span><span class="pl-v">xmm2</span><span class="pl-en"> = </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">]</span>
+
+<span class="pl-en">	# 标量 FMA：</span><span class="pl-v">xmm1</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-v">xmm0</span><span class="pl-en"> </span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-v">xmm2</span>
+<span class="pl-en">	</span><span class="pl-k">vfmadd231ss</span><span class="pl-en"> %</span><span class="pl-v">xmm0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm2</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm1</span>
+
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span>
+<span class="pl-en">	cmpq   %</span><span class="pl-v">r8</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span>
+<span class="pl-en">	</span><span class="pl-k">jl</span><span class="pl-en">     .Lscalar_inner_v1</span>
+
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en"># 存储标量结果：写回 </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">]</span>
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en">.Lscalar_store_v1:</span>
+<span class="pl-en">	</span><span class="pl-k">vmovss</span><span class="pl-en"> %</span><span class="pl-v">xmm1</span><span class="pl-s1">,</span><span class="pl-en"> (%</span><span class="pl-v">rdx</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">r9</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)    # </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">]</span><span class="pl-en"> = sum</span>
+
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span><span class="pl-en">                # i</span><span class="pl-s1">++</span>
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">4</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rdi</span><span class="pl-en">               # </span><span class="pl-k">in</span><span class="pl-en"> 指针右移 </span><span class="pl-c1">1</span><span class="pl-en"> 个</span> <span class="pl-c1">float</span><span class="pl-en">（</span><span class="pl-c1">1</span><span class="pl-s1">*</span><span class="pl-c1">4</span><span class="pl-en">=</span><span class="pl-c1">4</span><span class="pl-en"> 字节）</span>
+
+<span class="pl-en">	cmpq   %</span><span class="pl-v">r10</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span><span class="pl-en">              # i &lt; out_len ?</span>
+<span class="pl-en">	</span><span class="pl-k">jl</span><span class="pl-en">     .Lscalar_loop_v1        # 继续处理下一个</span>
+
+<span class="pl-en">.Lend_v1:</span>
+<span class="pl-en">	</span><span class="pl-k">vzeroupper</span><span class="pl-en">                      # 清 ymm 高 </span><span class="pl-c1">128</span><span class="pl-en"> 位，避免调用者 AVX/SSE 切换惩罚</span>
+<span class="pl-en">	</span><span class="pl-k">ret</span>
+
+<span class="pl-en">.</span><span class="pl-c1">section</span><span class="pl-en"> .note.GNU</span><span class="pl-s1">-</span><span class="pl-en">stack</span><span class="pl-s1">,</span><span class="pl-s">""</span><span class="pl-s1">,</span><span class="pl-en">@progbits</span>
+</pre></div>
+<p>测试了部分样例（全部测试会超时），结果如下：</p>
+<div class="highlight highlight-source-shell"><pre class="notranslate">./conv1d_bench 524288 64     <span class="pl-c"><span class="pl-c">#</span>7.068x</span>
+./conv1d_bench 134217728 64  <span class="pl-c"><span class="pl-c">#</span>6.039x</span></pre></div>
+<p>提交到网站加速比7.060，得分56</p>
+<h1>优化2：AVX-512向量化</h1>
+<p>利用目标平台 Xeon 6338 支持的 AVX-512 指令集，将向量寄存器升级为 512-bit 的 <code class="notranslate">zmm</code>，单次外层循环处理的输出元素从 8 个提升至 16 个，理论吞吐量翻倍。详细的代码和注释如下所示：</p>
+<div class="highlight highlight-source-assembly"><pre class="notranslate"><span class="pl-en">.text</span>
+<span class="pl-en">	.globl conv1d_asm</span>
+<span class="pl-en">	.type conv1d_asm</span><span class="pl-s1">,</span><span class="pl-en"> @function</span>
+
+<span class="pl-en"># void conv1d_asm(const</span> <span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-k">in</span><span class="pl-s1">,</span><span class="pl-en"> const</span> <span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en"> weight</span><span class="pl-s1">,</span> <span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-k">out</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-k">int</span><span class="pl-en"> N</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-k">int</span><span class="pl-en"> K)</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 版本：AVX</span><span class="pl-s1">-</span><span class="pl-c1">512</span><span class="pl-en"> 基础向量化（1x16 展开）</span><span class="pl-s1">+</span><span class="pl-en"> FMA 融合乘加</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 策略：</span>
+<span class="pl-en">#   </span><span class="pl-s1">-</span><span class="pl-en"> 升级到 </span><span class="pl-c1">512</span><span class="pl-s1">-</span><span class="pl-en">bit zmm 寄存器，单次外层循环处理 </span><span class="pl-c1">16</span><span class="pl-en"> 个 </span><span class="pl-k">out</span><span class="pl-en"> 元素（AVX2 的两倍）</span>
+<span class="pl-en">#   </span><span class="pl-s1">-</span><span class="pl-en"> 内层循环：对每个 weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en">，</span><span class="pl-k">vbroadcastss</span><span class="pl-en"> 广播到全部 </span><span class="pl-c1">16</span><span class="pl-en"> 通道，</span>
+<span class="pl-en">#     与 </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j..i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">15</span><span class="pl-s1">]</span><span class="pl-en"> 向量做 </span><span class="pl-k">vfmadd231ps</span><span class="pl-en"> 融合乘加</span>
+<span class="pl-en">#   </span><span class="pl-s1">-</span><span class="pl-en"> 收尾处理：out_len 不是 </span><span class="pl-c1">16</span><span class="pl-en"> 的倍数时，用标量 SSE 逐个处理剩余元素</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 寄存器分配（System V AMD64 ABI 入参）：</span>
+<span class="pl-en">#   %</span><span class="pl-v">rdi</span><span class="pl-en"> = </span><span class="pl-k">in</span><span class="pl-en">      (输入数组首地址，</span><span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en">)</span>
+<span class="pl-en">#   %</span><span class="pl-v">rsi</span><span class="pl-en"> = weight  (卷积核首地址，</span><span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en">)</span>
+<span class="pl-en">#   %</span><span class="pl-v">rdx</span><span class="pl-en"> = </span><span class="pl-k">out</span><span class="pl-en">     (输出数组首地址，</span><span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en">)</span>
+<span class="pl-en">#   %</span><span class="pl-v">ecx</span><span class="pl-en"> = N       (输入数组长度，</span><span class="pl-k">int</span><span class="pl-en">)</span>
+<span class="pl-en">#   %</span><span class="pl-v">r8d</span><span class="pl-en"> = K       (卷积核长度，</span><span class="pl-k">int</span><span class="pl-en">)</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 内部寄存器分配：</span>
+<span class="pl-en">#   %</span><span class="pl-v">r10d</span><span class="pl-en"> = out_len = N </span><span class="pl-s1">-</span><span class="pl-en"> K </span><span class="pl-s1">+</span><span class="pl-en"> </span><span class="pl-c1">1</span><span class="pl-en">   (输出长度，</span><span class="pl-c1">32</span><span class="pl-s1">-</span><span class="pl-en">bit)</span>
+<span class="pl-en">#   %</span><span class="pl-v">r10</span><span class="pl-en">  = out_len (</span><span class="pl-c1">64</span><span class="pl-en">位版)</span>
+<span class="pl-en">#   %</span><span class="pl-v">r8</span><span class="pl-en">   = K       (</span><span class="pl-c1">64</span><span class="pl-en">位版)</span>
+<span class="pl-en">#   %</span><span class="pl-v">r9</span><span class="pl-en">   = i      (外层循环变量：当前处理的输出位置索引)</span>
+<span class="pl-en">#   %</span><span class="pl-v">rax</span><span class="pl-en">  = j      (内层循环变量：卷积核偏移)</span>
+<span class="pl-en">#   %</span><span class="pl-v">r11</span><span class="pl-en">  = vec_end (向量化循环的最大 i 值，= out_len &amp; ~</span><span class="pl-c1">15</span><span class="pl-en">，向下按 </span><span class="pl-c1">16</span><span class="pl-en"> 对齐)</span>
+<span class="pl-en">#   %</span><span class="pl-v">zmm0</span><span class="pl-en"> = broadcast weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en">   (</span><span class="pl-c1">16</span><span class="pl-en"> 通道广播后的权重向量)</span>
+<span class="pl-en">#   %</span><span class="pl-v">zmm1</span><span class="pl-en"> = sum_vec               (</span><span class="pl-c1">16</span><span class="pl-en"> 元素 SIMD 累加向量)</span>
+<span class="pl-en">#   %</span><span class="pl-v">zmm2</span><span class="pl-en"> = in_vec                (</span><span class="pl-c1">16</span><span class="pl-en"> 通道输入向量 </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j .. i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">15</span><span class="pl-s1">]</span><span class="pl-en">)</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 算法流程：</span>
+<span class="pl-en">#   out_len = N </span><span class="pl-s1">-</span><span class="pl-en"> K </span><span class="pl-s1">+</span><span class="pl-en"> </span><span class="pl-c1">1</span>
+<span class="pl-en">#   vec_end = out_len &amp; ~</span><span class="pl-c1">15</span><span class="pl-en">       # 向下按 </span><span class="pl-c1">16</span><span class="pl-en"> 对齐的边界</span>
+<span class="pl-en">#</span>
+<span class="pl-en">#   # </span><span class="pl-s1">---</span><span class="pl-en"> 向量化路径：每次处理 </span><span class="pl-c1">16</span><span class="pl-en"> 个 </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i..i</span><span class="pl-s1">+</span><span class="pl-c1">15</span><span class="pl-s1">]</span><span class="pl-en"> 并行 </span><span class="pl-s1">---</span>
+<span class="pl-en">#   for i </span><span class="pl-k">in</span><span class="pl-en"> </span><span class="pl-s1">[</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> vec_end</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-c1">16</span><span class="pl-en">):</span>
+<span class="pl-en">#       sum_vec = {</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en">...} (</span><span class="pl-c1">16</span><span class="pl-en">个零)</span>
+<span class="pl-en">#       for j </span><span class="pl-k">in</span><span class="pl-en"> </span><span class="pl-s1">[</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> K):</span>
+<span class="pl-en">#           w_bc  = broadcast(weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en">)         # </span><span class="pl-k">vbroadcastss</span><span class="pl-en"> → </span><span class="pl-v">zmm0</span>
+<span class="pl-en">#           in_v  = </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j .. i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">15</span><span class="pl-s1">]</span><span class="pl-en">             # </span><span class="pl-k">vmovups</span><span class="pl-en"> → </span><span class="pl-v">zmm2</span>
+<span class="pl-en">#           sum_vec </span><span class="pl-s1">+</span><span class="pl-en">= w_bc </span><span class="pl-s1">*</span><span class="pl-en"> in_v                # </span><span class="pl-k">vfmadd231ps</span>
+<span class="pl-en">#       </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i..i</span><span class="pl-s1">+</span><span class="pl-c1">15</span><span class="pl-s1">]</span><span class="pl-en"> = sum_vec                    # </span><span class="pl-k">vmovups</span><span class="pl-en"> → mem</span>
+<span class="pl-en">#       i </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-c1">16</span>
+<span class="pl-en">#</span>
+<span class="pl-en">#   # </span><span class="pl-s1">---</span><span class="pl-en"> 标量收尾路径：处理剩余 </span><span class="pl-s1">[</span><span class="pl-en">vec_end</span><span class="pl-s1">,</span><span class="pl-en"> out_len) </span><span class="pl-s1">---</span>
+<span class="pl-en">#   for i </span><span class="pl-k">in</span><span class="pl-en"> </span><span class="pl-s1">[</span><span class="pl-en">vec_end</span><span class="pl-s1">,</span><span class="pl-en"> out_len):</span>
+<span class="pl-en">#       sum = </span><span class="pl-c1">0</span>
+<span class="pl-en">#       for j </span><span class="pl-k">in</span><span class="pl-en"> </span><span class="pl-s1">[</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> K):</span>
+<span class="pl-en">#           sum </span><span class="pl-s1">+</span><span class="pl-en">= weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> </span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">]</span>
+<span class="pl-en">#       </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">]</span><span class="pl-en"> = sum</span>
+
+<span class="pl-en">conv1d_asm:</span>
+<span class="pl-en">	</span><span class="pl-k">endbr64</span><span class="pl-en">                        # Intel CET 边界检查（近代</span> <span class="pl-c1">CPU</span> <span class="pl-en">兼容）</span>
+
+<span class="pl-en">	# </span><span class="pl-s1">------------------------------------------------------------</span>
+<span class="pl-en">	# 边界检查，计算 out_len = N </span><span class="pl-s1">-</span><span class="pl-en"> K </span><span class="pl-s1">+</span><span class="pl-en"> </span><span class="pl-c1">1</span>
+<span class="pl-en">	# subl:  </span><span class="pl-v">ecx</span><span class="pl-en"> = N </span><span class="pl-s1">-</span><span class="pl-en"> K（</span><span class="pl-c1">32</span><span class="pl-en"> 位减法）</span>
+<span class="pl-en">	# </span><span class="pl-k">js</span><span class="pl-en">:    if (N &lt; K) → 无输出，直接返回</span>
+<span class="pl-en">	# leal:  </span><span class="pl-v">r10d</span><span class="pl-en"> = (N </span><span class="pl-s1">-</span><span class="pl-en"> K) </span><span class="pl-s1">+</span><span class="pl-en"> </span><span class="pl-c1">1</span><span class="pl-en"> = out_len</span>
+<span class="pl-en">	# movslq: 扩展到 </span><span class="pl-c1">64</span><span class="pl-en"> 位，用于后续的指针/索引运算</span>
+<span class="pl-en">	# </span><span class="pl-s1">------------------------------------------------------------</span>
+<span class="pl-en">	subl   %</span><span class="pl-v">r8d</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">ecx</span><span class="pl-en">             # </span><span class="pl-v">ecx</span><span class="pl-en"> = N </span><span class="pl-s1">-</span><span class="pl-en"> K</span>
+<span class="pl-en">	</span><span class="pl-k">js</span><span class="pl-en">     .Lend_v2                # if (N &lt; K) return</span>
+
+<span class="pl-en">	leal   </span><span class="pl-c1">1</span><span class="pl-en">(%</span><span class="pl-v">rcx</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r10d</span><span class="pl-en">         # </span><span class="pl-v">r10d</span><span class="pl-en"> = out_len = N </span><span class="pl-s1">-</span><span class="pl-en"> K </span><span class="pl-s1">+</span><span class="pl-en"> </span><span class="pl-c1">1</span>
+<span class="pl-en">	movslq %</span><span class="pl-v">r10d</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r10</span><span class="pl-en">             # </span><span class="pl-v">r10</span><span class="pl-en"> = out_len (</span><span class="pl-c1">64</span><span class="pl-s1">-</span><span class="pl-en">bit)</span>
+<span class="pl-en">	movslq %</span><span class="pl-v">r8d</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r8</span><span class="pl-en">               # </span><span class="pl-v">r8</span><span class="pl-en">  = K (</span><span class="pl-c1">64</span><span class="pl-s1">-</span><span class="pl-en">bit)</span>
+
+<span class="pl-en">	</span><span class="pl-k">movq</span>   <span class="pl-c1">$</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span><span class="pl-en">                 # </span><span class="pl-v">r9</span><span class="pl-en"> = i = </span><span class="pl-c1">0</span><span class="pl-en">（</span><span class="pl-k">out</span><span class="pl-en"> 的写索引）</span>
+
+<span class="pl-en">	# </span><span class="pl-s1">------------------------------------------------------------</span>
+<span class="pl-en">	# 计算 </span><span class="pl-c1">16</span><span class="pl-en"> 元素向量块的边界：vec_end = out_len &amp; ~</span><span class="pl-c1">15</span>
+<span class="pl-en">	# 向下按 </span><span class="pl-c1">16</span><span class="pl-en"> 对齐，剩余不足 </span><span class="pl-c1">16</span><span class="pl-en"> 个的元素走标量路径</span>
+<span class="pl-en">	# 例如 out_len=</span><span class="pl-c1">20</span><span class="pl-en"> 时，vec_end=</span><span class="pl-c1">16</span><span class="pl-en">，剩余 </span><span class="pl-c1">4</span><span class="pl-en"> 个走标量</span>
+<span class="pl-en">	# </span><span class="pl-s1">------------------------------------------------------------</span>
+<span class="pl-en">	</span><span class="pl-k">movq</span><span class="pl-en">   %</span><span class="pl-v">r10</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r11</span><span class="pl-en">              # </span><span class="pl-v">r11</span><span class="pl-en"> = out_len</span>
+<span class="pl-en">	andq   $</span><span class="pl-s1">-</span><span class="pl-c1">16</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r11</span><span class="pl-en">               # </span><span class="pl-v">r11</span><span class="pl-en"> = vec_end = floor(out_len/</span><span class="pl-c1">16</span><span class="pl-en">)</span><span class="pl-s1">*</span><span class="pl-c1">16</span>
+<span class="pl-en">	cmpq</span>   <span class="pl-c1">$</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r11</span>
+<span class="pl-en">	</span><span class="pl-k">je</span><span class="pl-en">     .Lscalar_setup_v2        # out_len &lt; </span><span class="pl-c1">16</span><span class="pl-en">，直接走标量路径</span>
+
+<span class="pl-en"># =============================================================</span>
+<span class="pl-en"># 向量化外层循环：i = </span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-c1">16</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-c1">32</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-c1">48</span><span class="pl-s1">,</span><span class="pl-en"> ... 直到 vec_end</span>
+<span class="pl-en"># 每次处理 </span><span class="pl-c1">16</span><span class="pl-en"> 个连续的 </span><span class="pl-k">out</span><span class="pl-en"> 元素</span>
+<span class="pl-en"># =============================================================</span>
+<span class="pl-en">.Lvec16_loop_v2:</span>
+<span class="pl-en">	# </span><span class="pl-v">zmm1</span><span class="pl-en"> = sum_vec = {</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en">...}（</span><span class="pl-c1">16</span><span class="pl-en"> 个零），</span><span class="pl-c1">16</span><span class="pl-en"> 通道累加器清零</span>
+<span class="pl-en">	vxorps %</span><span class="pl-v">zmm1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm1</span>
+
+<span class="pl-en">	</span><span class="pl-k">movq</span>   <span class="pl-c1">$</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span><span class="pl-en">                # j = </span><span class="pl-c1">0</span><span class="pl-en">，内层循环偏移归零</span>
+<span class="pl-en">	testq  %</span><span class="pl-v">r8</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r8</span><span class="pl-en">                 # if K == </span><span class="pl-c1">0</span>
+<span class="pl-en">	</span><span class="pl-k">jle</span><span class="pl-en">    .Lvec16_store_v2          # K == </span><span class="pl-c1">0</span><span class="pl-en"> 跳过内层循环，直接写 </span><span class="pl-c1">0</span>
+
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en"># 向量化内层循环：j = </span><span class="pl-c1">0</span><span class="pl-en"> .. K</span><span class="pl-s1">-</span><span class="pl-c1">1</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 对每个 weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> 执行：</span>
+<span class="pl-en">#   </span><span class="pl-c1">1</span><span class="pl-en">. </span><span class="pl-k">vbroadcastss</span><span class="pl-en">: 将 weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> 广播到 </span><span class="pl-v">zmm0</span><span class="pl-en"> 的全部 </span><span class="pl-c1">16</span><span class="pl-en"> 个通道</span>
+<span class="pl-en">#      </span><span class="pl-v">zmm0</span><span class="pl-en"> = {weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">],</span><span class="pl-en"> weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">],</span><span class="pl-en"> ...</span><span class="pl-s1">,</span><span class="pl-en"> weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en">}（</span><span class="pl-c1">16</span><span class="pl-en"> 个相同</span> <span class="pl-c1">float</span><span class="pl-en">）</span>
+<span class="pl-en">#   </span><span class="pl-c1">2</span><span class="pl-en">. </span><span class="pl-k">vmovups</span><span class="pl-en">:      加载 </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j .. i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">15</span><span class="pl-s1">]</span><span class="pl-en"> 到 </span><span class="pl-v">zmm2</span>
+<span class="pl-en">#   </span><span class="pl-c1">3</span><span class="pl-en">. </span><span class="pl-k">vfmadd231ps</span><span class="pl-en">:  </span><span class="pl-v">zmm1</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-v">zmm0</span><span class="pl-en"> </span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-v">zmm2</span>
+<span class="pl-en">#      即 sum_vec</span><span class="pl-s1">[</span><span class="pl-en">k</span><span class="pl-s1">]</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en">= weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> </span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-en">k</span><span class="pl-s1">]</span><span class="pl-en">，对全部 k=</span><span class="pl-c1">0</span><span class="pl-en">..</span><span class="pl-c1">15</span><span class="pl-en"> 同时生效</span>
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en">.Lvec16_inner_v2:</span>
+<span class="pl-en">	# </span><span class="pl-k">vbroadcastss</span><span class="pl-en">: 将 weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> 广播到 </span><span class="pl-c1">16</span><span class="pl-en"> 通道</span>
+<span class="pl-en">	# 源: (%</span><span class="pl-v">rsi</span><span class="pl-s1">+</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">*</span><span class="pl-c1">4</span><span class="pl-en">)，即 weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> 的地址</span>
+<span class="pl-en">	# </span><span class="pl-v">zmm0</span><span class="pl-en"> = {w</span><span class="pl-s1">,</span><span class="pl-en"> w</span><span class="pl-s1">,</span><span class="pl-en"> ...</span><span class="pl-s1">,</span><span class="pl-en"> w}（</span><span class="pl-c1">16</span><span class="pl-en"> 个相同的</span> <span class="pl-c1">float</span><span class="pl-en">）</span>
+<span class="pl-en">	</span><span class="pl-k">vbroadcastss</span><span class="pl-en"> (%</span><span class="pl-v">rsi</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm0</span>
+
+<span class="pl-en">	# </span><span class="pl-k">vmovups</span><span class="pl-en">: 加载 </span><span class="pl-c1">16</span><span class="pl-en"> 个连续的</span> <span class="pl-c1">float</span><span class="pl-en">（内存不需要对齐）</span>
+<span class="pl-en">	# 地址: (%</span><span class="pl-v">rdi</span><span class="pl-s1">+</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">*</span><span class="pl-c1">4</span><span class="pl-en">)，即 </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> 的地址</span>
+<span class="pl-en">	# </span><span class="pl-v">zmm2</span><span class="pl-en"> = {</span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">0</span><span class="pl-s1">],</span><span class="pl-en"> ...</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">15</span><span class="pl-s1">]</span><span class="pl-en">}</span>
+<span class="pl-en">	</span><span class="pl-k">vmovups</span><span class="pl-en"> (%</span><span class="pl-v">rdi</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm2</span>
+
+<span class="pl-en">	# </span><span class="pl-k">vfmadd231ps</span><span class="pl-en">: 融合乘加（</span><span class="pl-c1">3</span><span class="pl-en"> 操作数 FMA）</span>
+<span class="pl-en">	# 语义: </span><span class="pl-v">zmm1</span><span class="pl-en"> = </span><span class="pl-v">zmm1</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en"> </span><span class="pl-v">zmm0</span><span class="pl-en"> </span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-v">zmm2</span>
+<span class="pl-en">	# 等价: sum_vec</span><span class="pl-s1">[</span><span class="pl-en">k</span><span class="pl-s1">]</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en">= broadcast(weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en">)</span><span class="pl-s1">[</span><span class="pl-en">k</span><span class="pl-s1">]</span><span class="pl-en"> </span><span class="pl-s1">*</span><span class="pl-en"> in_vec</span><span class="pl-s1">[</span><span class="pl-en">k</span><span class="pl-s1">]</span>
+<span class="pl-en">	</span><span class="pl-k">vfmadd231ps</span><span class="pl-en"> %</span><span class="pl-v">zmm0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm2</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm1</span>
+
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span><span class="pl-en">                # j</span><span class="pl-s1">++</span>
+<span class="pl-en">	cmpq   %</span><span class="pl-v">r8</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span><span class="pl-en">                # j &lt; K ?</span>
+<span class="pl-en">	</span><span class="pl-k">jl</span><span class="pl-en">     .Lvec16_inner_v2          # j &lt; K，继续内层循环</span>
+
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en"># 存储向量化结果：一次写入 </span><span class="pl-c1">16</span><span class="pl-en"> 个</span> <span class="pl-c1">float</span> <span class="pl-en">到 </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i..i</span><span class="pl-s1">+</span><span class="pl-c1">15</span><span class="pl-s1">]</span>
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en">.Lvec16_store_v2:</span>
+<span class="pl-en">	# </span><span class="pl-k">vmovups</span><span class="pl-en">: 将 </span><span class="pl-v">zmm1</span><span class="pl-en">（</span><span class="pl-c1">16</span><span class="pl-en"> 个</span> <span class="pl-c1">float</span><span class="pl-en">）写入内存</span>
+<span class="pl-en">	# 地址: (%</span><span class="pl-v">rdx</span><span class="pl-s1">+</span><span class="pl-en">%</span><span class="pl-v">r9</span><span class="pl-s1">*</span><span class="pl-c1">4</span><span class="pl-en">)，即 </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">]</span><span class="pl-en"> 的地址</span>
+<span class="pl-en">	</span><span class="pl-k">vmovups</span><span class="pl-en"> %</span><span class="pl-v">zmm1</span><span class="pl-s1">,</span><span class="pl-en"> (%</span><span class="pl-v">rdx</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">r9</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)    # </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i..i</span><span class="pl-s1">+</span><span class="pl-c1">15</span><span class="pl-s1">]</span><span class="pl-en"> = sum_vec</span>
+
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">16</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span><span class="pl-en">                # i </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-c1">16</span>
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">64</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rdi</span><span class="pl-en">               # ★ </span><span class="pl-k">in</span><span class="pl-en"> 指针右移 </span><span class="pl-c1">16</span><span class="pl-s1">*</span><span class="pl-c1">4</span><span class="pl-en">=</span><span class="pl-c1">64</span><span class="pl-en"> 字节</span>
+<span class="pl-en">	                               # </span><span class="pl-k">in</span><span class="pl-en"> 原本指向 </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">]</span><span class="pl-en">，下一轮要指向 </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-c1">16</span><span class="pl-s1">]</span>
+<span class="pl-en">	                               # 所以 </span><span class="pl-k">in</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-c1">16</span><span class="pl-en">，等价于 </span><span class="pl-k">in</span><span class="pl-en"> = &amp;</span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-c1">16</span><span class="pl-s1">]</span>
+
+<span class="pl-en">	cmpq   %</span><span class="pl-v">r11</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span><span class="pl-en">               # i &lt; vec_end ?</span>
+<span class="pl-en">	</span><span class="pl-k">jl</span><span class="pl-en">     .Lvec16_loop_v2         # i &lt; vec_end，继续向量化循环</span>
+
+<span class="pl-en"># =============================================================</span>
+<span class="pl-en"># 标量收尾循环：处理 out_len 不是 </span><span class="pl-c1">16</span><span class="pl-en"> 的倍数时剩余的 </span><span class="pl-s1">[</span><span class="pl-en">vec_end</span><span class="pl-s1">,</span><span class="pl-en"> out_len)</span>
+<span class="pl-en"># =============================================================</span>
+<span class="pl-en">.Lscalar_setup_v2:</span>
+<span class="pl-en">	cmpq   %</span><span class="pl-v">r10</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span><span class="pl-en">               # i &gt;= out_len ?</span>
+<span class="pl-en">	</span><span class="pl-k">jge</span><span class="pl-en">    .Lend_v2                # 已全部处理完，退出</span>
+
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en"># 标量外层循环：每次计算一个 </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">]</span>
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en">.Lscalar_loop_v2:</span>
+<span class="pl-en">	# </span><span class="pl-v">xmm1</span><span class="pl-en"> = sum = </span><span class="pl-c1">0</span><span class="pl-en">，标量累加器清零</span>
+<span class="pl-en">	vxorps %</span><span class="pl-v">xmm1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm1</span>
+
+<span class="pl-en">	</span><span class="pl-k">movq</span>   <span class="pl-c1">$</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span><span class="pl-en">                # j = </span><span class="pl-c1">0</span>
+<span class="pl-en">	testq  %</span><span class="pl-v">r8</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r8</span><span class="pl-en">                 # if K == </span><span class="pl-c1">0</span>
+<span class="pl-en">	</span><span class="pl-k">jle</span><span class="pl-en">    .Lscalar_store_v2        # K == </span><span class="pl-c1">0</span><span class="pl-en"> 直接写 </span><span class="pl-c1">0</span>
+
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en"># 标量内层循环：j = </span><span class="pl-c1">0</span><span class="pl-en"> .. K</span><span class="pl-s1">-</span><span class="pl-c1">1</span><span class="pl-en">，逐个累加</span>
+<span class="pl-en"># 注意：</span><span class="pl-v">rdi</span><span class="pl-en"> 在向量化阶段已被修改（</span><span class="pl-k">in</span><span class="pl-en"> 指针右移了 vec_end</span><span class="pl-s1">*</span><span class="pl-c1">4</span><span class="pl-en"> 字节）</span>
+<span class="pl-en"># 所以 </span><span class="pl-k">in</span><span class="pl-en"> 的地址 = </span><span class="pl-v">rdi</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en"> </span><span class="pl-v">rax</span><span class="pl-s1">*</span><span class="pl-c1">4</span><span class="pl-en">，即当前 </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> 的位置</span>
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en">.Lscalar_inner_v2:</span>
+<span class="pl-en">	# 加载 weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> 到 </span><span class="pl-v">xmm0</span>
+<span class="pl-en">	</span><span class="pl-k">vmovss</span><span class="pl-en"> (%</span><span class="pl-v">rsi</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm0</span><span class="pl-en">    # </span><span class="pl-v">xmm0</span><span class="pl-en"> = weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span>
+
+<span class="pl-en">	# 加载 </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> 到 </span><span class="pl-v">xmm2</span>
+<span class="pl-en">	</span><span class="pl-k">vmovss</span><span class="pl-en"> (%</span><span class="pl-v">rdi</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm2</span><span class="pl-en">   # </span><span class="pl-v">xmm2</span><span class="pl-en"> = </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">]</span>
+
+<span class="pl-en">	# 标量 FMA：</span><span class="pl-v">xmm1</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-v">xmm0</span><span class="pl-en"> </span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-v">xmm2</span>
+<span class="pl-en">	</span><span class="pl-k">vfmadd231ss</span><span class="pl-en"> %</span><span class="pl-v">xmm0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm2</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm1</span>
+
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span>
+<span class="pl-en">	cmpq   %</span><span class="pl-v">r8</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span>
+<span class="pl-en">	</span><span class="pl-k">jl</span><span class="pl-en">     .Lscalar_inner_v2</span>
+
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en"># 存储标量结果：写回 </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">]</span>
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en">.Lscalar_store_v2:</span>
+<span class="pl-en">	</span><span class="pl-k">vmovss</span><span class="pl-en"> %</span><span class="pl-v">xmm1</span><span class="pl-s1">,</span><span class="pl-en"> (%</span><span class="pl-v">rdx</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">r9</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)    # </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">]</span><span class="pl-en"> = sum</span>
+
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span><span class="pl-en">                # i</span><span class="pl-s1">++</span>
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">4</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rdi</span><span class="pl-en">               # </span><span class="pl-k">in</span><span class="pl-en"> 指针右移 </span><span class="pl-c1">1</span><span class="pl-en"> 个</span> <span class="pl-c1">float</span><span class="pl-en">（</span><span class="pl-c1">1</span><span class="pl-s1">*</span><span class="pl-c1">4</span><span class="pl-en">=</span><span class="pl-c1">4</span><span class="pl-en"> 字节）</span>
+
+<span class="pl-en">	cmpq   %</span><span class="pl-v">r10</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span><span class="pl-en">              # i &lt; out_len ?</span>
+<span class="pl-en">	</span><span class="pl-k">jl</span><span class="pl-en">     .Lscalar_loop_v2         # 继续处理下一个</span>
+
+<span class="pl-en">.Lend_v2:</span>
+<span class="pl-en">	</span><span class="pl-k">vzeroupper</span><span class="pl-en">                      # 清 zmm/ymm 高位，避免调用者 AVX/SSE 切换惩罚</span>
+<span class="pl-en">	</span><span class="pl-k">ret</span>
+
+<span class="pl-en">.</span><span class="pl-c1">section</span><span class="pl-en"> .note.GNU</span><span class="pl-s1">-</span><span class="pl-en">stack</span><span class="pl-s1">,</span><span class="pl-s">""</span><span class="pl-s1">,</span><span class="pl-en">@progbits</span></pre></div>
+<p>测试了部分样例，结果如下：</p>
+<div class="highlight highlight-source-shell"><pre class="notranslate">./conv1d_bench 524288 64     <span class="pl-c"><span class="pl-c">#</span>13.972</span>
+./conv1d_bench 134217728 64  <span class="pl-c"><span class="pl-c">#</span>10.935</span></pre></div>
+<p>提交到网站加速比12.113x，得分80</p>
+<h1>优化3：外层循环4×16展开</h1>
+<p>由于 FMA 指令具有较长的延迟（通常为 4 个周期），单纯的 1x16 计算会导致 CPU 流水线处于等待状态。我们将外层循环进一步按 64 展开，同时使用 4 个独立累加器 (<code class="notranslate">zmm1</code>~<code class="notranslate">zmm4</code>)。这样一次 <code class="notranslate">vbroadcastss</code> 加载的权重被立即复用于 4 次并发的独立计算中，完美隐藏了延迟。代码与详细注释如下所示</p>
+<div class="highlight highlight-source-assembly"><pre class="notranslate"><span class="pl-en">.text</span>
+<span class="pl-en">	.globl conv1d_asm</span>
+<span class="pl-en">	.type conv1d_asm</span><span class="pl-s1">,</span><span class="pl-en"> @function</span>
+
+<span class="pl-en"># void conv1d_asm(const</span> <span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-k">in</span><span class="pl-s1">,</span><span class="pl-en"> const</span> <span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en"> weight</span><span class="pl-s1">,</span> <span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-k">out</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-k">int</span><span class="pl-en"> N</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-k">int</span><span class="pl-en"> K)</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 版本：AVX</span><span class="pl-s1">-</span><span class="pl-c1">512</span><span class="pl-en"> 寄存器分块（4x16 展开，</span><span class="pl-c1">64</span><span class="pl-s1">-</span><span class="pl-en">element 大块）</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 策略：</span>
+<span class="pl-en">#   FMA 指令延迟约 </span><span class="pl-c1">4</span><span class="pl-en"> 周期，单路累加会导致流水线停滞。</span>
+<span class="pl-en">#   将外层按 </span><span class="pl-c1">64</span><span class="pl-en"> 展开，使用 </span><span class="pl-c1">4</span><span class="pl-en"> 个独立累加器（</span><span class="pl-v">zmm1</span><span class="pl-en">~</span><span class="pl-v">zmm4</span><span class="pl-en">）并行工作：</span>
+<span class="pl-en">#     </span><span class="pl-s1">-</span><span class="pl-en"> 一次 </span><span class="pl-k">vbroadcastss</span><span class="pl-en"> 加载的 weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> 同时参与 </span><span class="pl-c1">4</span><span class="pl-en"> 路独立的 FMA 计算</span>
+<span class="pl-en">#     </span><span class="pl-s1">-</span><span class="pl-en"> </span><span class="pl-c1">4</span><span class="pl-en"> 路累加器分别处理 </span><span class="pl-c1">4</span><span class="pl-en"> 组独立的 </span><span class="pl-k">out</span><span class="pl-en"> 块（每块 </span><span class="pl-c1">16</span><span class="pl-en"> 个元素）</span>
+<span class="pl-en">#     </span><span class="pl-s1">-</span><span class="pl-en"> 指令级并行（ILP）隐藏 FMA 延迟，使流水线持续满载</span>
+<span class="pl-en">#</span>
+<span class="pl-en">#   数据布局（每次内层循环迭代 j）：</span>
+<span class="pl-en">#     weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> → </span><span class="pl-k">vbroadcastss</span><span class="pl-en"> → </span><span class="pl-v">zmm0</span>
+<span class="pl-en">#     </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">0</span><span class="pl-en">..</span><span class="pl-c1">15</span><span class="pl-s1">]</span><span class="pl-en">   → </span><span class="pl-k">vmovups</span><span class="pl-en"> → </span><span class="pl-v">zmm5</span><span class="pl-en"> → </span><span class="pl-v">zmm1</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-v">zmm0</span><span class="pl-s1">*</span><span class="pl-v">zmm5</span><span class="pl-en">    (</span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-c1">0</span><span class="pl-en">..</span><span class="pl-c1">15</span><span class="pl-s1">]</span><span class="pl-en">)</span>
+<span class="pl-en">#     </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">16</span><span class="pl-en">..</span><span class="pl-c1">31</span><span class="pl-s1">]</span><span class="pl-en">  → </span><span class="pl-k">vmovups</span><span class="pl-en"> → </span><span class="pl-v">zmm6</span><span class="pl-en"> → </span><span class="pl-v">zmm2</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-v">zmm0</span><span class="pl-s1">*</span><span class="pl-v">zmm6</span><span class="pl-en">    (</span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-c1">16</span><span class="pl-en">..</span><span class="pl-c1">31</span><span class="pl-s1">]</span><span class="pl-en">)</span>
+<span class="pl-en">#     </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">32</span><span class="pl-en">..</span><span class="pl-c1">47</span><span class="pl-s1">]</span><span class="pl-en">  → </span><span class="pl-k">vmovups</span><span class="pl-en"> → </span><span class="pl-v">zmm7</span><span class="pl-en"> → </span><span class="pl-v">zmm3</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-v">zmm0</span><span class="pl-s1">*</span><span class="pl-v">zmm7</span><span class="pl-en">    (</span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-c1">32</span><span class="pl-en">..</span><span class="pl-c1">47</span><span class="pl-s1">]</span><span class="pl-en">)</span>
+<span class="pl-en">#     </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">48</span><span class="pl-en">..</span><span class="pl-c1">63</span><span class="pl-s1">]</span><span class="pl-en">  → </span><span class="pl-k">vmovups</span><span class="pl-en"> → </span><span class="pl-v">zmm8</span><span class="pl-en"> → </span><span class="pl-v">zmm4</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-v">zmm0</span><span class="pl-s1">*</span><span class="pl-v">zmm8</span><span class="pl-en">    (</span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-c1">48</span><span class="pl-en">..</span><span class="pl-c1">63</span><span class="pl-s1">]</span><span class="pl-en">)</span>
+<span class="pl-en">#</span>
+<span class="pl-en">#   三级处理：</span>
+<span class="pl-en">#     </span><span class="pl-c1">1</span><span class="pl-en">. vec64_loop: </span><span class="pl-c1">64</span><span class="pl-en"> 个 </span><span class="pl-k">out</span><span class="pl-en"> 元素并行（</span><span class="pl-c1">4</span><span class="pl-en"> 路 x </span><span class="pl-c1">16</span><span class="pl-en">），out_len ≥ </span><span class="pl-c1">64</span>
+<span class="pl-en">#     </span><span class="pl-c1">2</span><span class="pl-en">. vec16_loop: </span><span class="pl-c1">16</span><span class="pl-en"> 个 </span><span class="pl-k">out</span><span class="pl-en"> 元素并行（</span><span class="pl-c1">1</span><span class="pl-en"> 路 x </span><span class="pl-c1">16</span><span class="pl-en">），out_len % </span><span class="pl-c1">64</span><span class="pl-en"> ∈ </span><span class="pl-s1">[</span><span class="pl-c1">16</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-c1">63</span><span class="pl-s1">]</span>
+<span class="pl-en">#     </span><span class="pl-c1">3</span><span class="pl-en">. scalar_loop: 逐个处理剩余元素，out_len % </span><span class="pl-c1">64</span><span class="pl-en"> &lt; </span><span class="pl-c1">16</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 寄存器分配（System V AMD64 ABI 入参）：</span>
+<span class="pl-en">#   %</span><span class="pl-v">rdi</span><span class="pl-en"> = </span><span class="pl-k">in</span><span class="pl-en">      (输入数组首地址，</span><span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en">)</span>
+<span class="pl-en">#   %</span><span class="pl-v">rsi</span><span class="pl-en"> = weight  (卷积核首地址，</span><span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en">)</span>
+<span class="pl-en">#   %</span><span class="pl-v">rdx</span><span class="pl-en"> = </span><span class="pl-k">out</span><span class="pl-en">     (输出数组首地址，</span><span class="pl-c1">float</span><span class="pl-s1">*</span><span class="pl-en">)</span>
+<span class="pl-en">#   %</span><span class="pl-v">ecx</span><span class="pl-en"> = N       (输入数组长度，</span><span class="pl-k">int</span><span class="pl-en">)</span>
+<span class="pl-en">#   %</span><span class="pl-v">r8d</span><span class="pl-en"> = K       (卷积核长度，</span><span class="pl-k">int</span><span class="pl-en">)</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 内部寄存器分配：</span>
+<span class="pl-en">#   %</span><span class="pl-v">r10d</span><span class="pl-en"> = out_len = N </span><span class="pl-s1">-</span><span class="pl-en"> K </span><span class="pl-s1">+</span><span class="pl-en"> </span><span class="pl-c1">1</span><span class="pl-en">   (输出长度，</span><span class="pl-c1">32</span><span class="pl-s1">-</span><span class="pl-en">bit)</span>
+<span class="pl-en">#   %</span><span class="pl-v">r10</span><span class="pl-en">  = out_len (</span><span class="pl-c1">64</span><span class="pl-en">位版)</span>
+<span class="pl-en">#   %</span><span class="pl-v">r8</span><span class="pl-en">   = K       (</span><span class="pl-c1">64</span><span class="pl-en">位版)</span>
+<span class="pl-en">#   %</span><span class="pl-v">r9</span><span class="pl-en">   = i      (外层循环变量：当前处理的输出位置索引)</span>
+<span class="pl-en">#   %</span><span class="pl-v">rax</span><span class="pl-en">  = j      (内层循环变量：卷积核偏移)</span>
+<span class="pl-en">#   %</span><span class="pl-v">r11</span><span class="pl-en">  = block_end (当前块边界，向量化循环的最大 i 值)</span>
+<span class="pl-en">#   %</span><span class="pl-v">zmm0</span><span class="pl-en"> = broadcast weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en">   (</span><span class="pl-c1">16</span><span class="pl-en"> 通道广播后的权重向量，</span><span class="pl-c1">4</span><span class="pl-en"> 路共享)</span>
+<span class="pl-en">#   %</span><span class="pl-v">zmm1</span><span class="pl-en"> = sum_vec0              (第 </span><span class="pl-c1">0</span><span class="pl-en"> 路累加器，</span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-c1">0</span><span class="pl-en">..</span><span class="pl-c1">15</span><span class="pl-s1">]</span><span class="pl-en">)</span>
+<span class="pl-en">#   %</span><span class="pl-v">zmm2</span><span class="pl-en"> = sum_vec1              (第 </span><span class="pl-c1">1</span><span class="pl-en"> 路累加器，</span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-c1">16</span><span class="pl-en">..</span><span class="pl-c1">31</span><span class="pl-s1">]</span><span class="pl-en">)</span>
+<span class="pl-en">#   %</span><span class="pl-v">zmm3</span><span class="pl-en"> = sum_vec2              (第 </span><span class="pl-c1">2</span><span class="pl-en"> 路累加器，</span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-c1">32</span><span class="pl-en">..</span><span class="pl-c1">47</span><span class="pl-s1">]</span><span class="pl-en">)</span>
+<span class="pl-en">#   %</span><span class="pl-v">zmm4</span><span class="pl-en"> = sum_vec3              (第 </span><span class="pl-c1">3</span><span class="pl-en"> 路累加器，</span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-c1">48</span><span class="pl-en">..</span><span class="pl-c1">63</span><span class="pl-s1">]</span><span class="pl-en">)</span>
+<span class="pl-en">#   %</span><span class="pl-v">zmm5</span><span class="pl-s1">-</span><span class="pl-c1">8</span><span class="pl-en"> = in_vec0</span><span class="pl-s1">-</span><span class="pl-c1">3</span><span class="pl-en">           (临时：各路输入向量)</span>
+
+<span class="pl-en">conv1d_asm:</span>
+<span class="pl-en">	</span><span class="pl-k">endbr64</span><span class="pl-en">                        # Intel CET 边界检查（近代</span> <span class="pl-c1">CPU</span> <span class="pl-en">兼容）</span>
+
+<span class="pl-en">	# </span><span class="pl-s1">------------------------------------------------------------</span>
+<span class="pl-en">	# 边界检查，计算 out_len = N </span><span class="pl-s1">-</span><span class="pl-en"> K </span><span class="pl-s1">+</span><span class="pl-en"> </span><span class="pl-c1">1</span>
+<span class="pl-en">	# subl:  </span><span class="pl-v">ecx</span><span class="pl-en"> = N </span><span class="pl-s1">-</span><span class="pl-en"> K（</span><span class="pl-c1">32</span><span class="pl-en"> 位减法）</span>
+<span class="pl-en">	# </span><span class="pl-k">js</span><span class="pl-en">:    if (N &lt; K) → 无输出，直接返回</span>
+<span class="pl-en">	# leal:  </span><span class="pl-v">r10d</span><span class="pl-en"> = (N </span><span class="pl-s1">-</span><span class="pl-en"> K) </span><span class="pl-s1">+</span><span class="pl-en"> </span><span class="pl-c1">1</span><span class="pl-en"> = out_len</span>
+<span class="pl-en">	# movslq: 扩展到 </span><span class="pl-c1">64</span><span class="pl-en"> 位，用于后续的指针/索引运算</span>
+<span class="pl-en">	# </span><span class="pl-s1">------------------------------------------------------------</span>
+<span class="pl-en">	subl   %</span><span class="pl-v">r8d</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">ecx</span><span class="pl-en">             # </span><span class="pl-v">ecx</span><span class="pl-en"> = N </span><span class="pl-s1">-</span><span class="pl-en"> K</span>
+<span class="pl-en">	</span><span class="pl-k">js</span><span class="pl-en">     .Lend_v3                # if (N &lt; K) return</span>
+
+<span class="pl-en">	leal   </span><span class="pl-c1">1</span><span class="pl-en">(%</span><span class="pl-v">rcx</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r10d</span><span class="pl-en">         # </span><span class="pl-v">r10d</span><span class="pl-en"> = out_len = N </span><span class="pl-s1">-</span><span class="pl-en"> K </span><span class="pl-s1">+</span><span class="pl-en"> </span><span class="pl-c1">1</span>
+<span class="pl-en">	movslq %</span><span class="pl-v">r10d</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r10</span><span class="pl-en">             # </span><span class="pl-v">r10</span><span class="pl-en"> = out_len (</span><span class="pl-c1">64</span><span class="pl-s1">-</span><span class="pl-en">bit)</span>
+<span class="pl-en">	movslq %</span><span class="pl-v">r8d</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r8</span><span class="pl-en">               # </span><span class="pl-v">r8</span><span class="pl-en">  = K (</span><span class="pl-c1">64</span><span class="pl-s1">-</span><span class="pl-en">bit)</span>
+
+<span class="pl-en">	</span><span class="pl-k">movq</span>   <span class="pl-c1">$</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span><span class="pl-en">                 # </span><span class="pl-v">r9</span><span class="pl-en"> = i = </span><span class="pl-c1">0</span><span class="pl-en">（</span><span class="pl-k">out</span><span class="pl-en"> 的写索引）</span>
+
+<span class="pl-en">	# </span><span class="pl-s1">------------------------------------------------------------</span>
+<span class="pl-en">	# 计算 </span><span class="pl-c1">64</span><span class="pl-en"> 元素大块边界：block_end = out_len &amp; ~</span><span class="pl-c1">63</span>
+<span class="pl-en">	# 向下按 </span><span class="pl-c1">64</span><span class="pl-en"> 对齐，例如 out_len=</span><span class="pl-c1">100</span><span class="pl-en"> 时 block_end=</span><span class="pl-c1">64</span><span class="pl-en">，剩余 </span><span class="pl-c1">36</span><span class="pl-en"> 个走 vec16</span>
+<span class="pl-en">	# </span><span class="pl-s1">------------------------------------------------------------</span>
+<span class="pl-en">	</span><span class="pl-k">movq</span><span class="pl-en">   %</span><span class="pl-v">r10</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r11</span><span class="pl-en">              # </span><span class="pl-v">r11</span><span class="pl-en"> = out_len</span>
+<span class="pl-en">	andq   $</span><span class="pl-s1">-</span><span class="pl-c1">64</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r11</span><span class="pl-en">               # </span><span class="pl-v">r11</span><span class="pl-en"> = block_end = floor(out_len/</span><span class="pl-c1">64</span><span class="pl-en">)</span><span class="pl-s1">*</span><span class="pl-c1">64</span>
+<span class="pl-en">	cmpq</span>   <span class="pl-c1">$</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r11</span>
+<span class="pl-en">	</span><span class="pl-k">je</span><span class="pl-en">     .Lvec16_setup_v3        # out_len &lt; </span><span class="pl-c1">64</span><span class="pl-en">，跳到 vec16 路径</span>
+
+<span class="pl-en"># =============================================================</span>
+<span class="pl-en"># vec64_loop：每次处理 </span><span class="pl-c1">64</span><span class="pl-en"> 个 </span><span class="pl-k">out</span><span class="pl-en"> 元素（</span><span class="pl-c1">4</span><span class="pl-en"> 路 × </span><span class="pl-c1">16</span><span class="pl-en">）</span>
+<span class="pl-en"># i = </span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-c1">64</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-c1">128</span><span class="pl-s1">,</span><span class="pl-en"> ... 直到 block_end</span>
+<span class="pl-en"># =============================================================</span>
+<span class="pl-en">.Lvec64_loop_v3:</span>
+<span class="pl-en">	# 清零 </span><span class="pl-c1">4</span><span class="pl-en"> 个独立的累加器</span>
+<span class="pl-en">	vxorps %</span><span class="pl-v">zmm1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm1</span><span class="pl-en">     # sum_vec0 = </span><span class="pl-c1">0</span>
+<span class="pl-en">	vxorps %</span><span class="pl-v">zmm2</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm2</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm2</span><span class="pl-en">     # sum_vec1 = </span><span class="pl-c1">0</span>
+<span class="pl-en">	vxorps %</span><span class="pl-v">zmm3</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm3</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm3</span><span class="pl-en">     # sum_vec2 = </span><span class="pl-c1">0</span>
+<span class="pl-en">	vxorps %</span><span class="pl-v">zmm4</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm4</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm4</span><span class="pl-en">     # sum_vec3 = </span><span class="pl-c1">0</span>
+
+<span class="pl-en">	</span><span class="pl-k">movq</span>   <span class="pl-c1">$</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span><span class="pl-en">                # j = </span><span class="pl-c1">0</span>
+<span class="pl-en">	testq  %</span><span class="pl-v">r8</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r8</span><span class="pl-en">                 # if K == </span><span class="pl-c1">0</span>
+<span class="pl-en">	</span><span class="pl-k">jle</span><span class="pl-en">    .Lvec64_store_v3        # K == </span><span class="pl-c1">0</span><span class="pl-en"> 跳过内层循环，直接写 </span><span class="pl-c1">0</span>
+
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en"># vec64 内层循环：j = </span><span class="pl-c1">0</span><span class="pl-en"> .. K</span><span class="pl-s1">-</span><span class="pl-c1">1</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 对每个 weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en">，执行 </span><span class="pl-c1">4</span><span class="pl-en"> 路并行的 FMA：</span>
+<span class="pl-en">#   </span><span class="pl-c1">1</span><span class="pl-en">. </span><span class="pl-k">vbroadcastss</span><span class="pl-en">: weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> 广播到 </span><span class="pl-v">zmm0</span><span class="pl-en">（</span><span class="pl-c1">16</span><span class="pl-en"> 通道）</span>
+<span class="pl-en">#   </span><span class="pl-c1">2</span><span class="pl-en">. 依次加载 </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">0</span><span class="pl-en">..</span><span class="pl-c1">15</span><span class="pl-s1">],</span><span class="pl-en"> </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">16</span><span class="pl-en">..</span><span class="pl-c1">31</span><span class="pl-s1">],</span><span class="pl-en"> </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">32</span><span class="pl-en">..</span><span class="pl-c1">47</span><span class="pl-s1">],</span><span class="pl-en"> </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">48</span><span class="pl-en">..</span><span class="pl-c1">63</span><span class="pl-s1">]</span>
+<span class="pl-en">#   </span><span class="pl-c1">3</span><span class="pl-en">. </span><span class="pl-c1">4</span><span class="pl-en"> 路并发 FMA：</span><span class="pl-v">zmm1</span><span class="pl-s1">-</span><span class="pl-c1">4</span><span class="pl-en"> 分别累加 weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> × 对应 </span><span class="pl-k">in</span><span class="pl-en"> 块</span>
+<span class="pl-en">#</span>
+<span class="pl-en"># 延迟隐藏原理：</span>
+<span class="pl-en">#   </span><span class="pl-c1">4</span><span class="pl-en"> 条 </span><span class="pl-k">vfmadd231ps</span><span class="pl-en"> 独立操作 </span><span class="pl-v">zmm1</span><span class="pl-s1">-</span><span class="pl-c1">4</span><span class="pl-en">，无数据依赖</span>
+<span class="pl-en">#</span>   <span class="pl-c1">CPU</span> <span class="pl-en">发射单元可每周期发射 </span><span class="pl-c1">1</span><span class="pl-en"> 条，</span><span class="pl-c1">4</span><span class="pl-en"> 条流水线并行</span>
+<span class="pl-en">#   延迟 ~</span><span class="pl-c1">4</span><span class="pl-en"> 周期，但吞吐量 = 每周期 </span><span class="pl-c1">1</span><span class="pl-en"> 条 → 流水线填满后无停顿</span>
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en">.Lvec64_inner_v3:</span>
+<span class="pl-en">	# 将 weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span><span class="pl-en"> 广播到 </span><span class="pl-c1">16</span><span class="pl-en"> 通道，</span><span class="pl-c1">4</span><span class="pl-en"> 路共享同一个 </span><span class="pl-v">zmm0</span>
+<span class="pl-en">	</span><span class="pl-k">vbroadcastss</span><span class="pl-en"> (%</span><span class="pl-v">rsi</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm0</span>
+
+<span class="pl-en">	# 第 </span><span class="pl-c1">0</span><span class="pl-en"> 路：</span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">0</span><span class="pl-en">..</span><span class="pl-c1">15</span><span class="pl-s1">]</span><span class="pl-en">  → </span><span class="pl-v">zmm5</span><span class="pl-en"> → </span><span class="pl-v">zmm1</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-v">zmm0</span><span class="pl-en"> </span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-v">zmm5</span>
+<span class="pl-en">	</span><span class="pl-k">vmovups</span><span class="pl-en"> (%</span><span class="pl-v">rdi</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm5</span>
+<span class="pl-en">	</span><span class="pl-k">vfmadd231ps</span><span class="pl-en"> %</span><span class="pl-v">zmm0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm5</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm1</span>
+
+<span class="pl-en">	# 第 </span><span class="pl-c1">1</span><span class="pl-en"> 路：</span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">16</span><span class="pl-en">..</span><span class="pl-c1">31</span><span class="pl-s1">]</span><span class="pl-en"> → </span><span class="pl-v">zmm6</span><span class="pl-en"> → </span><span class="pl-v">zmm2</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-v">zmm0</span><span class="pl-en"> </span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-v">zmm6</span>
+<span class="pl-en">	</span><span class="pl-k">vmovups</span><span class="pl-en"> </span><span class="pl-c1">64</span><span class="pl-en">(%</span><span class="pl-v">rdi</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm6</span>
+<span class="pl-en">	</span><span class="pl-k">vfmadd231ps</span><span class="pl-en"> %</span><span class="pl-v">zmm0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm6</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm2</span>
+
+<span class="pl-en">	# 第 </span><span class="pl-c1">2</span><span class="pl-en"> 路：</span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">32</span><span class="pl-en">..</span><span class="pl-c1">47</span><span class="pl-s1">]</span><span class="pl-en"> → </span><span class="pl-v">zmm7</span><span class="pl-en"> → </span><span class="pl-v">zmm3</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-v">zmm0</span><span class="pl-en"> </span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-v">zmm7</span>
+<span class="pl-en">	</span><span class="pl-k">vmovups</span><span class="pl-en"> </span><span class="pl-c1">128</span><span class="pl-en">(%</span><span class="pl-v">rdi</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm7</span>
+<span class="pl-en">	</span><span class="pl-k">vfmadd231ps</span><span class="pl-en"> %</span><span class="pl-v">zmm0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm7</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm3</span>
+
+<span class="pl-en">	# 第 </span><span class="pl-c1">3</span><span class="pl-en"> 路：</span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">+</span><span class="pl-c1">48</span><span class="pl-en">..</span><span class="pl-c1">63</span><span class="pl-s1">]</span><span class="pl-en"> → </span><span class="pl-v">zmm8</span><span class="pl-en"> → </span><span class="pl-v">zmm4</span><span class="pl-en"> </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-v">zmm0</span><span class="pl-en"> </span><span class="pl-s1">*</span><span class="pl-en"> </span><span class="pl-v">zmm8</span>
+<span class="pl-en">	</span><span class="pl-k">vmovups</span><span class="pl-en"> </span><span class="pl-c1">192</span><span class="pl-en">(%</span><span class="pl-v">rdi</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm8</span>
+<span class="pl-en">	</span><span class="pl-k">vfmadd231ps</span><span class="pl-en"> %</span><span class="pl-v">zmm0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm8</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm4</span>
+
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span><span class="pl-en">                # j</span><span class="pl-s1">++</span>
+<span class="pl-en">	cmpq   %</span><span class="pl-v">r8</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span><span class="pl-en">                # j &lt; K ?</span>
+<span class="pl-en">	</span><span class="pl-k">jl</span><span class="pl-en">     .Lvec64_inner_v3         # j &lt; K，继续内层循环</span>
+
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en"># 存储 </span><span class="pl-c1">64</span><span class="pl-en"> 元素大块的结果（</span><span class="pl-c1">4</span><span class="pl-en"> 次 </span><span class="pl-c1">16</span><span class="pl-s1">-</span><span class="pl-en">element 存储）</span>
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en">.Lvec64_store_v3:</span>
+<span class="pl-en">	# 依次将 </span><span class="pl-v">zmm1</span><span class="pl-s1">-</span><span class="pl-c1">4</span><span class="pl-en"> 写入 </span><span class="pl-k">out</span><span class="pl-en"> 的连续 </span><span class="pl-c1">4</span><span class="pl-en"> 个 </span><span class="pl-c1">16</span><span class="pl-s1">-</span><span class="pl-en">element 块</span>
+<span class="pl-en">	</span><span class="pl-k">vmovups</span><span class="pl-en"> %</span><span class="pl-v">zmm1</span><span class="pl-s1">,</span><span class="pl-en"> (%</span><span class="pl-v">rdx</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">r9</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)     # </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-c1">0</span><span class="pl-en">..</span><span class="pl-c1">15</span><span class="pl-s1">]</span><span class="pl-en"> = sum_vec0</span>
+<span class="pl-en">	</span><span class="pl-k">vmovups</span><span class="pl-en"> %</span><span class="pl-v">zmm2</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-c1">64</span><span class="pl-en">(%</span><span class="pl-v">rdx</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">r9</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)   # </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-c1">16</span><span class="pl-en">..</span><span class="pl-c1">31</span><span class="pl-s1">]</span><span class="pl-en"> = sum_vec1</span>
+<span class="pl-en">	</span><span class="pl-k">vmovups</span><span class="pl-en"> %</span><span class="pl-v">zmm3</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-c1">128</span><span class="pl-en">(%</span><span class="pl-v">rdx</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">r9</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)  # </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-c1">32</span><span class="pl-en">..</span><span class="pl-c1">47</span><span class="pl-s1">]</span><span class="pl-en"> = sum_vec2</span>
+<span class="pl-en">	</span><span class="pl-k">vmovups</span><span class="pl-en"> %</span><span class="pl-v">zmm4</span><span class="pl-s1">,</span><span class="pl-en"> </span><span class="pl-c1">192</span><span class="pl-en">(%</span><span class="pl-v">rdx</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">r9</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)  # </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-c1">48</span><span class="pl-en">..</span><span class="pl-c1">63</span><span class="pl-s1">]</span><span class="pl-en"> = sum_vec3</span>
+
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">64</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span><span class="pl-en">                # i </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-c1">64</span>
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">256</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rdi</span><span class="pl-en">              # ★ </span><span class="pl-k">in</span><span class="pl-en"> 指针右移 </span><span class="pl-c1">64</span><span class="pl-s1">*</span><span class="pl-c1">4</span><span class="pl-en">=</span><span class="pl-c1">256</span><span class="pl-en"> 字节</span>
+<span class="pl-en">	                               # 对应 </span><span class="pl-c1">4</span><span class="pl-en"> 路 × </span><span class="pl-c1">16</span><span class="pl-en"> 个</span> <span class="pl-c1">float</span> <span class="pl-en">的跨度</span>
+
+<span class="pl-en">	cmpq   %</span><span class="pl-v">r11</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span><span class="pl-en">               # i &lt; block_end ?</span>
+<span class="pl-en">	</span><span class="pl-k">jl</span><span class="pl-en">     .Lvec64_loop_v3         # i &lt; block_end，继续 vec64 循环</span>
+
+<span class="pl-en"># =============================================================</span>
+<span class="pl-en"># vec16_setup </span><span class="pl-s1">+</span><span class="pl-en"> vec16_loop：处理剩余 </span><span class="pl-s1">[</span><span class="pl-en">block_end</span><span class="pl-s1">,</span><span class="pl-en"> out_len) 中的 </span><span class="pl-c1">16</span><span class="pl-s1">-</span><span class="pl-c1">63</span><span class="pl-en"> 个元素</span>
+<span class="pl-en"># 避免直接退化到慢速标量循环</span>
+<span class="pl-en"># =============================================================</span>
+<span class="pl-en">.Lvec16_setup_v3:</span>
+<span class="pl-en">	# 计算 </span><span class="pl-c1">16</span><span class="pl-en"> 元素块边界：block_end = out_len &amp; ~</span><span class="pl-c1">15</span>
+<span class="pl-en">	</span><span class="pl-k">movq</span><span class="pl-en">   %</span><span class="pl-v">r10</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r11</span><span class="pl-en">              # </span><span class="pl-v">r11</span><span class="pl-en"> = out_len</span>
+<span class="pl-en">	andq   $</span><span class="pl-s1">-</span><span class="pl-c1">16</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r11</span><span class="pl-en">               # </span><span class="pl-v">r11</span><span class="pl-en"> = floor(out_len/</span><span class="pl-c1">16</span><span class="pl-en">)</span><span class="pl-s1">*</span><span class="pl-c1">16</span>
+<span class="pl-en">	cmpq   %</span><span class="pl-v">r11</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span><span class="pl-en">               # i &gt;= vec16_end ?</span>
+<span class="pl-en">	</span><span class="pl-k">jge</span><span class="pl-en">    .Lscalar_setup_v3       # 无剩余或剩余 &lt; </span><span class="pl-c1">16</span><span class="pl-en">，跳到标量路径</span>
+
+<span class="pl-en">.Lvec16_loop_v3:</span>
+<span class="pl-en">	# 清零单路累加器</span>
+<span class="pl-en">	vxorps %</span><span class="pl-v">zmm1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm1</span>
+
+<span class="pl-en">	</span><span class="pl-k">movq</span>   <span class="pl-c1">$</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span><span class="pl-en">                # j = </span><span class="pl-c1">0</span>
+<span class="pl-en">	testq  %</span><span class="pl-v">r8</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r8</span><span class="pl-en">                 # if K == </span><span class="pl-c1">0</span>
+<span class="pl-en">	</span><span class="pl-k">jle</span><span class="pl-en">    .Lvec16_store_v3        # K == </span><span class="pl-c1">0</span><span class="pl-en"> 跳过内层</span>
+
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en"># vec16 内层循环：j = </span><span class="pl-c1">0</span><span class="pl-en"> .. K</span><span class="pl-s1">-</span><span class="pl-c1">1</span><span class="pl-en">，单路 </span><span class="pl-c1">16</span><span class="pl-en"> 元素并行</span>
+<span class="pl-en"># 与 vec64 的区别：只处理 </span><span class="pl-c1">1</span><span class="pl-en"> 路（</span><span class="pl-v">zmm1</span><span class="pl-en">），省去其他 </span><span class="pl-c1">3</span><span class="pl-en"> 路</span>
+<span class="pl-en"># </span><span class="pl-s1">-------------------------------------------------------------</span>
+<span class="pl-en">.Lvec16_inner_v3:</span>
+<span class="pl-en">	</span><span class="pl-k">vbroadcastss</span><span class="pl-en"> (%</span><span class="pl-v">rsi</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm0</span>
+<span class="pl-en">	</span><span class="pl-k">vmovups</span><span class="pl-en"> (%</span><span class="pl-v">rdi</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm2</span>
+<span class="pl-en">	</span><span class="pl-k">vfmadd231ps</span><span class="pl-en"> %</span><span class="pl-v">zmm0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm2</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">zmm1</span>
+
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span>
+<span class="pl-en">	cmpq   %</span><span class="pl-v">r8</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span>
+<span class="pl-en">	</span><span class="pl-k">jl</span><span class="pl-en">     .Lvec16_inner_v3</span>
+
+<span class="pl-en">.Lvec16_store_v3:</span>
+<span class="pl-en">	</span><span class="pl-k">vmovups</span><span class="pl-en"> %</span><span class="pl-v">zmm1</span><span class="pl-s1">,</span><span class="pl-en"> (%</span><span class="pl-v">rdx</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">r9</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)    # </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i..i</span><span class="pl-s1">+</span><span class="pl-c1">15</span><span class="pl-s1">]</span><span class="pl-en"> = sum_vec</span>
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">16</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span><span class="pl-en">                # i </span><span class="pl-s1">+</span><span class="pl-en">= </span><span class="pl-c1">16</span>
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">64</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rdi</span><span class="pl-en">               # </span><span class="pl-k">in</span><span class="pl-en"> 指针右移 </span><span class="pl-c1">16</span><span class="pl-s1">*</span><span class="pl-c1">4</span><span class="pl-en">=</span><span class="pl-c1">64</span><span class="pl-en"> 字节</span>
+<span class="pl-en">	cmpq   %</span><span class="pl-v">r11</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span><span class="pl-en">               # i &lt; vec16_end ?</span>
+<span class="pl-en">	</span><span class="pl-k">jl</span><span class="pl-en">     .Lvec16_loop_v3</span>
+
+<span class="pl-en"># =============================================================</span>
+<span class="pl-en"># 标量收尾循环：处理剩余 &lt; </span><span class="pl-c1">16</span><span class="pl-en"> 个元素</span>
+<span class="pl-en"># =============================================================</span>
+<span class="pl-en">.Lscalar_setup_v3:</span>
+<span class="pl-en">	cmpq   %</span><span class="pl-v">r10</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span><span class="pl-en">               # i &gt;= out_len ?</span>
+<span class="pl-en">	</span><span class="pl-k">jge</span><span class="pl-en">    .Lend_v3                # 已全部处理完</span>
+
+<span class="pl-en">.Lscalar_loop_v3:</span>
+<span class="pl-en">	vxorps %</span><span class="pl-v">xmm1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm1</span><span class="pl-en">     # sum = </span><span class="pl-c1">0</span>
+<span class="pl-en">	</span><span class="pl-k">movq</span>   <span class="pl-c1">$</span><span class="pl-c1">0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span><span class="pl-en">                # j = </span><span class="pl-c1">0</span>
+<span class="pl-en">	testq  %</span><span class="pl-v">r8</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r8</span><span class="pl-en">                 # if K == </span><span class="pl-c1">0</span>
+<span class="pl-en">	</span><span class="pl-k">jle</span><span class="pl-en">    .Lscalar_store_v3</span>
+
+<span class="pl-en">.Lscalar_inner_v3:</span>
+<span class="pl-en">	</span><span class="pl-k">vmovss</span><span class="pl-en"> (%</span><span class="pl-v">rsi</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm0</span><span class="pl-en">    # weight</span><span class="pl-s1">[</span><span class="pl-en">j</span><span class="pl-s1">]</span>
+<span class="pl-en">	</span><span class="pl-k">vmovss</span><span class="pl-en"> (%</span><span class="pl-v">rdi</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">rax</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm2</span><span class="pl-en">   # </span><span class="pl-k">in</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">+</span><span class="pl-en">j</span><span class="pl-s1">]</span>
+<span class="pl-en">	</span><span class="pl-k">vfmadd231ss</span><span class="pl-en"> %</span><span class="pl-v">xmm0</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm2</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">xmm1</span>
+
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span>
+<span class="pl-en">	cmpq   %</span><span class="pl-v">r8</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rax</span>
+<span class="pl-en">	</span><span class="pl-k">jl</span><span class="pl-en">     .Lscalar_inner_v3</span>
+
+<span class="pl-en">.Lscalar_store_v3:</span>
+<span class="pl-en">	</span><span class="pl-k">vmovss</span><span class="pl-en"> %</span><span class="pl-v">xmm1</span><span class="pl-s1">,</span><span class="pl-en"> (%</span><span class="pl-v">rdx</span><span class="pl-s1">,</span><span class="pl-en">%</span><span class="pl-v">r9</span><span class="pl-s1">,</span><span class="pl-c1">4</span><span class="pl-en">)    # </span><span class="pl-k">out</span><span class="pl-s1">[</span><span class="pl-en">i</span><span class="pl-s1">]</span><span class="pl-en"> = sum</span>
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">1</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span>
+<span class="pl-en">	addq</span>   <span class="pl-c1">$</span><span class="pl-c1">4</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">rdi</span><span class="pl-en">               # </span><span class="pl-k">in</span><span class="pl-en"> 指针右移 </span><span class="pl-c1">1</span><span class="pl-en"> 个</span> <span class="pl-c1">float</span>
+<span class="pl-en">	cmpq   %</span><span class="pl-v">r10</span><span class="pl-s1">,</span><span class="pl-en"> %</span><span class="pl-v">r9</span>
+<span class="pl-en">	</span><span class="pl-k">jl</span><span class="pl-en">     .Lscalar_loop_v3</span>
+
+<span class="pl-en">.Lend_v3:</span>
+<span class="pl-en">	</span><span class="pl-k">vzeroupper</span><span class="pl-en">                      # 清 zmm/ymm 高位，避免调用者 AVX/SSE 切换惩罚</span>
+<span class="pl-en">	</span><span class="pl-k">ret</span>
+
+<span class="pl-en">.</span><span class="pl-c1">section</span><span class="pl-en"> .note.GNU</span><span class="pl-s1">-</span><span class="pl-en">stack</span><span class="pl-s1">,</span><span class="pl-s">""</span><span class="pl-s1">,</span><span class="pl-en">@progbits</span>
+</pre></div>
+<p>测试了部分样例，结果如下：</p>
+<div class="highlight highlight-source-shell"><pre class="notranslate">./conv1d_bench 524288 64     <span class="pl-c"><span class="pl-c">#</span>25.679x</span>
+./conv1d_bench 134217728 64  <span class="pl-c"><span class="pl-c">#</span>16.263x</span></pre></div>
+<p>提交到网站加速比15.530，得分97</p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
