@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="论文全名：FlashANNS: GPU-Driven Asynchronous I/O Pipelining for Eliminating Storage-Compute Bottlenecks in Billion-Scale Similarity Search
+# 摘要
+近似最近邻搜索（ANNS）能够在高维向量空间中实现高效的相似度检索，已成为推荐系统、检索增强生成（RAG）等上层任务的核心基础组件。">
+<meta property="og:title" content="【论文细读；SIGMOD'26】FlashANNS：基于GPU的异步IO流水线技术，用于消除十亿级相似性搜索中的存储与计算瓶颈">
+<meta property="og:description" content="论文全名：FlashANNS: GPU-Driven Asynchronous I/O Pipelining for Eliminating Storage-Compute Bottlenecks in Billion-Scale Similarity Search
+# 摘要
+近似最近邻搜索（ANNS）能够在高维向量空间中实现高效的相似度检索，已成为推荐系统、检索增强生成（RAG）等上层任务的核心基础组件。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/%E3%80%90-lun-wen-xi-du-%EF%BC%9BSIGMOD%2726%E3%80%91FlashANNS%EF%BC%9A-ji-yu-GPU-de-yi-bu-IO-liu-shui-xian-ji-shu-%EF%BC%8C-yong-yu-xiao-chu-shi-yi-ji-xiang-si-xing-sou-suo-zhong-de-cun-chu-yu-ji-suan-ping-jing.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>【论文细读；SIGMOD'26】FlashANNS：基于GPU的异步IO流水线技术，用于消除十亿级相似性搜索中的存储与计算瓶颈</title>
+
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">【论文细读；SIGMOD'26】FlashANNS：基于GPU的异步IO流水线技术，用于消除十亿级相似性搜索中的存储与计算瓶颈</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/40" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>论文全名：FlashANNS: GPU-Driven Asynchronous I/O Pipelining for Eliminating Storage-Compute Bottlenecks in Billion-Scale Similarity Search</p>
+<h1>摘要</h1>
+<p>近似最近邻搜索（ANNS）能够在高维向量空间中实现高效的相似度检索，已成为推荐系统、检索增强生成（RAG）等上层任务的核心基础组件。现代 ANNS 系统通过集成固态硬盘（SSD）来支撑 TB 级规模的向量数据集，主要采用<strong>聚类索引</strong>与<strong>图索引</strong>两种架构。然而，聚类索引类 ANNS 系统因向量索引粒度粗糙，存在查询吞吐性能不佳的问题；图索引系统则受两项固有缺陷制约，难以达到最优性能：</p>
+<ol>
+<li>无法将 SSD 数据读取与距离计算过程<strong>并行执行</strong>；</li>
+<li>I/O 长尾延迟导致存储访问性能低下。</li>
+</ol>
+<p>为解决上述难题，本文提出<strong>FlashANNS</strong>—— 一款基于 GPU 加速、核外（out-of-core）图索引的 ANNS 系统，通过 I/O 与计算重叠执行突破性能瓶颈。本研究的核心思路是对 I/O 操作与计算过程进行精细调度，主要包含三项创新设计：</p>
+<ol>
+<li><strong>带严格理论收敛保证的松依赖异步流水线</strong>：FlashANNS 解除 I/O 与计算间的依赖约束，让 GPU 距离计算与 SSD 数据传输实现<strong>完全重叠</strong>；</li>
+<li><strong>查询粒度并发 SSD 访问</strong>：FlashANNS 构建无锁 I/O 栈并采用查询级并发控制，避免 I/O 长尾延迟引发的性能下降；</li>
+<li><strong>计算 - I/O 平衡的图度选择策略</strong>：针对不同硬件配置、数据集与查询需求，在计算负载与存储访问延迟间实现最优平衡。</li>
+</ol>
+<p>我们实现了 FlashANNS 系统，并与三款当前顶尖的核外 ANNS 系统（SPANN、DiskANN、FusionANNS）进行对比实验。结果表明：在<strong>Recall@10≥95%</strong> 的相同精度条件下，单 SSD 配置中本方法的查询吞吐比现有最优方案<strong>提升 2.7–5.9 倍</strong>；多 SSD 配置下，查询吞吐提升幅度可达<strong>3.9–12.2 倍</strong>。</p>
+<h1>一、引言</h1>
+<p>近似最近邻搜索（ANNS）是指在高维向量数据集中，查找与给定查询向量<strong>最相似的前 k 个向量</strong>的一类方法。与精确搜索相比，ANNS 以<strong>小幅精度损失</strong>为代价，大幅缩短检索耗时。ANNS 广泛应用于信息检索 [8,24,28,39,62]、推荐系统 [13,49,56] 以及大语言模型 [14,30,33,37,59] 等诸多领域。尤其随着生成式 AI 与大规模推荐系统的兴起，<strong>百亿级规模 ANNS</strong>的需求急剧增长；现代数据集（向量数量常超 10 亿）及其索引（体积可达数据集的 6 倍）对内存与算力要求极高，传统内存式框架已无法承载。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429114727.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429114727.png" alt="image.png" style="max-width: 100%;"></a><br>
+一种直接的横向扩展方案是采用<strong>分布式内存架构</strong>[43,71]，利用多台服务器的内存存储索引。例如 Vearch [43] 将规模为 N 的索引划分为 n 个分片，每个分片大小为 N/n，分别存放在不同服务器的 DRAM 中。查询执行时，所有节点针对同一查询在本地分片上并行处理，各自计算出局部前 K 个结果；最终对 n×K 个局部结果排序、截断，得到全局的 K 近邻。但即便算力资源扩充 n 倍，查询吞吐也无法实现 n 倍提升，核心原因是查询耗时与数据集分片大小<strong>并非线性缩放关系</strong>。如图 1 所示，将数据集规模减半，查询吞吐仅提升 10.8%–19.5%。</p>
+<p>鉴于横向扩展方案性能不佳，近年的 ANNS 系统 [11,31,52,69,77] 纷纷搭载<strong>固态硬盘（SSD）</strong>，以支撑数十 TB 级的超大数据集与索引，进一步提升单节点容量。按索引类型划分，这类系统主要分为<strong>聚类索引</strong>与<strong>图索引</strong>两类。我们发现，这两类系统均存在<strong>系统资源利用率偏低</strong>的问题。</p>
+<p><strong>基于聚类的索引</strong><br>
+以 SPANN [11] 为代表的聚类索引方法，将数据集划分为<strong>基于聚类的倒排链表</strong>，把原始向量存储在磁盘上，同时将聚类中心索引保留在内存中。但这种<strong>粗粒度聚类</strong>会导致候选搜索空间过大，在高精度场景下需要进行海量的向量距离计算。</p>
+<p>FusionANNS [69] 通过<strong>GPU 加速预过滤</strong>缓解了这一问题，通过选择性地从 SSD 读取向量来降低 I/O 开销。即便如此，受限于粗粒度聚类的固有缺陷，FusionANNS 仍会产生大量 SSD 访问。此外，由于 CPU 管理的任务同步开销过高，其计算流水线无法充分发挥 GPU 的算力。</p>
+<p><strong>基于图的索引</strong><br>
+以 DiskANN [31] 为代表的<strong>细粒度图索引</strong>，只需更少的候选集即可达到目标精度，从而减少 SSD 读取次数与整体 I/O 成本。但这会增加单次读取的计算量（如距离计算、邻居节点管理），导致端到端延迟中<strong>计算占比显著升高</strong>，说明计算侧仍有较大优化空间。</p>
+<p>尽管图索引减少了 I/O 操作，但它提升了计算强度，使得<strong>计算延迟占比更高</strong>。这推动了通过<strong>GPU 卸载</strong>进行计算侧优化的方向。然而，直接引入 GPU 会带来三大核心挑战：<br>
+(1) 串行或粗粒度执行无法充分发挥 GPU 算力；<br>
+(2) 细粒度同步会放大 I/O 延迟；</p>
+<blockquote>
+<p>解释：当系统引入 GPU 来加速时，会面临计算和 I/O 之间的循环依赖问题：系统必须先算出距离结果，才知道下一步去 SSD 读哪些邻居节点的数据 。这种强烈的依赖关系导致系统被迫在极小的任务颗粒度上（即每遍历一小步）进行停顿和同步等待 。论文明确指出，正是这种“细粒度同步”严重放大了 I/O 延迟 。</p>
+</blockquote>
+<p>(3) 大量小块随机 SSD 访问受限于 IOPS，导致 SSD 带宽利用率不足。</p>
+<p>为此，我们提出<strong>FlashANNS</strong>—— 一个面向百亿级相似度搜索、兼顾计算与 I/O 平衡的<strong>GPU 加速、SSD 驻留图索引框架</strong>。本方案核心包含三项关键设计：</p>
+<ul>
+<li><strong>松依赖异步 I/O 流水线</strong>：针对计算与 I/O 串行执行导致 GPU/SSD 利用率低的问题，我们提出松依赖异步 I/O 流水线，并给出严格的理论收敛保证，确保 FlashANNS 能达到同等召回率。</li>
+<li><strong>查询粒度并发 SSD 访问</strong>：针对内核级 GPU I/O 栈中同步开销导致 I/O 延迟拉长的问题，我们提出面向 ANNS 负载优化的查询粒度并发 SSD 访问架构，消除传统基于 CAM 的 I/O 栈固有的 GPU 内核级全局同步。在该架构下，每个查询发起的 SSD 访问可在 warp 内独立完成并恢复执行，不会引发内核级全局阻塞。</li>
+<li><strong>计算 - I/O 平衡的图度选择</strong>：针对 SSD 页对齐导致的 I/O 放大问题，我们提出硬件感知的图度选择机制。该方法通过采样式性能分析量化 SSD I/O 带宽与 GPU 算力，支持在索引结构中自适应选取图度参数，在整个流水线运行中维持计算与 I/O 的平衡。</li>
+</ul>
+<p>我们实现了 FlashANNS，并在业界通用的百亿级向量数据集（SIFT1B、SPACEV1B、DEEP1B）上进行评估，对比当前顶尖的核外 ANNS 系统（SPANN、DiskANN）以及 GPU 加速的核外基准系统（FusionANNS）。实验结果表明，在召回率 @10≥95%的精度下，单 SSD 配置中 FlashANNS 的查询（QPS）比现有最优方法高<strong>2.7–5.9 倍</strong>；在多 SSD 配置中，吞吐提升最高可达<strong>12.2 倍</strong>。论文录用后，我们将在 GitHub 开源 FlashANNS 以回馈社区。</p>
+<h1>二、背景</h1>
+<p>近似最近邻搜索（ANNS）已成为现代数据处理系统中的一项基础操作，能够在高维向量空间中实现高效的相似度检索。作为推荐系统、检索增强生成（RAG）等上层任务的核心组件，随着相关业务规模持续扩大，ANNS 技术也在快速演进。<strong>向量索引</strong>是 ANNS 的关键部分，负责组织向量数据并决定检索方式。索引本身会产生巨大存储开销，最高可占用查询执行存储总量的 86%。为满足当前应用对 TB 级向量数据集的支撑需求，现代 ANNS 系统 [11,31,69] 均集成了固态硬盘（SSD）。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429121941.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429121941.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h2>2.1 基于聚类的向量索引</h2>
+<p>基于聚类的向量索引因<strong>查询延迟低</strong>而被广泛使用。这类系统主要维护两种数据结构：1）存放在 SSD 上的聚类向量；2）存放在内存中的聚类中心导航图。在索引构建阶段，系统会扫描全部向量数据集，并将向量划分为若干簇。向量按簇存储在 SSD 中，而每个簇的中心构成一张图，存储在 CPU 内存中。图 2a 展示了基于聚类的向量索引的<strong>三阶段检索流程</strong>。</p>
+<ol>
+<li><strong>图遍历阶段</strong><br>
+在内存中的聚类中心导航图内，检索流程遍历图结构，找到与查询向量距离最近的 K 个聚类中心。</li>
+<li><strong>候选获取阶段</strong><br>
+从 SSD 存储的聚类向量中，读取与选中的 K 个中心对应的全部簇数据。</li>
+<li><strong>距离计算阶段</strong><br>
+对读取到的簇内所有向量与查询向量计算精确距离，按距离排序后选出最终结果。</li>
+</ol>
+<p>然而，基于聚类索引的 ANNS 系统<strong>查询吞吐率表现不佳</strong>。原因在于这类系统采用<strong>粗粒度向量索引</strong>：图遍历阶段（1）的计算量极轻，但候选获取阶段（2）需要访问大量候选向量，距离计算阶段（3）也需要进行大量相应计算。</p>
+<p>其根本缺陷源于图遍历阶段（1）的一个假设：倒排列表中的聚类中心能够充分代表对应簇内的向量。在实际场景中，这种表示并不准确，表现为两个明显问题：</p>
+<ol>
+<li><strong>误包含（False Inclusion）</strong><br>
+与查询向量接近的中心，对应的簇内可能存在大量距离很远的向量，导致候选获取与距离计算阶段不得不处理海量无关候选。</li>
+<li><strong>误排除（False Exclusion）</strong><br>
+在候选获取阶段（2），系统可能错误排除那些中心较远、但内部包含近邻向量的簇，把真正的最近邻错误归类为远距离向量，使其无法进入候选池，严重降低查询精度。</li>
+</ol>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429122206.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429122206.png" alt="image.png" style="max-width: 100%;"></a><br>
+图 3 展示了在 SIFT1B 数据集上，聚类索引（SPANN）与图索引（DiskANN）的候选集大小差异。在 81%–95% 的 recall@10 精度下，要达到相同召回率，聚类索引需要的候选数量是图索引的<strong>1.14–2.34 倍</strong>，且精度越高，差距越大。这给查询过程带来极大的计算与 I/O 压力。因此，DiskANN 的 QPS 比 SPANN 高<strong>1.23–1.88 倍</strong>。</p>
+<p><strong>GPU 加速的聚类型向量索引</strong><br>
+为缓解过高的计算与 SSD 访问压力，FusionANNS [69] 利用 GPU，并将量化后的向量存入 GPU 内存。这些向量通过乘积量化（PQ）降维并量化为 uint8 类型。如图 2b 所示，相较于传统聚类索引的三阶段流程，FusionANNS 在图遍历（1）与候选获取（3）之间，增加了一个<strong>基于 GPU 的量化过滤阶段（2）</strong>。</p>
+<p>在量化过滤阶段（2），GPU 利用 PQ 编码向量，对图遍历阶段选中的簇内向量计算量化距离，筛选出低于预设阈值的向量，只将这些过滤后的候选送入后续阶段，从 SSD 读取并执行精确距离计算。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429130611.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429130611.png" alt="image.png" style="max-width: 100%;"></a><br>
+尽管量化过滤带来了效率提升，但 FusionANNS 只能<strong>部分缓解</strong>严重的 SSD I/O 压力。因为其过滤阶段仅依靠 PQ 压缩距离筛选候选，缺少由精确距离构成的细粒度导航指引，导致需要额外访问 SSD 获取精确距离以补偿量化误差。如图 4 所示，在 SIFT1B 数据集上，FusionANNS 的 SSD 页访问次数仍比 DiskANN 多<strong>1.36–1.70 倍</strong>。</p>
+<h2>2.2 基于图的向量索引</h2>
+<p>为减少 SSD 访问次数及对应的计算开销，新兴的 ANNS 系统（如 DiskANN [31]、DiskANN++ [52]）采用细粒度向量图，而非粗粒度的聚类中心图。这类系统主要维护两种数据结构：1）内存中的量化向量；2）存于 SSD 上的向量图邻接表与全精度向量。图 2c 展示了图索引 ANNS 系统的迭代检索流程：</p>
+<p>・1. 距离计算阶段：系统利用内存中的量化向量，计算查询向量与节点间的精确距离，并为邻居节点计算 PQ 距离。<br>
+・2. 遍历状态管理阶段：系统在结果堆中维护精确距离，同时通过最小堆管理 PQ 距离；下一个遍历节点将从最小堆中按 PQ 距离最小值动态选出。<br>
+・3. 邻居访问阶段：系统从 SSD 读取选中节点的全精度向量及其邻居列表。</p>
+<p>通过采用高精度向量索引，该方法缩小了候选集规模，并减少了距离计算量。如图 3 与图 4 所示，相较于 SPANN 与 FusionANNS，DiskANN 的候选集规模更小，SSD 访问需求也显著更低。</p>
+<h1>三、动机</h1>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429143922.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429143922.png" alt="image.png" style="max-width: 100%;"></a><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429143840.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429143840.png" alt="image.png" style="max-width: 100%;"></a><br>
+如图 6 所示，<strong>图索引减少的 SSD 访问量远多于计算量</strong>，这使得系统很容易出现<strong>计算瓶颈</strong>。图 5 展示了查询吞吐率随 CPU 核心数变化的趋势。我们发现，查询吞吐率几乎随核心数<strong>线性增长</strong>。特别地，当使用全部 52 个核心时，实际消耗的 SSD 吞吐率仅为 3.7 GB/s，仅略高于一块 PCIe 4.0×4 SSD（Intel P5510 [63]）的 I/O 带宽。当系统扩展到多 SSD 配置时，SSD 的 I/O 带宽会出现<strong>利用率不足</strong>的问题。</p>
+<p>FusionANNS 采用 GPU 解决了预排序阶段的计算瓶颈。受此启发，一个很直接的思路是引入 GPU 来缓解距离计算带来的计算压力。这一设计思路看似简单，但实际面临<strong>三大严峻挑战</strong>。</p>
+<p><strong>C1：计算与 I/O 串行执行导致 GPU 利用率低</strong><br>
+图索引类 ANNS 算法存在<strong>固有的计算依赖</strong>：距离计算阶段需要读取存储设备上的邻居向量数据，而邻居访问阶段又依赖初步的距离计算结果才能取数。这种循环依赖会导致不可避免的<strong>计算停顿</strong>。</p>
+<p>在引入 GPU 后，距离计算被大幅加速，反而造成严重的<strong>流水线失衡</strong>—— 计算完成得更快，导致<strong>等待 I/O 的时间占比更高</strong>。</p>
+<p>在我们的实验中（§5.3），在相同 recall@10 条件下，<strong>串行执行</strong>的 QPS 仅为异步执行的<strong>67.6%–73.1%</strong>。</p>
+<p><strong>C2：内核级 GPU I/O 栈中的同步导致 I/O 延迟被拉长</strong><br>
+内核级 GPU I/O 栈通过<strong>批量 SSD 访问</strong>提升 I/O 吞吐，但批次中<strong>任何一次长尾延迟</strong>都会把延迟扩散到同批次的所有请求。在 GPU 加速的 ANNS 系统中，并发 SSD 访问流量大幅增加，会显著加剧这种延迟放大效应。</p>
+<p>在我们的实验中（§5.4），在相同 recall@10 条件下，<strong>内核级执行</strong>的 QPS 仅为查询级执行的<strong>55.3%–67.4%</strong>。</p>
+<p><strong>C3：SSD 页不对齐导致 I/O 放大</strong><br>
+在图索引ANNS的访问模式中，SSD读取通常以<strong>4KB 为最小粒度</strong>，因为当访问尺寸小于 4KB 时，IOPS 基本保持不变 [31]。在图遍历过程中，每个查询步骤只访问一个图节点。然而，存储向量数据与邻居索引的标准图节点<strong>通常远小于 4KB</strong>，从而造成严重的<strong>I/O 放大</strong>。</p>
+<p>例如，一个<strong>64 度</strong>的图节点仅占用<strong>384 字节</strong>（占 4KB 的 9.37%），导致每次访问有<strong>90.63% 的带宽被浪费</strong>。</p>
+<h1>四、FlashANNS的设计</h1>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429144657.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429144657.png" alt="image.png" style="max-width: 100%;"></a><br>
+为解决这些问题，我们提出 <strong>FlashANNS</strong>：一款基于 GPU 加速、核外图索引的 ANNS 系统。</p>
+<p>图 7 展示了 FlashANNS 的整体架构。它包含三项创新设计：</p>
+<ol>
+<li><strong>I/O - 计算流水线处理</strong>：通过放宽数据依赖，实现 GPU 计算与 I/O 访问并行执行。</li>
+<li><strong>查询粒度 GPU-SSD 直接 I/O 栈</strong>：采用查询级同步，减少 SSD 数据读取过程中的长尾延迟干扰。</li>
+<li><strong>基于采样的图度选择器</strong>：在当前硬件配置下，用采样索引刻画不同图度的流水线性能，从而为不同 SSD 数量选择能最大化流水线重叠的最优图度。</li>
+</ol>
+<h2>4.1 依赖性松弛异步I/O流水线</h2>
+<p>为解决挑战 C1，本文提出<strong>松依赖 I/O 流水线</strong>。本设计不再强制严格的逐步骤依赖关系，允许 SSD 访问在前序计算阶段尚未结束时就提前发起。本节首先分析传统严格串行依赖的产生位置，接着提出<strong>感知陈旧度的流水线</strong>以松弛依赖关系；最后为松依赖检索算法建立<strong>收敛性理论保证</strong>，并对陈旧度步长的选取依据作出解释。</p>
+<h3>4.1.1 传统最优优先搜索中的数据依赖</h3>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429145025.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429145025.png" alt="image.png" style="max-width: 100%;"></a><br>
+如图 8 检索路径所示，ANNS 图索引中的传统<strong>最优优先搜索</strong>从入口节点出发，迭代访问邻居节点。本文将一次<strong>弹出–扩展迭代</strong>定义为一轮检索步：在第 i 步，算法从候选最小堆中弹出当前最近节点 vi​，发起 SSD 读请求获取 vi​ 的所有邻居，计算这些邻居与查询向量的距离，并将其插入候选最小堆。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429145127.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429145127.png" alt="image.png" style="max-width: 100%;"></a><br>
+图 9a 展示了算法流程：计算各邻居节点与查询向量的距离，并维护一份按节点到查询向量距离排序的候选最小堆。图 9 中每个 “最小堆” 代表一轮检索步结束时候选最小堆的快照，堆队首节点即为堆根，将被弹出并进行扩展。一旦某个节点被弹出且其邻居处理完毕，该节点就会从堆中移除，不再出现在后续的最小堆快照中。</p>
+<p>每一轮检索步包含两个耗时阶段：</p>
+<ol>
+<li><strong>SSD 访问阶段</strong>：读取被弹出节点的邻居列表；</li>
+<li><strong>距离计算阶段</strong>：计算这些邻居节点与查询向量的距离，并更新候选最小堆。</li>
+</ol>
+<p>这两个阶段存在两类依赖关系：<br>
+a) <strong>步内依赖</strong>：同一步内的距离计算必须依赖该步 SSD 访问的返回结果；<br>
+b) <strong>步间依赖</strong>：当前步的 SSD 访问，必须依赖前一步计算结果更新后的候选最小堆。</p>
+<p>正是这两类依赖，<strong>阻碍了 I/O 阶段与计算阶段的重叠执行</strong>。</p>
+<h3>4.1.2 依赖松弛策略</h3>
+<p>为改善计算资源利用率低下的问题，我们提出松弛步间依赖关系，使计算阶段与 I/O 阶段可以重叠执行。该方法基于一项核心洞察：图检索过程对<strong>状态陈旧度</strong>具备天然容忍能力，即可以使用前 k 步的候选集合继续检索流程。该洞察由两项实验现象佐证。首先，基于 SIFT1B 数据集的分析显示，仅有 24.3% 的检索步骤需要直接依赖即时更新的候选最小堆。<br>
+其次，即便使用陈旧的候选最小堆，检索行进方向通常依然有效。因此，由状态陈旧度带来的额外检索步数增幅有限且幅度很小。如图 10 所示，每增加一级陈旧步，检索总步数仅上升 2.4% 至 9.8%。</p>
+<blockquote>
+<p>对于每一轮检索步（F+C），只有当计算（C）过程结束时，堆才会更新，然而大部分情况下，堆的更新并不意味着堆顶的更新，因此第t步的读取（F）过程不一定等到第t-1步的计算（C）过程完成，而是可以使用第t-k步的</p>
+</blockquote>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429153515.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429153515.png" alt="image.png" style="max-width: 100%;"></a><br>
+利用图检索对状态陈旧度的固有容忍特性，我们实现了松依赖流水线以最大化资源利用率。如图 9b 所示，我们打破步间依赖，允许当前第 i 步的 SSD 访问阶段无需等待前序第 i-1 步的距离计算阶段完成即可启动。第 i 步待访问的节点，从由第 i-2 步距离计算结果所更新的候选最小堆中选取。如图 8 所示，此时第 i 步执行时不会纳入第 i-1 步的距离计算结果，可能错过传统最优优先搜索中本应在第 i 步选取的更近节点。因此，该陈旧度机制可能需要略微增加向量检索的迭代步数。</p>
+<p>然而，对比图 9a 与图 9b 的耗时可以发现，引入陈旧度的算法能够实现 SSD 访问阶段与距离计算阶段的流水线重叠；即便检索步数略有增加，整体执行耗时仍可大幅降低。</p>
+<h3>4.1.3 收敛分析</h3>
+<p>我们在带有有界搜索步数的陈旧机制下，提供了搜索算法的收敛保证。</p>
+<p>定义 Δt 为步长 t 处路径 Prelax 与 Pstrict 之间最大的位置偏差，受限于 k 步方向方差。偏差满足：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429154016.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429154016.png" alt="image.png" style="max-width: 100%;"></a><br>
+初始条件为 t = 0：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429154050.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429154050.png" alt="image.png" style="max-width: 100%;"></a><br>
+通过数学归纳法对步骤：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429155502.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429155502.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h3>4.1.4 陈旧度步长选择</h3>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429160749.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429160749.png" alt="image.png" style="max-width: 100%;"></a><br>
+在 FlashANNS 中，我们将陈旧度步长默认固定为<strong>k = 1</strong>，作为最优配置。该选择基于图度选择器（第 4.3 节）指导下的软硬件协同设计原则：在索引构建前，图度选择器会调整图的节点度，使单步 GPU 计算时间 Tc​ 与 SSD I/O 时间 Tf​ 近似相等，实现两者的均衡。在此均衡条件下，k=1 的陈旧度已足够实现计算阶段与 I/O 阶段的完全重叠，如图 9b 所示，无需引入额外延迟即可最大化流水线效率。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429160757.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429160757.png" alt="image.png" style="max-width: 100%;"></a><br>
+将陈旧度提升至 k=2 或更高并无增益。例如，增大至 k=2 并不会缩短 Tf​ 和 Tc​ 的固有耗时；尽管更高的陈旧度可以更早发起数据读取，但计算单元无法提前完成任务。因此，如图 12 所示，其流水线周期时间与 k=1 时相比并无变化。此外，如图 10 所示，更大的 k 会因使用更陈旧的候选堆而增加检索总步数，最终导致整体查询延迟升高。该逻辑同样适用于更大的 k 值。如图 11 所示，在 FlashANNS 的端到端评测中，k=1 始终能达到最高的 QPS。</p>
+<h2>4.2 资源高效的查询粒度并发I/O栈</h2>
+<p>为解决挑战 C2，我们引入了一种专为 ANNS 工作负载设计的<strong>资源高效、查询粒度并发 I/O 栈</strong>。该 I/O 栈克服了现有 I/O 栈在处理 ANNS 工作负载特有的迭代式、批量式、细粒度 SSD 请求时的局限。我们的设计支持 GPU 与 SSD 之间的直接数据传输，GPU 开销极低，且完全绕过了主机操作系统的文件系统。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429161851.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429161851.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h3>4.2.1 查询粒度 I/O 栈的设计与执行</h3>
+<p>如图 13 所示，FlashANNS 实现的查询粒度 I/O 栈包含三个组件：(1) 驻留在 CPU 主机上的 I/O 请求数组；(2) 驻留在 GPU 上的完成信号数组；(3) GPU 数据缓冲区。每个数组元素对应一个查询，每个查询由一个 warp（GPU 计算中由 32 个线程组成的线程组）执行。</p>
+<p>发起 SSD 读取时，流水线分为四个阶段，实现计算与 I/O 的重叠执行：<br>
+(1) 每个 warp 将目标 SSD 块地址写入请求缓冲区。该缓冲区分配在主机固定内存中，并通过 CUDA 的映射内存功能映射到 GPU 地址空间。提交地址后，warp 无需等待 I/O 请求完成，可立即恢复计算任务。<br>
+(2) CPU 代理轮询该数组，将地址批量整理为读取请求并提交给 SSD。<br>
+(3) 完成读取后，SSD 通过 DMA 将数据直接传输至 GPU 全局内存中的查询粒度数据缓冲区，同时 CPU I/O 线程向 GPU 端数组写入完成信号。<br>
+(4) 当 warp 完成当前计算任务并到达同步点时，会检查完成信号。若数据已就绪，warp 即可读取数据。</p>
+<h3>4.2.2 ANNS 工作负载的独特特性与挑战</h3>
+<p>ANNS 工作负载的特征是存在大规模查询批次，且每个查询的处理过程都涉及 SSD 访问阶段与 GPU 计算阶段的迭代执行。这带来了三项挑战：首先，ANNS 工作负载包含大量小型随机 I/O 操作；其次，我们提出的 SSD 访问与 GPU 计算重叠执行机制，要求以异步方式处理 SSD 访问请求；第三，跨不同查询的 SSD 访问同步会导致单个 I/O 的长尾延迟（掉队请求）拖累整个批次。在迭代式检索过程中，这类延迟会显著累积，严重降低整体吞吐率。据我们所知，现有 I/O 栈均无法同时应对这三项挑战。</p>
+<h3>4.2.3 现有GPU-SSD IO栈的局限性</h3>
+<p>现有 I/O 栈存在严重性能瓶颈，拖累系统整体表现。</p>
+<p>GPU 直连存储 GDS [55] 虽可绕过 CPU 完成数据传输，但控制操作仍依赖主机操作系统文件系统。这种依赖会产生系统调用与频繁的内核态 - 用户态切换，在处理 ANNS 场景特有的海量小规模随机 I/O 时，会带来巨大开销。</p>
+<blockquote>
+<p>解释：<br>
+传统I/O路径：SSD-&gt;系统内核/文件系统（系统调用+内核/用户态切换）-&gt;CPU内存-&gt;拷贝-&gt;GPU显存<br>
+GDS路径：SSD-&gt;DMA直连（系统调用+内核/用户态切换）-&gt;GPU显存<br>
+数据不用CPU搬运，但每个小I/O仍需要频繁进行系统调用和内核/用户态切换</p>
+</blockquote>
+<p>BaM（GPU 主动按需存储）[58] 采用以 GPU 为中心的 I/O 控制路径。但由于其接口为同步阻塞模式，无法解决第一项挑战：线程必须阻塞等待 I/O 请求完成，不能并行执行计算任务，因此无法实现 ANNS 工作负载中计算与 I/O 阶段的流水重叠。</p>
+<blockquote>
+<p>解释：<br>
+传统IO：<br>
+GPU计算线程 → （请求数据）→ CPU → OS文件系统 → NVMe SSD<br>
+SSD → CPU内存 → 拷贝 → 显存 → GPU继续计算<br>
+BaM：<br>
+GPU线程 → 直接写 NVMe SSD 的 doorbell 寄存器 → SSD<br>
+SSD → 直接DMA → GPU显存<br>
+BaM 只是把 “<strong>CPU 阻塞</strong>” 换成了 “<strong>GPU 线程阻塞</strong>”，<strong>同步本质没变</strong>，还是做不到计算与 I/O 的流水重叠。</p>
+</blockquote>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429164638.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429164638.png" alt="image.png" style="max-width: 100%;"></a><br>
+CAM（GPU 发起、CPU 托管的异步 SSD 管理框架）[64] 采用折中设计，支持异步访问且由 CPU 负责调度管理，但采用<strong>内核粒度的全局同步</strong>机制。这意味着 GPU 必须等待批次内<strong>所有 I/O 请求全部完成</strong>才能继续执行。面对 ANNS 卸载场景的第二项挑战（图 14a），CAM 的同步机制需要等待跨查询的所有未完成 SSD 访问结束，进而造成严重的<strong>延迟放大</strong>。</p>
+<blockquote>
+<p>解释：<br>
+传统I/O<br>
+GPU 线程 → 通知 CPU → CPU 发起系统调用 / 文件系统 → 提交 SSD 请求 → SSD 返回数据 → CPU 拷贝数据到显存 → GPU 继续计算<br>
+CAM<br>
+GPU 线程 → 主动发起 I/O 请求 → 写入 CPU 侧请求队列 → CPU 批量提交 SSD 请求 → SSD 异步返回数据 → CPU 写入 GPU 缓冲区 → 【全局同步点：等待批次内所有 I/O 完成】 → GPU 线程解除同步，继续计算<br>
+CAM 能缓解系统调用开销、支持异步提交，但<strong>无法解决挑战 C2（I/O 长尾延迟放大）</strong></p>
+<p>什么是“内核粒度的全局同步”？</p>
+<ul>
+<li>当 GPU 启动一个 kernel 处理一批查询时，所有线程（对应所有查询）被视为一个整体。</li>
+<li>同步点会强制所有线程停在同一位置，直到<strong>批次内所有线程的所有 I/O 请求全部完成</strong>，才能继续执行后续代码。</li>
+</ul>
+</blockquote>
+<p>为解决 GDS 的性能开销问题，FlashANNS 采用 SPDK 完全绕过内核协议栈，从而消除文件系统带来的开销。为改进 BaM 的同步设计缺陷，FlashANNS 将 I/O 管理交由 CPU 负责，并实现异步数据传递机制，使计算流程与 I/O 流程能够并行执行。为缓解 CAM 批量 SSD 访问的长时间等待问题，如图 14b 所示，FlashANNS 让每个查询可以<strong>独立发起 I/O 请求、独立接收完成信号</strong>，从而避免个别掉队请求拖累整个批次。</p>
+<blockquote>
+<p>spdk介绍<br>
+Storage Performance Development Kit（SPDK，存储性能开发工具包）由 Intel 发起并开源，遵循 BSD 许可证，是一套基于 C 语言、用于编写高性能、高扩展性用户态存储应用程序的底层库和工具集。传统 Linux 系统的 I/O 栈存在上下文切换、中断处理、内存拷贝、多线程锁争用等开销，在 NVMe 等极速 SSD 普及、存储介质延迟降至微秒级后，内核软件开销成为 I/O 性能瓶颈，SPDK 的出现正是为了解决这一问题。</p>
+<p>SPDK 通过三大核心技术重构底层 I/O 架构：内核旁路将 NVMe 驱动移至用户态，减少内核协议栈开销；轮询模式用专属 CPU 核心主动检查任务，消除中断开销与长尾延迟；无锁与零拷贝设计通过 Thread-per-core 架构避免锁争用，借助 DMA 直接传输数据省去冗余拷贝。在 FlashANNS 架构中，SPDK 彻底绕过内核协议栈，消除底层文件系统开销，支撑其应对数十亿规模向量检索的高并发 I/O 压力。</p>
+</blockquote>
+<p>我们将 GDS、BaM、CAM 三种主流 I/O 栈分别集成到 FlashANNS 架构中进行对比评测。如图 15 所示，在 4 块 SSD、SIFT1B 数据集的测试环境下，本文自研 I/O 栈性能表现最优，QPS 分别达到 GDS 的 14.5 倍、BaM 的 3.9 倍、CAM 的 1.5 倍。实验结果充分表明，相较于现有方案，FlashANNS 的 I/O 栈具备更优异的性能，且针对 ANNS 工作负载的访问模式做了更深度的专属优化。</p>
+<h2>4.3 基于采样的图度数选择器</h2>
+<p>为解决<strong>约束 C3</strong>，本文提出一种基于采样的图度数选择器。该机制属于<strong>索引构建前预处理流程</strong>：通过在不同度数的采样索引上分析流水线运行特征，估算 I/O 与计算的相对延迟；再利用 I/O 放大带来的带宽冗余，选取能<strong>最大化流水线重叠度</strong>的度数配置。</p>
+<h3>4.3.1 图度数对计算/IO瓶颈的影响</h3>
+<p>SSD 的 I/O 特性决定了：<strong>当访问粒度不超过 4KB 时，IOPS 而非带宽会成为主要性能瓶颈</strong>。图索引的节点大小大多小于 4KB。例如 DiskANN [31] 在 SIFT1B 数据集上的默认配置（度数 64）中，单个节点仅 384 字节。而 SSD 通常以 4KB 块为单位进行访问（DiskANN 中也有说明）。SSD 访问块大小与图索引节点尺寸不匹配，会造成严重的<strong>I/O 放大</strong>：每次读取都会取回一整个 4KB 数据块，但实际只用到其中很小一部分。</p>
+<p>图节点由原始全精度向量和邻居节点索引构成。虽然通过增大图度数把节点大小扩充至 4KB，看似可以直接消除 I/O 放大，却会带来新的问题：度数越高，单步 GPU 计算耗时呈线性增长，因为邻居数量越多，所需的距离计算就越多；与此同时，继续增加邻居数量带来的性能增益会出现<strong>边际收益递减</strong>。因此，选取最优图度数需要在 I/O 负载与计算负载之间做精细权衡，且必须适配当前可用的 SSD 带宽。</p>
+<p>如 4.1.4 节所述，为支持单步陈旧流水线机制，图度数选择器会均衡单步 GPU 计算耗时Tc​与 SSD I/O 耗时Tf​，使二者大致相等。</p>
+<h3>4.3.2 图度数选择器的工作流</h3>
+<p>在完整索引构建开始前，FlashANNS 会通过轻量级图度数选择器确定最优图度数。该流程基于<strong>精简数据样本</strong>（如 10 万个节点、索引体积小于 200MB）开展，且样本与目标数据集保持相同的数据类型和向量维度。</p>
+<p>系统会为一组候选度数（如 64、150、250）构建临时图索引，索引边采用随机链接生成，而非真实近邻关系，这已足以精准探测每种度数下的内存访问与 I/O 访问特征。</p>
+<p>度数选择器复用相同的运行时流水线，经过简短的合成查询预热后，对每个候选度数 d 分别测量数据读取延迟 Tf​(d) 与单步计算延迟 Tc​(d)。其优化目标是让<strong>每一步的 I/O 耗时与计算耗时相等</strong>，从而最大化流水线重叠度，因此最优度数 d 按如下方式求解：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429221306.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429221306.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h3>4.3.3 图度数选择的开销</h3>
+<p>通过在带有随机连接的小规模样本（如 10 万个节点，仅为十亿级数据集的 0.01%）上进行特征剖析，该方法无需构建真实近邻关系，极大规避了相关开销，使得图索引构建与性能评测的成本都降到极低。整个过程仅耗时数分钟，相较于动辄数小时的完整索引构建流程，其额外开销不足 1%。</p>
+<h3>4.3.4 通过度数选择的硬件适配</h3>
+<p>图度数选择器让 FlashANNS 能够适配各类不同的硬件配置。它通过重新均衡<strong>计算负载时延Tc​</strong>与<strong>I/O 时延Tf​</strong>，指导用户充分发挥硬件性能优势，保障流水线始终保持高效运行。</p>
+<p>当使用<strong>IOPS 更高的 SSD</strong>时，度数选择器会建议<strong>降低图度数</strong>。以此减小计算时延Tc​，使其与缩短后的 I/O 时延Tf​重新匹配，压缩流水线周期，进而加快查询速度。</p>
+<p>当使用<strong>性能更强的 GPU</strong>时，度数选择器会建议<strong>增大图度数</strong>。充分利用富余的算力，在保持流水线周期不变的前提下，每一步检索可比对更多邻居节点，最终减少整体搜索步数，提升整体查询执行效率。</p>
+<h1>五、评估</h1>
+<p>本文的实验评估旨在回答以下研究问题：</p>
+<ul>
+<li>在单块 SSD 与多块 SSD 场景下，FlashANNS 的性能相较于其他基于 SSD 的检索框架表现如何（见 5.2 节）？</li>
+<li>依赖松弛异步 I/O 流水线的实际效果如何（见 5.3 节）？</li>
+<li>查询粒度并发 SSD 访问机制的有效性如何（见 5.4 节）？</li>
+<li>随着返回结果 top-k 值增大，系统吞吐量的伸缩性能表现如何（见 5.5 节）？</li>
+<li>计算与 I/O 均衡的图度数选择器如何指导最优度数选取（见 5.6 节）？</li>
+<li>当索引规模超出内存容量时，FlashANNS 的性能表现如何（见 5.7 节）？</li>
+</ul>
+<h2>5.1 实验搭建</h2>
+<p>实验基于一台双路服务器开展，配置Intel Xeon Gold 5320 processors，主频 2.20 GHz，共 52 线程；配备 768GB DDR4 系统内存、单张 80GB PCIe 版本 A100 GPU。存储子系统包含 8 块 3.84TB 英特尔 P5510 NVMe SSD，采用 PCIe 4.0 x16 拓扑架构。服务器操作系统为 Ubuntu 22.04 LTS。</p>
+<p><strong>数据集</strong><br>
+实验采用高维相似度检索基准任务中广泛使用的<strong>三个经典十亿级数据集</strong>：</p>
+<ul>
+<li>SIFT-1B：包含 10 亿条 128 维 <strong>8 位无符号整型（uint8）</strong> 向量，采用 10000 条查询样本进行评测。</li>
+<li>DEEP-1B：包含 10 亿条 96 维 <strong>32 位浮点型（float32）</strong> 向量，采用 10000 条查询样本进行基准测试。</li>
+<li>SPACEV-1B：十亿级规模、100 维 <strong>8 位有符号整型（int8）</strong> 向量，采用 29300 条查询样本完成测试。</li>
+</ul>
+<p><strong>对比基线</strong><br>
+本文选取三种主流框架作为 FlashANNS 的对比基线：</p>
+<ul>
+<li>SPANN [11]：基于聚类的<strong>SSD 驻留型</strong>检索框架，将聚类链表存储于 SSD，聚类中心点常驻 CPU 内存。该检索机制延迟较低，但单次查询计算开销较大。</li>
+<li>DiskANN [31]：基于图索引的<strong>SSD 驻留型</strong>框架，索引图与原始向量均存放于 SSD，同时在 CPU 内存中保存乘积量化压缩向量，依靠并行检索实现性能优化。</li>
+<li>FusionANNS [69]：GPU 加速的聚类式<strong>SSD 驻留型</strong>检索框架，通过 CPU 与 GPU 协同计算优化近似最近邻检索任务。</li>
+</ul>
+<p><strong>评价指标</strong><br>
+实验以<strong>每秒查询数（QPS）</strong> 衡量查询吞吐量，以<strong>Recall@10</strong>衡量检索精度。Recall@10 表示近似最近邻检索返回结果中，与真实标准答案匹配的前 10 近邻所占比例。</p>
+<p>聚类索引类系统通过调整图遍历过程中拉取的倒排列表数量调节召回率；图索引类系统则通过配置候选最小堆大小控制召回率。在<strong>QPS-Recall@10</strong>权衡曲线上，性能更优的方案会分布在曲线<strong>右上角</strong>，即在相同条件下同时具备更高吞吐量与更高检索精度。</p>
+<h2>5.2 端到端的吞吐量-召回率权衡</h2>
+<p>我们将 FlashANNS 与全部基于 SSD 的基线方案 [11,31,69] 进行对比评测，实验中将 CPU 线程数拉满至 52 个。图 16 给出了<strong>三个数据集上查询吞吐量随 Recall@10 的变化曲线</strong>，同时将用于存储索引的 SSD 数量从 1 块扩展至 8 块。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429223234.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429223234.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>单 SSD 配置下对比</strong><br>
+首先测试单 SSD 部署下的 QPS–Recall@10 性能。图 16 第一行结果表明：在 Recall@10 达到 96% 时，FlashANNS 相比基于 CPU 的基线方案（SPANN、DiskANN），<strong>查询吞吐量提升 2.7–5.9 倍</strong>。</p>
+<p>在 Recall@10 为 98% 的条件下，对比 GPU 加速的 FusionANNS，FlashANNS 在 SIFT1B 与 SPACEV1B 数据集上吞吐量相当、小幅领先（1.03–1.4 倍）；这是由于 I/O 带宽受限会降低计算压力，从而规避了 CPU 瓶颈。</p>
+<p>但在 DEEP1B 数据集、98% 召回率下，FlashANNS 的查询吞吐量比 FusionANNS <strong>高出 14.3 倍</strong>。该性能差距源于 DEEP1B 采用单精度浮点（FP32）格式，会让 FusionANNS 在高精度距离计算阶段承受巨大 CPU 负载，暴露出其<strong>CPU 受限</strong>的短板。</p>
+<p>总体来看，FlashANNS 在 QPS–Recall@10 权衡曲线中始终处于<strong>右上角最优区域</strong>，说明其依托并行流水线优化与 I/O 协议栈高效裁剪，能在有限 I/O 带宽下实现更优的查询吞吐性能。</p>
+<p><strong>多 SSD 扩容场景对比</strong><br>
+随着 SSD 数量增加、整机可用 I/O 带宽提升，FlashANNS 凭借<strong>导航图度数优化</strong>与<strong>I/O - 计算时延均衡</strong>机制，性能增幅远高于其他对比方案。</p>
+<p>以图 16 第一列的 SIFT1B 数据集为例，在 Recall@10 为 98% 时，随着 SSD 从 1 块扩容至 8 块，FlashANNS 相对基线分别取得 <strong>1.4×–7.0×、2.0×–5.4×、2.7×–5.9×、3.9×–5.7×</strong> 的吞吐量提升。</p>
+<p><strong>与内存型基线的补充对比</strong><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429223723.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429223723.png" alt="image.png" style="max-width: 100%;"></a><br>
+此外实验发现，FusionANNS 在高 I/O 带宽场景下的表现低于预期。分析表明，其根本原因在于 FusionANNS 的 I/O 提交队列调度机制存在固有低效问题。为严格<strong>剥离</strong>算法与架构层面的固有优势、排除工程实现差异带来的偏差，本文开展了一组<strong>对照实验</strong>：将采用 4 块 SSD 部署的 FlashANNS，与<strong>全索引加载至内存</strong>的内存版 FusionANNS 进行对比，以此消除存储层优化带来的干扰影响。如图 17 所示，FlashANNS 的性能优于内存版 FusionANNS 基线。该结果证明：<strong>即便对比全内存索引部署的 FusionANNS</strong>，基于 SSD 实现的 FlashANNS 仍具备性能优势。</p>
+<h2>5.3 依赖松弛异步I/O管道的影响</h2>
+<p>本小节定量评估<strong>依赖松弛流水线并行机制</strong>在运行过程中对查询吞吐量的影响。分别从三方面展开评测：<br>
+1）依赖松弛对图检索<strong>搜索步数</strong>的影响；<br>
+2）通过执行流水重叠实现的时延降低效果；<br>
+3）整体查询吞吐量的性能提升幅度。</p>
+<p><strong>对搜索步数的影响</strong><br>
+为阐明依赖松弛对检索流程的作用，本文实现了两个版本的 FlashANNS：<strong>流水线版本</strong>与<strong>非流水线版本</strong>。<br>
+流水线版本引入依赖松弛，使图遍历过程中的 SSD 读取与数据计算可以并发执行；而非流水线版本严格遵循最佳优先搜索算法固有的强依赖约束，强制 SSD 访问与计算处理串行执行。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429224141.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429224141.png" alt="image.png" style="max-width: 100%;"></a><br>
+图 18 展示了在 SIFT1B 数据集、图度数设为 250 的配置下，依赖松弛对检索路径长度的影响，对比流水线方案与标准最佳优先搜索方案。实验发现，依赖松弛机制仅额外增加 <strong>2.8~3.2 步</strong>检索步数，相对于基准检索策略的总查询步数，开销仅为 <strong>2.5%~7%</strong>。由此可得：依赖松弛只会造成检索步数的小幅增加。</p>
+<p><strong>对查询时延的影响</strong><br>
+本小节从时延角度量化流水线的重叠执行特性。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429224233.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429224233.png" alt="image.png" style="max-width: 100%;"></a><br>
+基于 SIFT1B 数据集、图度数 250、4 块 SSD 并行配置开展评测，图 19 对比了流水线版 FlashANNS 的平均查询时延，以及将 SSD 访问阶段与 GPU 计算阶段时延直接相加的串行总时延。实验结果表明：在不同召回率下，<strong>流水重叠执行时间占流水线总时延的 35.4%~45.1%</strong>。这说明 FlashANNS 能够高效重叠 SSD 访问与 GPU 计算阶段，有效降低检索时延、提升每秒查询吞吐量 QPS。</p>
+<p><strong>流水线整体性能</strong><br>
+综上，<strong>依赖松弛异步 I/O 流水线</strong>仅付出 <strong>2.5%~7%</strong> 的额外计算步数代价，便可实现 <strong>36%~47%</strong> 的流水线重叠率，最终显著提升整体查询吞吐量。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429224612.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429224612.png" alt="image.png" style="max-width: 100%;"></a><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429224625.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429224625.png" alt="image.png" style="max-width: 100%;"></a><br>
+如图 20、图 21 所示，在相同召回率条件下，该流水线方案相比非流水线版本，QPS 提升幅度可达 <strong>33.6%~46.6%</strong>。</p>
+<h2>5.4 查询粒度同步SSD访问的影响</h2>
+<p>为验证<strong>查询粒度并发 SSD 访问</strong>机制的有效性，本文采用未经优化的<strong>内核粒度 I/O 栈</strong>（CAM [64]）作为对比基线。</p>
+<p>查询粒度 SSD 访问将每个线程束（warp）的检索操作视作独立调度单元；而内核粒度方案则会把一个内核函数执行期间产生的所有 SSD 请求聚合为批量处理，必须等待整批请求全部读取完成后，才能开启后续数据处理与下一阶段的访问操作。</p>
+<p>相比之下，查询粒度 SSD 访问采用更细粒度的同步机制，单个线程束完成对应查询后即可立即处理后续读请求。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429231103.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429231103.png" alt="image.png" style="max-width: 100%;"></a><br>
+实验基于 SIFT1B 数据集、4 块 SSD 配置、图度数 250 的参数设置开展。如图 22 和图 23 所示，<strong>查询粒度 SSD 访问</strong>相比内核粒度的 CAM 方案，查询吞吐量提升<strong>43%~68%</strong>。<br>
+该性能增益主要源于查询粒度操作具备更精细的同步调度粒度，能够有效平摊近似最近邻检索系统中零散存在的 SSD 长尾读取延迟。</p>
+<h2>5.5 对更大返回集的可扩展性</h2>
+<p>为验证 FlashANNS 在<strong>返回更大结果集</strong>场景下的性能表现，本文在 SIFT-1B 数据集、4 块 SSD 配置下，选取更多不同的 Top-K 取值，将 FlashANNS 与三种主流前沿基线算法进行对比。针对每种算法，对 K∈{10,50,100} 分别调参，在保证召回率高于 90% 的前提下，测试不同 Top-K 对应的可达查询吞吐量 QPS。图 24 可见，FlashANNS 的 QPS 相较其余三种基线算法高出<strong>2.2–5.2 倍</strong>，证明其在不同 Top-K 取值下均能保持极高的查询吞吐性能。</p>
+<h2>5.6 计算与 I/O 均衡的图度数选取流程</h2>
+<p>我们在<strong>三种图度数配置</strong>（64、150、250）以及<strong>多档 SSD 并行规模</strong>（1、2、4、8 块 SSD）下开展索引构建实验，系统评测不同 I/O 带宽条件下的查询吞吐特性，验证基于采样索引分析进行图度数优选方法的有效性。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429231615.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429231615.png" alt="image.png" style="max-width: 100%;"></a><br>
+本文在 DEEP1B 数据集、不同 I/O 带宽配置下，评测不同图度数对应的 QPS - 召回率权衡表现。由图 25 可知：在<strong>低 I/O 带宽约束</strong>（索引存放于 1–2 块 SSD）下，高度数图在达到同等召回率指标时，查询吞吐量始终优于低度数图。该优势源于 SSD 带宽紧缺时，高度数图能更好地利用 GPU 并行计算资源<strong>掩盖 I/O 延迟</strong>。</p>
+<p>但随着 SSD 并行度提升、I/O 带宽增大（最多至 8 块 SSD），高度数与低度数图之间的查询吞吐差距显著缩小。值得注意的是，在 8 块 SSD 配置、Recall@10 为 96% 的条件下，<strong>150 度图</strong>的查询吞吐量比 250 度图高出 13%。当带宽超过临界阈值后，高度数图检索本身带来的更高计算开销（例如每步遍历需要访问更多邻居节点）反而会形成<strong>计算瓶颈</strong>。</p>
+<p>在确定索引构建的最优图度数前，本文按照 4.3 节所述方式构建<strong>采样索引</strong>：其数据类型与真实向量索引保持一致，但不包含真实近邻关系，用于预先估测流水线各阶段延迟。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429231818.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429231818.png" alt="image.png" style="max-width: 100%;"></a><br>
+图 26 给出了不同图度数采样索引的<strong>I/O–计算时延比例</strong>实测结果，这类采样索引能够真实反映对应度数下全规模索引图的实际性能特征。</p>
+<ul>
+<li>1 块 SSD 场景下：150 度图的 I/O 时延是计算时延的 4.2 倍，250 度图为 2.3 倍，说明两种配置均处于<strong>I/O 受限</strong>状态，高度数图仍具备性能优势。</li>
+<li>2 块 SSD 场景下：150 度图 I/O 时延为计算时延的 3.1 倍（仍为 I/O 受限）；250 度图 I/O 与计算时延比值接近 1.1，基本达到均衡，流水线资源可充分利用。</li>
+<li>4 块 SSD 场景下：150 度图 I/O 时延降至计算时延的 1.4 倍（轻度 I/O 受限）；250 度图转为<strong>计算受限</strong>，I/O/ 计算时延比值仅为 0.7。这说明最优度数应落在 150～250 之间，以规避单一资源瓶颈。</li>
+</ul>
+<p>基于轻量级采样索引的度数采样所预测的性能趋势，与实际测试结果高度吻合，从实验层面验证了<strong>面向负载感知的索引优化中，图度数预优选机制</strong>的有效性。</p>
+<h2>5.7 30B-向量数据集的核外效率</h2>
+<p>为验证 FlashANNS 对<strong>超内存外存索引</strong>的处理能力，本文对 DEEP1B 数据集进行扩充：将每个向量做两次微小扰动后复制生成新向量，构造出规模达<strong>300 亿向量</strong>、总大小 1073GB 的扩展数据集。该方式在扩充数据规模的同时，保留了原始向量间的近邻关系。</p>
+<p>图 27 表明，FlashANNS 在这种超大规模数据集上仍能保持良好的 QPS - 召回率权衡表现，充分证明 FlashANNS 可高效完成<strong>远超内存容量</strong>的海量数据集近似最近邻检索，完全能够满足检索增强生成（RAG）场景下的业务需求。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429232319.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260429232319.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h1>六、相关工作</h1>
+<p>据我们所知，本文首次提出<strong>基于 GPU 加速、依托 SSD 部署的图结构近似最近邻检索（ANNS）框架</strong>。第五章已与当前最先进的基于 SSD 的 ANNS 系统（DiskANN、SPANN、FusionANNS）进行全面对比，本章则从两大核心领域梳理相关研究：<strong>内存型 ANNS 框架</strong>与<strong>SSD I/O 优化实现</strong>。</p>
+<p><strong>内存型 ANNS 框架</strong><br>
+内存近似最近邻检索系统应用广泛，其索引结构主要分为四类：</p>
+<ol>
+<li><strong>基于树的索引</strong>[7, 9, 15, 21, 50, 51, 62, 78]<br>
+核心思想是构建树形数据结构，依据距离或密度划分规则对向量进行层次化组织。</li>
+<li><strong>基于哈希的索引</strong>[24, 16, 23, 67]<br>
+采用 ** 局部敏感哈希（LSH）** 将高维向量映射至哈希桶中，同时保留向量间相似度关系，实现高效的近似最近邻检索。</li>
+<li><strong>基于量化的索引</strong>[5, 6, 22, 32, 36, 53, 76]<br>
+该方法将高维向量拆分为多个子向量，对每个子向量独立量化为紧凑编码形式，既缩减存储空间占用，又可通过查表加速相似度计算。</li>
+<li><strong>基于图的索引</strong>[18, 20, 26, 34, 38, 46, 47]<br>
+图索引通过显式建模局部近邻关系，在欧氏空间中具备更优的检索性能。图结构中的边直接刻画向量相邻关系，支持通过贪心遍历逐步逼近最近邻节点。<br>
+相比之下，FlashANNS 面向<strong>外存超内存</strong>ANNS 场景设计，同时性能相较内存检索方案仍有小幅优势。</li>
+</ol>
+<p><strong>SSD I/O 优化相关工作</strong><br>
+近年来，SSD 凭借大容量与远超传统机械硬盘的性能优势，已在众多业务场景中得到部署 [1,25,35,48]。已有大量研究充分挖掘 SSD 的性能潜力 [1,10,12,17,19,27,29,40-42,44,45,48,57,60,65,66,68,70,72-75,80]。</p>
+<p>现有工作 [79] 借助 <strong>GPUDirect</strong> 技术实现 GPU 与 SSD 之间的数据直传，但仍依赖 CPU 发起和触发 SSD 访问请求，无法彻底消除操作系统内核开销。另有部分系统 [61] 甚至不支持 GPUDirect。这类方案均存在内核层开销，尤其难以在 ANNS 负载的批量访问模式下打满 SSD 吞吐带宽。</p>
+<p>BaM [58] 提出由<strong>GPU 主动发起</strong>按需直连 SSD 访问，全程无需 CPU 参与；但其设计引入了新的 GPU 核心资源争用问题，挤占了本该用于计算任务的 GPU 算力。</p>
+<p>CAM [64] 可以在不占用 GPU 流式多处理器（SM）资源的前提下实现高吞吐，但其实现采用<strong>内核粒度全局同步</strong>：同一个内核中的所有线程束，必须等待最慢的一次 SSD I/O 请求完成后才能继续执行后续流程。</p>
+<p>与之不同，FlashANNS 采用<strong>查询粒度并发 SSD 访问</strong>机制，有效加速了基于 GPU 的近似最近邻检索任务。</p>
+<h1>七、总结</h1>
+<p>在本研究中，我们介绍了FlashANNS，一种GPU加速、基于核心图的ANNS系统。我们的方法通过三种协调机制实现了完整的I/O计算重叠：首先，通过依赖松弛I/O流水线实现SSD节点检索与GPU计算的重叠，同时提供严格的理论收敛保证。其次，是基于查询粒度的并发SSD访问，消除了GPU内核粒度固有的全局同步。第三，一种硬件感知的图度选择机制，最大化流水线阶段重叠效率。实验结果显示，在相同的回忆精度下，FlashANNS在单一SSD配置下，查询吞吐量比现有SOTA方法高出2.7–5.9×，并在多SSD配置中可提升至3.9–12.2×的查询吞吐量。</p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
