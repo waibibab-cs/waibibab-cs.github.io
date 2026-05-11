@@ -462,7 +462,20 @@ SONG 重新设计图检索流程以更好适配 GPU 并行特性，GANNS、CAGRA
 因此，<strong>在 GPU 上实现高效的动态索引更新</strong>，尤其是大规模图类索引的动态维护，仍是尚未解决的难题。</p>
 <h1>八、总结</h1>
 <p>本文提出了 <strong>SVFusion</strong>，一种面向大规模向量检索、支持实时更新的 <strong>CPU-GPU 协同框架</strong>。该框架设计了跨多层存储的<strong>分层向量索引</strong>，实现异构硬件间的数据高效分布。同时引入<strong>自适应缓存机制</strong>，结合访问模式与图结构关联关系优化数据放置策略。SVFusion 还采用<strong>轻量级删除策略</strong>，支持各类操作无阻塞并发执行，适配动态负载场景。</p>
-<p>实验结果表明，在多种流式负载下，相较于现有主流方法，SVFusion 在保持高召回率的同时，吞吐性能最高可提升 <strong>72 倍</strong>。</p></div>
+<p>实验结果表明，在多种流式负载下，相较于现有主流方法，SVFusion 在保持高召回率的同时，吞吐性能最高可提升 <strong>72 倍</strong>。</p>
+<h1>九、附录</h1>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260511141659.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260511141659.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h2>9.1 基于图索引的ANNS</h2>
+<p>本附录给出了 <strong>图索引最优优先搜索（Best-First Search, BFS）</strong> 以及前沿实现 CAGRA [41] 中基于 GPU 的近似最近邻搜索（ANNS）伪代码。算法 3 展示了最优优先搜索在 DiskANN [28] 等图索引上的运行机制。在为大批量查询检索 k 近邻时，基于 CPU 的方案仅能依靠单线程实现查询并行处理，受限于 CPU 核心数量。与之相比，基于 GPU 的算法将图结构与向量均存放于显存中，可调度数千个线程块同时执行距离计算与图遍历操作。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260511142147.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260511142147.png" alt="image.png" style="max-width: 100%;"></a><br>
+算法 4 展示了 CAGRA 的检索流程。该算法为每个查询qi​维护一个候选池Ci​（对应 CAGRA 内部的 top-L 列表），用于存储当前最优候选节点及其距离。检索从随机初始化开始（第 1-2 行）：函数 InitialPoints (G) 从图索引中随机采样节点，计算距离后加入候选池。随后主检索循环迭代执行图遍历与候选集优化：每一轮迭代中，算法从候选池Ci​中选取距离最近且未访问过的候选节点xcurr​，从图结构中读取其邻接节点集合Xi​，在 GPU 上并行计算查询向量与所有邻接节点的距离，并将优质新候选节点更新至候选池（第 4-9 行）。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260511142154.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260511142154.png" alt="image.png" style="max-width: 100%;"></a><br>
+CAGRA 的一项核心优化为<strong>条件式距离计算</strong>：仅对从未评估过的节点计算距离，避免迭代过程中的重复计算。当候选池状态趋于稳定（连续多轮迭代未发现更优候选节点）时算法收敛，最终返回 Top-k 近邻结果（第 10 行）。</p>
+<h2>9.2 执行细节</h2>
+<p>我们通过<strong>扩展 cuVS 24.12 库 [2]</strong> 实现了 SVFusion，为流式向量检索新增了 CPU-GPU 协同机制。具体而言：</p>
+<p>（1）我们对 CAGRA [41] 代码库进行了<strong>数万行代码的深度重构</strong>，使其支持大规模图向量索引的动态更新与 CPU-GPU 协同处理，并通过基于位图（bitset）的过滤机制实现高效的向量插入与删除操作。<br>
+（2）我们开发了一套<strong>缓存管理器</strong>，维护 CPU 内存与 GPU 内存之间的双向映射关系，以实现高效的数据传输。<br>
+（3）我们设计了<strong>多分区策略</strong>，将缓存空间划分为多个独立区域，每个区域采用独立锁进行管理，以最小化资源竞争并最大化系统吞吐量。该分区方案支持多线程并发执行缓存操作，同时保证数据一致性。</p></div>
 <div style="font-size:small;margin-top:8px;float:right;"></div>
 
 <button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
