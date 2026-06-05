@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="From Theory to Practice: Optimization Framework and Performance Evaluation of Mobile HNSW
+# 摘要
+高维近似最近邻（ANN）检索是移动端检索增强生成（RAG）等 AI 应用的关键技术，但主流 HNSW 算法内存开销巨大，与边缘设备严苛的资源约束形成矛盾。">
+<meta property="og:title" content="【论文阅读；26】从理论到实践：移动 HNSW 的优化框架与性能评估">
+<meta property="og:description" content="From Theory to Practice: Optimization Framework and Performance Evaluation of Mobile HNSW
+# 摘要
+高维近似最近邻（ANN）检索是移动端检索增强生成（RAG）等 AI 应用的关键技术，但主流 HNSW 算法内存开销巨大，与边缘设备严苛的资源约束形成矛盾。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/%E3%80%90-lun-wen-yue-du-%EF%BC%9B26%E3%80%91-cong-li-lun-dao-shi-jian-%EF%BC%9A-yi-dong-%20HNSW%20-de-you-hua-kuang-jia-yu-xing-neng-ping-gu.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>【论文阅读；26】从理论到实践：移动 HNSW 的优化框架与性能评估</title>
+
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">【论文阅读；26】从理论到实践：移动 HNSW 的优化框架与性能评估</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/54" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>From Theory to Practice: Optimization Framework and Performance Evaluation of Mobile HNSW</p>
+<h1>摘要</h1>
+<p>高维近似最近邻（ANN）检索是移动端检索增强生成（RAG）等 AI 应用的关键技术，但主流 HNSW 算法内存开销巨大，与边缘设备严苛的资源约束形成矛盾。针对<strong>内存壁垒</strong>问题，本文提出一套将乘积量化（PQ）融合进 HNSW 的混合优化框架，把数据压缩作为移动端落地的底层基础。在 3GB 内存上限环境下基于 SIFT1M 数据集开展对照实验：所提 HNSWPQ 方案峰值内存占用下降 35%，降至 849MB，索引存储空间缩减 63.2%，有效规避系统内存溢出（OOM）风险。在 1536 维超高维向量仿真测试中，该方案出现<strong>计算反转</strong>现象，检索速度相比原生基线提升 4.5 倍；尽管指标召回率上限约 54%，但经过验证，该取舍在云边分级检索架构中用作<strong>哨兵索引</strong>效果优异，可为端侧候选集粗筛提供可靠工程基准。</p>
+<h1>一、引言</h1>
+<p>近似最近邻（ANN）检索是检索增强生成（RAG）等移动端 AI 应用的关键支撑技术 [1]。早期基于树结构、哈希的检索算法受<strong>维度灾难</strong>制约，在高维向量场景性能急剧下滑；当前最优算法 HNSW [3] 虽然检索性能出众，但采用<strong>以空间换时间</strong>的设计思路，百万量级向量数据集就需要约 1.3GB 内存，和移动端严苛的硬件资源限制形成尖锐矛盾。针对该瓶颈，本文从三方面开展研究：<br>
+<strong>理论建模</strong>：剖析 HNSW 空间复杂度，论证乘积量化（PQ）是数据层优化的底层技术基石；<br>
+<strong>框架搭建</strong>：面向移动端搭建全栈优化框架，融合数据压缩与云边协同方案，探究数据压缩、上层剪枝、硬件加速三者之间的协同增益效果；<br>
+<strong>实验验证</strong>：在 3GB 内存上限、1536 维超高维向量的严苛条件下验证 HNSWPQ 方案，实验证实存在<strong>计算反转</strong>现象（检索速度提升 4.5 倍），同时验证该算法可在分层检索架构中充当哨兵索引。</p>
+<h1>二、近似近邻检索的发展与现存难题</h1>
+<p>近似近邻检索已经从传统树、哈希方案，演进为现代图索引技术。KD 树、局部敏感哈希（LSH）等经典算法受维度灾难影响，高维环境下检索效率退化至线性全量遍历，无法满足海量数据的实时检索需求 [2,4]。<br>
+以 HNSW [3] 为代表的图索引在召回与延迟的综合表现上达到业界最优，但算法依托高维空间的枢纽节点特性与空间换时间机制实现高效检索 [6]。为保障贪心寻路效率，索引除存储原始向量外，还要维护海量图邻接表。据 HM-ANN [12] 分析，该架构内存占用随数据量 N 线性增长，在仅配备数 GB 内存的手机设备上极易出现内存溢出（OOM）、应用被系统强杀的问题。除此之外，相册这类高频增删的移动端场景中，图结构维护成本、频繁更新带来的链路断裂问题同样难以解决 [16]。<br>
+反观乘积量化（PQ）[7]，通过子空间拆分 + 码本量化实现超高压缩率，大幅削减存储开销，但会带来不可逆的精度损耗，且不具备高效的图检索遍历能力。本文提出混合索引方案，融合 HNSW 高效的拓扑寻路能力与 PQ 的高存储压缩优势，依托非对称距离计算（ADC）弥补精度损失，从底层硬件层面突破移动端的内存壁垒。</p>
+<h1>三、算法原理与理论框架</h1>
+<h2>3.1 分层图检索机制</h2>
+<p>HNSW [3] 作为图检索的拓扑基础，设计初衷是改善基础 NSW 图在高维空间中出现的区域锁定问题。文献 [13] 指出，受高维数据的聚类特性影响，贪心检索路径极易陷入局部最优；文献 [5] 进一步表明，此类图遍历在理论最坏场景下耗时无上限。</p>
+<p>为解决上述缺陷，HNSW 借鉴跳表思想，依靠随机概率生成多层拓扑结构。节点所处层级计算公式：li​=−mL​⋅ln(U)，其中U服从[0,1]均匀分布。</p>
+<p>该生成规则让顶层节点排布极度稀疏，用于构建远距离跨层链路；底层节点排布稠密，保障近邻查找精度。依托该架构，检索复杂度从O(N)降至O(logN)，代价是需要维护多层图结构，产生高额的以空间换时间的内存开销。</p>
+<h2>3.2 空间复杂度建模</h2>
+<p>为从理论层面量化 HNSW 在移动端部署的资源瓶颈，本文对 HNSW 整体占用存储空间SHNSW​建立数学模型：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260605162242.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260605162242.png" alt="image.png" style="max-width: 100%;"></a><br>
+式中，Mmax​为节点最大出度，Lˉ为索引平均层数。该模型表明：索引存储空间随向量维度d与样本总数N呈线性增长。依据 HM-ANN 文献 [12] 的工程实测结论，程序运行时的额外开销会使内存峰值达到理论计算值的 2～3 倍。理论测算证明：在 3GB 内存硬性限制条件下，原生 HNSWFlat 索引在建库阶段必然因内存溢出（OOM）失败。上述推论为第 4 节的实验假设提供了可靠理论依据。</p>
+<h2>3.3 数据层优化：PQ&amp;ADC</h2>
+<p>针对 3.2 节推导得到的SHNSW​存储瓶颈，本文引入乘积量化（PQ）[7]，将d维向量空间正交拆解为m个低维子空间，各个子空间分别独立训练专属码本Cj​；模型训练的优化目标为最小化全局量化误差E：<br>
+$$E:E(x,q(x))=\sum_{j=1}^{m}\min_{c\in C_j}|u_j(x)-c|^2$$<br>
+为保证数据压缩后系统依旧能维持微秒级查询吞吐（QPS），本文采用 <strong>非对称距离计算（ADC）</strong> 方案 [10]。提前预计算查询向量y与所有码本聚类中心之间的距离，生成距离查找表（LUT）；原本开销高昂的高维浮点欧式距离运算，被转化为O(m)次查表与加法运算，近似距离计算公式：<br>
+$$\tilde d(y,x)^2=\sum_{j=1}\text{LUT}[j][i_j]$$<br>
+需要重点说明：在本文提出的优化框架中，乘积量化不再只用于向量存储压缩，而是深度融入 HNSW 图索引的构建流程。在建图的近邻筛选环节（选取建图所需近邻节点），全部距离计算均依托预训练码本通过 ADC 完成。最终 HNSW 图的邻接边，是在<strong>量化后的压缩向量空间</strong>上依据邻近关系生成，而非原始浮点向量空间。</p>
+<p>据 Gao 等人的研究 [10]，该方案将单次距离计算的时间复杂度从O(d)降至O(m)。此外，工程实现中借助<strong>SIMD 单指令多数据指令集</strong>（移动端 ARM 架构使用 NEON 指令）对查找表分段距离累加做并行优化；距离查找表体积通常仅数 KB，大幅提升一级缓存（L1 Cache）命中率，从硬件底层落地移动端「低内存占用、高运算效率」的设计目标。</p>
+<h2>3.4 小结</h2>
+<p>理论分析证实：<strong>空间复杂度（内存开销）是移动端落地的首要瓶颈，而非计算复杂度</strong>。该结论为后续实验方案提供严谨的理论依据，也从原理上解释了为何将数据层压缩作为全栈优化的底层先决条件。</p>
+<h1>四、实验验证：内存受限环境下 HNSWPQ 性能分析</h1>
+<h2>4.1 实验环境配置</h2>
+<p>本章节在精准复刻移动端硬件资源受限的测试平台中开展对照实验，量化对比本文混合索引 HNSWPQ 与原生 HNSW 的资源利用率、性能取舍特性。</p>
+<h3>4.1.1 仿真环境与代码实现</h3>
+<p>为在可控条件下复现移动端严苛的硬件资源限制，依托容器虚拟化技术搭建确定性实验测试床。<br>
+<strong>测试床配置</strong>：基于 Docker 容器做资源硬限制（启动参数<code class="notranslate">--memory=3g --cpus=2</code>），依托 Linux 内核 cgroup 机制精准还原主流中低端安卓手机的可用物理内存上限：这类机型整机物理内存为 4GB，扣除操作系统与后台常驻进程占用后，应用实际可用内存约 3GB [11]。</p>
+<p><strong>代码实现</strong>：算法基于 Faiss 1.7.4 版本开发，全程仅使用 CPU 运算，贴合移动端通用算力场景。<br>
+<strong>实验有效性说明</strong>：尽管 x86 容器指令集与移动端 ARM 架构不同，但该环境可完整复现物理内存耗尽时系统低内存查杀（LMK）机制，对于验证进程峰值驻留内存（RSS）、算法时空复杂度具备充足工程参考价值。</p>
+<h3>4.1.2 数据集与对照组基线</h3>
+<p><strong>数据集</strong>：采用 SIFT1M 标准基准数据集，底库包含106条 128 维向量、测试查询集包含104条向量；原始浮点数据体积约 512MB，数据特征分布能够有效对标真实场景下高维图像特征业务。</p>
+<p><strong>对照基线设置两组</strong></p>
+<ol>
+<li><strong>基线组 HNSWFlat</strong>：存储原始 32 位浮点向量的标准原生 HNSW 索引，超参配置：近邻数M=16、建图候选近邻数efconstruction=40；</li>
+<li><strong>本文方案 HNSWPQ</strong>：所提混合索引，保持图结构参数M=16不变；采用 PQ 将 128 维向量拆分为m=16个子空间，每个子空间使用 8 比特量化，子空间码本聚类中心数量k∗=256。</li>
+</ol>
+<h2>4.2 资源利用率分析：内存工作集与存储开销</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260605164546.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260605164546.png" alt="image.png" style="max-width: 100%;"></a><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260605164621.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260605164621.png" alt="image.png" style="max-width: 100%;"></a><br>
+表 1 与图 1 的数据直观体现了 HNSWPQ 在突破内存壁垒方面的突出优势。</p>
+<h3>4.2.1 峰值内存削减效果</h3>
+<p>实验数据表明：原始数据仅 512MB 时，基线方案 HNSWFlat 运行峰值内存高达 1.3GB。<br>
+<strong>风险分析</strong>：该数值虽未触及 3GB 物理内存溢出上限，但按照移动端操作系统内存管控规则，单个应用占用整机超 40% 物理内存极易触发 LMK 低内存查杀机制。在手机多任务场景（例如微信与相机后台同开）下，原生 HNSWFlat 存在极高概率被系统强制杀进程。<br>
+<strong>优化收益</strong>：与之对比，HNSWPQ 峰值内存降至 849MB，将内存占用稳定控制在移动端安全区间，大幅提升应用运行稳定性。</p>
+<h3>4.2.2 整体存储压缩率（GCR）</h3>
+<p>在磁盘存储层面，HNSWPQ 优势显著。索引文件体积由对照组 747.8MB 缩减至 274.9MB，<strong>整体存储压缩率 63.2%</strong>。存储空间大幅节约既节省手机 NAND 闪存资源，又降低应用冷启动阶段索引加载的 IO 耗时，印证了 3 节SHNSW​空间复杂度模型的理论推算。</p>
+<h2>4.3 性能折中分析：速度与精度的取舍</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260605164654.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260605164654.png" alt="image.png" style="max-width: 100%;"></a><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260605164712.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260605164712.png" alt="image.png" style="max-width: 100%;"></a><br>
+在验证方案落地可行性后，本节基于不同检索深度参数<code class="notranslate">efSearch</code>测试 HNSWPQ 综合性能，实测数据如表 2，性能权衡曲线见图 2。</p>
+<h3>4.3.1 延迟与 ADC 加速原理分析</h3>
+<p>HNSWPQ 查询效率优异，当<code class="notranslate">efSearch=16</code>时，系统查询吞吐量超 13000 QPS。实测 73 微秒为端到端完整检索耗时，包含全链路图路径寻路开销与路径上全部距离累加运算。高性能源于非对称距离计算 ADC：将高维浮点欧式距离的高开销运算，转化为依托预计算查找表（LUT）的轻量化查表运算。该结构大幅提升 CPU 一级缓存（L1 Cache）命中率，最终把整体检索延迟压缩至微秒级别。</p>
+<h3>4.3.2 高维场景扩展性与计算反转现象</h3>
+<p>为适配大模型嵌入向量的落地需求，采用 768 维、1536 维合成向量开展压力测试，结果如图 3 所示。基线算法（蓝色曲线）内存、延迟随维度线性上涨；HNSWPQ（红色曲线）在 1536 维场景出现<strong>计算反转</strong>：峰值内存降幅 85.5%（基线 308MB→优化方案 44MB），检索延迟反而提速 4.5 倍（基线 0.100ms→优化方案 0.022ms）。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260605164724.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260605164724.png" alt="image.png" style="max-width: 100%;"></a><br>
+原因：量化空间下O(m)查表开销，远小于原生方案O(d)浮点运算开销，证明该架构适配移动端高维向量 RAG 业务。</p>
+<h2>4.4 架构落地方案：哨兵索引策略</h2>
+<h3>4.4.1 精度分析</h3>
+<p>实验数据表明，当检索参数efSearch=64时，HNSWPQ 的 Top10 召回率稳定在 54.3% 左右。原生 HNSWFlat 召回率通常可达 95% 以上，8 比特乘积量化带来的量化误差造成了明显的精度损失。</p>
+<h3>4.4.2 定位转变与解决方案</h3>
+<p>但在 RAG、相册语义检索等移动端实际场景中，该精度指标完全可用，原因在于索引的功能定位发生改变：<br>
+<strong>哨兵索引</strong>：HNSWPQ 占用资源极低（仅 275MB）、查询耗时微秒级（73μs），适合作为检索第一阶段的候选集生成器。它不直接输出最终检索结果，而是从百万级底库中快速粗筛出 Top100/Top200 候选样本。<br>
+<strong>精度补足方案</strong>：后续系统读取闪存中存储的原始向量，或依托云端大模型对小规模候选集做重排序。这套「HNSWPQ 粗筛选 + 精准重排」的级联架构依托云边协同补齐量化带来的精度缺陷，同时保证交互查询维持微秒级响应速度。</p>
+<h2>4.5 小节总结</h2>
+<p>实验量化证实 HNSWPQ 具备双重工程价值：</p>
+<ol>
+<li><strong>工程落地可行性</strong>：内存占用从高危的 1.3GB 降至安全的 0.8GB，破除了 HNSW 在移动端部署的内存准入壁垒。</li>
+<li><strong>架构适配性</strong>：属于典型以精度换取空间与速度的工程方案，为移动端分层检索架构打下底层支撑。</li>
+</ol>
+<h1>五、讨论</h1>
+<h2>5.1 哨兵索引在分层检索中的作用</h2>
+<p>针对召回率仅约 54.6% 的短板，本文提出：在移动端 RAG 这类云边分层检索架构里，端侧索引不作为最终结果判定单元，而是充当哨兵索引。其核心任务是在小于 1ms 的极低时延下过滤掉 99.9% 的无关数据；再由云端部署的大模型、交叉编码器重排模块，从候选集中筛选最终答案。因此，牺牲部分召回率来规避内存溢出、保障微秒级响应，是边缘设备合理的工程取舍。</p>
+<h2>5.2 协同优化：数据压缩的底层支撑作用</h2>
+<p>移动端向量检索优化并非单一技术的零和博弈。HNSWPQ 不会替代剪枝、硬件加速方案，而是位于优化体系最底层，和上层各类优化具备良好正交性与协同增益。</p>
+<h3>5.2.1 与无损剪枝（Tribase 等）的关系</h3>
+<p>分工差异：Tribase 依托三角不等式构造剪枝边界，减少距离运算次数、降低 CPU 负载；本文 PQ 专注削减存储开销。<br>
+协同关系：移动端若不解决内存壁垒，Tribase 无法完成索引加载。HNSWPQ 是 Tribase 落地的载体，二者联用可同时实现低内存、低延迟。</p>
+<h3>5.2.2 与硬件加速（BANG 等）的关系</h3>
+<p>瓶颈：BANG 借助 GPU 并行加速查表，但性能受片上显存容量约束；索引体积过大会引发频繁内外存交换，抵消硬件加速收益。<br>
+赋能作用：数据压缩是硬件加速落地的先决条件，经过 PQ 压缩后，有限显存可载入更多分片数据，消除 IO 瓶颈，本文方案是 GPU/NPU 加速落地的基础。</p>
+<h3>5.2.3 与分区索引（Zonal HNSW 等）的关系</h3>
+<p>粗细分层：分区 HNSW 实现分区粒度的粗粒度内存管控，HNSWPQ 实现向量粒度细粒度压缩。<br>
+融合思路：二者结合构建由粗到细的分级管理体系，进一步压缩各分区运行内存，提升跨分区查询效率。</p>
+<h3>5.2.4 与倒排索引（IVFPQ 等）的关系</h3>
+<p>IVFPQ 压缩率更高，但 HNSW 图索引可以保证O(logN)稳定寻路。对于需要微秒级稳定时延的移动端实时交互场景，图索引更优；HNSWPQ 依靠量化弥补原生 HNSW 存储臃肿的缺陷。<br>
+综上，HNSWPQ 不排斥各类上层优化，是移动端检索技术栈的底层核心，为上层剪枝、硬件加速预留宝贵的内存资源。</p>
+<h2>5.3 未来工作方向</h2>
+<ol>
+<li><strong>精度优化</strong>：探究优化型乘积量化 OPQ 与基于深度学习的量化算法，在不降低压缩率的前提下优化子空间划分，提升向量表征能力。</li>
+<li><strong>零 CPU 运算</strong>：依托移动端 SoC 日渐强大的 NPU 算力，将距离计算内核完全硬件化，探索查询零占用 CPU 的新型检索架构。</li>
+</ol>
+<h1>6 结论</h1>
+<p>随着移动端 AI 应用快速普及，在资源受限设备部署高效向量检索已是行业刚需。本文从理论建模、框架设计、实测验证全链路论证了 HNSWPQ 的工程可用性：</p>
+<ol>
+<li><strong>理论层面</strong>：揭示原生 HNSW 性能与移动端硬件资源的固有矛盾，证明 PQ+ADC 是数据层优化的必要手段。</li>
+<li><strong>实验层面</strong>：3GB 内存限制环境下，该混合索引峰值内存下降 35%，索引体积压缩 63.2%，查询时延低至 73μs；1536 维超高维向量测试出现计算反转现象，验证方案适配大模型高维嵌入检索。</li>
+<li><strong>架构层面</strong>：虽存在量化精度损耗，但作为分层检索里的哨兵索引，完全满足工业级应用低延迟、低功耗需求。<br>
+移动端 HNSW 相关优化仍处在发展初期，随着算法与硬件深度融合，端侧智能检索未来拥有广阔落地空间。</li>
+</ol></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script><script>MathJax = {tex: {inlineMath: [["$", "$"]]}};</script><script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</html>
