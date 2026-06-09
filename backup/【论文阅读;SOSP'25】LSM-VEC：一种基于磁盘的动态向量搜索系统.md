@@ -90,7 +90,7 @@
 在查询阶段，给定查询向量q，系统会计算其哈希码，并按照下述方式将其与每个候选对象u进行对比：
 ![image.png](https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260120173740.png)
 该操作用于计算匹配的哈希位数（即冲突数）。
-为了确保召回率保证，系统根据霍夫丁不等式（Hoeffding’s inequality）设定了一个冲突阈值。给定目标误差ϵ和最大距离δ，冲突次数的阈值被定义为 $`T^{SimHash}_ϵ`$ 。在这里δ通常对应于查询向量q与当前前k个候选集中最远候选者之间的距离，作为评估新候选者的动态截断值（dynamic cutoff）。
+为了确保召回率保证，系统根据霍夫丁不等式（Hoeffding’s inequality）设定了一个冲突阈值。给定目标误差ϵ和最大距离δ，冲突次数的阈值被定义为 $T^{SimHash}_ϵ$ 。在这里δ通常对应于查询向量q与当前前k个候选集中最远候选者之间的距离，作为评估新候选者的动态截断值（dynamic cutoff）。
 随后，过滤条件变为：
 ![image.png](https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260120174130.png)
 这使得系统能够安全地跳过哈希冲突不足的候选对象，在显著减少 I/O 的同时维持理论上的召回率保证。
@@ -114,7 +114,7 @@
 
 给定这一评分定义，LSM-VEC 旨在寻求一种节点排列 ϕ(⋅)，以实现在大小为w的物理预取窗口内总边评分的最大化，其公式定义如下：
 ![image.png](https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260120175059.png)
-其中 $`v_i = ϕ^{-1}(i)`$ 表示存储布局中放置在位置i的节点。直观而言，这一目标促使频繁被共同访问的节点被紧密放置在一起，以便它们可以在同一个磁盘 I/O 块中被一并读取。
+其中 $v_i = ϕ^{-1}(i)$ 表示存储布局中放置在位置i的节点。直观而言，这一目标促使频繁被共同访问的节点被紧密放置在一起，以便它们可以在同一个磁盘 I/O 块中被一并读取。
 
 为了实现这一目标，LSM-VEC 定期对磁盘驻留的底层图进行全局重排序（global reordering pass）。该重排序由查询采样的边热图（edge heatmap）引导，由此产生的布局能够自然地适应不断变化的查询模式，而无需预先了解完整的图结构。
 ![image.png](https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260120175425.png)
