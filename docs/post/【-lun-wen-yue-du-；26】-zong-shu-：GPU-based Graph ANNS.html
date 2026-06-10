@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="GPU-Accelerated Algorithms for Graph Vector Search: Taxonomy, Empirical Study, and Research Directions
+# 摘要
+近似最近邻检索（ANNS）是支撑各类大规模数据挖掘与机器学习应用的基础技术。">
+<meta property="og:title" content="【论文阅读；26】综述：GPU-based Graph ANNS">
+<meta property="og:description" content="GPU-Accelerated Algorithms for Graph Vector Search: Taxonomy, Empirical Study, and Research Directions
+# 摘要
+近似最近邻检索（ANNS）是支撑各类大规模数据挖掘与机器学习应用的基础技术。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/%E3%80%90-lun-wen-yue-du-%EF%BC%9B26%E3%80%91-zong-shu-%EF%BC%9AGPU-based%20Graph%20ANNS.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>【论文阅读；26】综述：GPU-based Graph ANNS</title>
+
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">【论文阅读；26】综述：GPU-based Graph ANNS</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/58" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>GPU-Accelerated Algorithms for Graph Vector Search: Taxonomy, Empirical Study, and Research Directions</p>
+<h1>摘要</h1>
+<p>近似最近邻检索（ANNS）是支撑各类大规模数据挖掘与机器学习应用的基础技术。随着数据集规模不断扩增，借助 GPU 实现向量高效检索已成为必然趋势。目前，基于图的检索方法是近似最近邻检索领域的最优方案，但针对这类算法如何适配现代 GPU 架构进行优化、以及其在真实场景下的端到端表现，学界仍缺乏系统性研究。<br>
+本文针对<strong>GPU 加速的图向量检索算法</strong>开展全面综述与实证分析。首先，本文构建了一套完备的 GPU 优化策略分类体系，并厘清了算法任务与 GPU 硬件执行单元之间的对应关系。随后，基于八大主流大规模基准数据集，对六种代表性算法展开评测，全面分析图索引构建与查询检索两大环节的性能表现。<br>
+实验表明，距离计算是该类算法最核心的计算瓶颈；而在大规模部署场景中，<strong>CPU 主机与 GPU 设备间的数据传输</strong>是造成检索高时延的首要因素。本文同时剖析了不同系统方案在可扩展性与内存占用之间的权衡关系。<br>
+本研究成果可为设计高可扩展、高稳定性的 GPU 近似最近邻检索系统提供明确指导，也可为知识发现与数据挖掘领域提供一套完整的评测基准。</p>
+<h1>一、引言</h1>
+<p>k 近邻搜索（KNNS）是数据挖掘、信息检索与向量检索领域的基础核心技术。具体而言，给定包含n条数据样本的数据集X={x1​,x2​,…,xn​}（其中样本xi​属于d维实数空间Rd），以及同样位于d维实数空间Rd内的查询点q，该任务要求依据指定距离度量方式，从数据集X中检索出与查询点q距离最近的k个数据点。传统精确解法需要逐一计算查询点与全部n个数据点之间的距离，单次查询的时间复杂度为O(nd)。在小规模数据场景下，O(nd)的时间复杂度看似具备可行性，但在推荐系统、检索增强生成等诸多实际应用场景中，数据集样本量n与向量维度d往往极大（通常满足n≥106、d≥100）。这类业务场景对用户查询的实时响应能力有着严苛要求，在此前提下，即便是线性时间复杂度算法也难以落地，无法满足低延迟的使用需求，也不能适配当下海量、高维的数据集规模 [7,29]。</p>
+<p>为解决这类可扩展性难题，近似最近邻搜索（ANNS）放宽了精确匹配的约束条件。该技术以损失微小的检索精度为代价，大幅提升检索效率。围绕高性能近似最近邻搜索技术的研究推动了相关方法的不断迭代发展。早期出现的<strong>基于树</strong>的检索方法 [3,8,9,14,16,44,50,53]，通过将搜索空间划分为多层级区域，实现对数级别的搜索复杂度。但在高维空间中，不同区域必然出现重叠问题，导致这类方法的性能大幅下降。为改善这一缺陷，<strong>基于哈希</strong>的方法 [1,2,10,11,27,40,41,52,57,65] 应运而生：该类方法将高维向量映射为紧凑的二进制编码，以此实现次线性复杂度检索，然而其普遍存在检索精度损失问题，且检索效果对哈希函数的参数设置高度敏感。此外，<strong>基于量化</strong>的方法 [6,19,24,32,35,54,61] 会将向量压缩为有限码本集合中的码字，既能减少存储开销，也可加快距离计算速度，不过码本训练过程通常会产生巨大的计算开销。</p>
+<p>为在保证高召回率的同时实现更优异的检索效率，<strong>基于图</strong>的方法 [13,21,28,47,59,63,64,66] 被相继提出，并已成为当前近似最近邻搜索领域的主流技术。这类方法的核心思路是构建近邻关系图，借助贪心搜索算法在图节点间遍历，不断探索邻接节点，最终找到查询点对应的k个最近邻数据点。但早期的图检索算法 [12,17,18,25,26,42,43] 主要针对中央处理器（CPU）进行优化。图形处理器（GPU）虽可依托多线程技术并行处理大量查询请求，但针对单个查询任务，图的遍历过程基本仍是串行执行 —— 邻接节点扩展、距离计算、结果比对等操作均按顺序完成。为突破这一局限，多种面向 GPU 的加速方案被陆续提出 [24,31]。这类方案充分利用 GPU 强大的并行计算能力，并行执行距离运算与节点扩展操作，显著提升了大规模向量检索的整体吞吐率。</p>
+<p>尽管基于 GPU 加速的图结构近似最近邻搜索算法已取得长足发展，但仍存在若干关键问题，制约了该类技术的系统化评测与实际落地应用。现有研究中，多数工作聚焦于 CPU 端检索方法 [5,56]，而针对 GPU 端方案的相关研究 [30,31]，在方法分析与实际性能评估两方面均存在明显短板，具体问题如下：</p>
+<ol>
+<li>缺陷一：缺乏系统化分类体系。目前尚无统一的分类标准对各类 GPU 加速技术进行归纳梳理。GPU 拥有强大的并行计算能力，但想要充分发挥其性能，需要配套的专用优化手段，而相关优化策略既未得到系统性研究，也缺少完善的文献记载。过往多数研究仅关注算法最终效果，对于线程调度、内存管理等 GPU 核心优化策略的探讨十分有限。</li>
+<li>缺陷二：缺少统一的评测框架。目前没有一套完整的评测体系，能够覆盖 GPU 端近似最近邻搜索技术的全运行流程，也无法全面衡量其多维度性能表现。现有研究大多只关注检索环节的加速效果，却忽视了图构建、数据迁移等在大规模部署场景中至关重要的额外开销。</li>
+<li>缺陷三：全链路评测不完整。当前基准测试的方式较为零散，性能指标往往仅基于独立计算核心的运行耗时统计。这种评测方式忽略了内存分配、高速串行计算机扩展总线（PCIe）数据传输、主机与设备间同步等环节带来的显著影响，最终得出的结论可能无法真实反映系统在实际场景中的运行性能。</li>
+</ol>
+<p>为填补 GPU 加速图结构近似最近邻搜索在算法理论设计与硬件实际运行效率之间的鸿沟，本文对该领域现有研究成果展开全面、多维度的分析。鉴于当前学界尚未理清现代 GPU 架构与高维检索基础运算之间的适配关系，本文首先构建一套完整的 GPU 加速技术分类体系，明确算法任务与硬件执行单元之间的对应关系。在此基础上，选取六种主流算法，基于八个大规模基准数据集开展大量实证实验，逐层拆解全链路运行性能，挖掘潜藏的性能瓶颈。结合理论分析与严谨的基准测试结果，本文厘清了计算吞吐率、数据迁移开销与内存可扩展性三者之间复杂的权衡关系。</p>
+<p>本文的主要研究贡献总结如下：</p>
+<ol>
+<li>构建结构化的 GPU 优化策略分类体系，为相关研究者选取适配 GPU 近似最近邻搜索场景的加速技术提供系统性参考。</li>
+<li>阐明近似最近邻搜索基础运算与现代 GPU 硬件单元的映射机制，解析如何利用硬件架构特性最大化运行效率。</li>
+<li>基于不同规模的数据集，评测主流算法的可扩展性，并拆解各功能模块的运行耗时。</li>
+<li>证实主机与设备间的数据传输延迟，是大规模检索场景下制约整体性能的关键瓶颈。</li>
+</ol>
+<h1>二、预备知识</h1>
+<p>本章介绍理解 ** 基于图的近似最近邻搜索（ANNS）** 算法及其在 GPU 架构上实现所需的基础概念、符号定义与问题形式化描述。<br>
+<strong>anns介绍</strong>：略<br>
+<strong>GPU 架构</strong><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610112910.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610112910.png" alt="image.png" style="max-width: 100%;"></a><br>
+如附录 A.1 中的图 8 所示，图形处理器（GPU）是专为大规模并行计算设计的专用处理器。在近似最近邻搜索场景中，GPU 强大的并行计算能力与高内存带宽，能够有效加速高维距离计算、大规模图遍历等计算密集型操作。</p>
+<p>GPU 硬件体系中，与可扩展近似最近邻搜索密切相关的核心组件包括高速串行计算机扩展总线（PCIe）、流式多处理器（SM）以及线程，具体说明如下：</p>
+<ul>
+<li><strong>PCIe 总线</strong>：用于连接主机端 CPU 与设备端 GPU 的高速总线。在近似最近邻搜索任务中，PCIe 负责将海量向量数据集与批量查询请求传输至 GPU 全局内存。采用异步传输方式降低 PCIe 传输开销，是掩盖传输延迟的关键手段。</li>
+<li><strong>流式多处理器（SM）</strong>：GPU 执行运算的基础硬件单元。单块 GPU 包含多个流式多处理器，每个处理器均配备 CUDA 核心、张量核心，以及寄存器、共享内存等片上资源。</li>
+<li><strong>线程</strong>：GPU 执行层级中最小的调度单元。每个线程在一个 CUDA 核心上执行指令序列。在并行化的近似最近邻搜索实现方案中，单个线程可负责处理向量的指定维度计算，也可与其他线程协同维护候选优先队列。</li>
+</ul>
+<p><strong>GPU 端近似最近邻搜索</strong><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610113034.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610113034.png" alt="image.png" style="max-width: 100%;"></a><br>
+近似最近邻搜索算法会在索引构建与检索两个阶段，采用不同策略发挥 GPU 的并行特性。在图索引构建阶段，数据点被分配至各个线程块，线程块可并行查找并建立节点间的邻接关系，相较于串行方案，索引构建速度得到大幅提升。</p>
+<p>在检索阶段（见图 1），系统以批次形式处理查询请求，每个查询任务分配至独立线程块，由其完成距离计算与图遍历操作。所有线程块会被动态调度至各个流式多处理器上运行，实现同一批次内所有查询的并发执行，进而显著提升系统整体吞吐率。</p>
+<h1>三、模块拆解分析</h1>
+<p>本章对<strong>图索引构建阶段</strong>进行分类梳理，并从模块与技术层面对<strong>检索阶段</strong>展开详细解析。索引构建阶段分为批量插入、迭代优化、分治三类方法，同时分析各类方法在 GPU 架构下的并行加速策略。检索阶段则拆解为候选节点查找、批量距离计算、数据结构维护三大环节，并深入剖析不同算法所采用的并行加速原理与实现技术。</p>
+<h2>3.1 图索引构建阶段</h2>
+<p>受硬件架构差异影响，目前尚未形成一套通用的图索引构建框架。实际应用中主要存在三类主流构建方案：<strong>并行迭代优化（第一类）</strong>、<strong>批量增量插入（第二类）</strong> 与<strong>并行分治（第三类）</strong>。三类方案可组合使用，以进一步提升整体性能。各类方法的详细介绍见附录 A.2。<br>
+<strong>第一类：并行迭代优化</strong><br>
+该方法遵循迭代式图优化思路：先构建初始的近似近邻图，再通过反复执行邻域挖掘、重排序与边剪枝操作，持续迭代优化图结构。</p>
+<p>这类方案通常先依托 NN-Descent 算法 [15] 生成初始 k 近邻图，再将图数据迁移至 GPU 完成后续优化。执行过程中，图中的每个顶点单独分配至一个 GPU 线程块，各线程块相互独立、并行挖掘该顶点的 N 跳邻接节点，并开展迭代优化。多轮迭代完成后，优化得到的高质量近似 k 近邻图会回传至 CPU 并持久化存储至磁盘，供后续检索使用。</p>
+<p>相较于 NSG [18] 等传统 CPU 端算法，GPU 导向的迭代优化具备两大核心优势：其一，距离计算可实现全批量处理，能够充分发挥 GPU 单指令多数据流单元与内存带宽的性能潜力；其二，各个顶点的优化过程相互独立，支持在 GPU 上大规模并行执行与更新，大幅提升图索引的构建效率。</p>
+<p>具体来看，CAGRA [48] 采用<strong>基于排名的重排序</strong>方式统计 N 跳邻接节点数量，不再单纯依据欧氏距离排序邻接点，而是按照节点间的连通性排名完成重排。该方式不仅显著加快建图速度、降低内存占用，大量实验也证实，其检索精度与基于距离的优化方案基本持平。</p>
+<p>Tagore [39] 则基于<strong>两阶段 GNN-Descent 算法</strong>[55] 对传统 NN-Descent [15] 进行改进：第一阶段沿用原始 NN-Descent 的采样策略完成图结构初步优化；第二阶段中，每个节点从自身最近的 m 个邻接点的邻接列表中采样，进一步精简自身邻接节点集合。<br>
+<strong>第二类：批量增量插入</strong><br>
+该方案由传统 CPU 增量插入方法演变而来，核心是在 GPU 上以批次为单位，并行完成数据点的图插入操作。每个数据点对应一个独立 GPU 线程块，线程块自主挖掘并匹配该点的邻接顶点。整批数据全部插入完成后，生成的图结构回传至 CPU 并保存至磁盘。</p>
+<p>与传统 CPU 增量建图方式相比，该方案充分释放 GPU 的大规模并行能力，可对大量待插入数据同时开展邻域检索，有效降低建图延迟、提升吞吐率，在海量数据集场景下优势尤为突出。此外，批量插入的执行模式让内存访问模式更规整、更适配缓存机制，进一步提升 GPU 利用率与整体计算效率。</p>
+<p>GANNS [60] 是该类方法的代表性算法，其通过在每一批待插入数据内部先行构建局部 k 近邻图来优化建图质量。批次内局部图能够刻画新增节点之间的邻接关系，避免并行插入过程中遗漏同批次内距离相近的节点。将批次级 k 近邻结构融合至全局图后，GANNS [60] 在保障检索精度的同时，维持了 GPU 端优异的建图吞吐能力。</p>
+<p><strong>第三类：并行分治</strong><br>
+该方法采用分治思想，将大规模数据集划分为多个子数据空间，在 GPU 中并行构建各个子空间对应的局部 k 近邻图，最终合并所有子图得到完整的全局图。这种分层并行模式可高效利用 GPU 资源，在保证图连通性的前提下，大幅加快海量数据的建图速度。</p>
+<p>GGNN [22] 是该类算法的典型代表，采用分层架构：首先并行构建多个局部子图，再自上而下完成子图合并。其构建出的图质量与串行方法相当，同时在 GPU 上实现显著加速。此外，顶层图还可作为初始种子结构，为后续检索流程提速。</p>
+<h2>3.2 检索阶段</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610113947.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610113947.png" alt="image.png" style="max-width: 100%;"></a><br>
+如图 2 所示，基于图的近似最近邻检索拥有一套标准化执行流程，该流程将原本串行的图遍历操作改造为适配 GPU 架构的可并行任务。常规实现中，一组线程束（包含 32 个 GPU 线程）负责处理单个查询点，各线程束相互独立运行、互不干扰。整套流程划分为三大核心环节，协同完成高效近邻查找，并充分发挥 GPU 的并行特性。附录 A.3 中的算法 1 展示了适配 GPU 的标准贪心检索流程，清晰体现三大环节在并行执行模型中的调度逻辑。</p>
+<p><strong>环节一：并行候选节点查找（S1）</strong><br>
+在 GPU 架构中，由一组线程协同处理单个候选顶点。线程配合提取尚未访问的最优候选节点，并并行加载其所有邻接节点。由于邻接节点存储在全局内存的不同地址偏移处，并发加载不会产生写冲突，加载完成的邻接节点可快速暂存至共享内存。</p>
+<p>传统 CPU 图检索中，候选节点提取与邻域扩展多为串行执行，即便开启并行也仅能做到有限的核级并行，且存在内存访问不规则的问题。而 GPU 方案依托细粒度的线程束级并行与高内存带宽，大幅加快候选节点查找速度，提升检索整体吞吐率。</p>
+<p>早期 GPU 图检索算法 SONG [62] 仅使用单个线程加载候选节点的邻接点，线程块内其余线程在此阶段处于空闲状态。后续 GGNN [22]、GANNS [60] 等算法对此进行了深度优化，让线程块内所有线程并行加载不同邻接节点。这种并行邻接节点加载策略有效提升内存吞吐、降低访问延迟，进一步优化 GPU 端候选节点查找效率。</p>
+<p>BANG [33] 则是特例：该算法的图数据并未全部常驻 GPU 显存，邻接节点加载操作在 CPU 端完成，加载后的邻接信息通过异步传输发送至 GPU 进行后续处理。该设计使 BANG [33] 能够处理显存容量无法容纳的超大规模图。</p>
+<p>主流算法普遍采用布隆过滤器剔除已完成距离计算的邻接节点，但 GANNS [60] 提出了不同思路：该算法认为距离计算可依托 GPU 细粒度线程级并行实现高效加速，因此完全舍弃布隆过滤器。原因在于布隆过滤器会引发随机内存访问，严重损耗 GPU 内存带宽。</p>
+<p>PathWeaver [34] 采用<strong>方向引导筛选</strong>策略，在保证检索精度的同时减少距离计算量。算法先计算查询点与节点的方向向量，对照预设统计表统计所有邻接节点的符号匹配位数，优先选择匹配位数最多的邻接点作为候选节点。</p>
+<p><strong>环节二：批量距离计算（S2）</strong><br>
+批量距离计算通过任务划分实现并行化：将欧氏距离计算任务拆分给多个线程，每个线程负责计算查询点与数据点的部分维度，各线程算出的局部结果最终通过归约运算整合，得到完整欧氏距离。相较于 CPU 实现方案，该环节是基于图的近似最近邻检索中加速效果最显著的部分，充分发挥了 GPU 的线程级并行能力与高内存带宽优势。</p>
+<p>SONG [62]、GGNN [22] 等多数算法采用<strong>一线程束对应一个数据点</strong>的模式，由包含 32 个线程的线程束计算单个数据点与查询点之间的距离。CAGRA [48] 则提出<strong>线程束拆分</strong>技术：将一个线程束划分为多个 8 线程小组，每个小组独立计算不同数据点的距离。该设计提升了 GPU 线程占用率与并行度，进而提高整体吞吐。附录 A.4 通过实验对比了不同分组尺寸的性能，结果表明，在召回率相同的前提下，线程束拆分方案的每秒查询量高于传统的一线程束对应一个数据点的方案。</p>
+<p><strong>环节三：数据结构维护（S3）</strong><br>
+本环节根据上一阶段的计算结果更新候选节点列表。通常情况下，同一线程束或线程块内的不同线程负责向优先队列、候选列表等数据结构的不同位置写入数据，彻底规避写冲突，最大化 GPU 并行执行效率。得益于该设计，GPU 可并发更新多条候选记录，相较传统 CPU 方案，本环节的运算速度得到大幅提升。</p>
+<p>SONG [62] 与 PilotANN [23] 使用堆结构维护候选列表，完成单次距离计算后，仅由指定的首个线程将结果写入堆中。GGNN [22] 选用循环队列，插入新节点时由不同线程分别完成数组内单个元素的移位操作，极大加快数据结构的更新速度。</p>
+<p>GANNS [60]、CAGRA [48] 等算法则采用<strong>延迟校验</strong>策略：距离计算完成后不立即将节点加入候选列表，而是先将所有距离值存入未访问距离数组，待全部邻接节点的距离计算完毕后，利用 GPU 专用的双调排序算法对该数组排序，再合并至候选列表。与逐个插入节点的方式相比，双调排序能够充分调动所有线程的计算能力。</p>
+<h1>四、实验评估</h1>
+<p>本章针对<strong>GPU 加速型基于图的近似最近邻搜索算法</strong>开展全面实验评测。4.1 节详细介绍实验环境与评价指标；4.2 节评估索引构建效率与图结构质量；4.3 节为核心分析部分，将检索性能拆解为端到端延迟、计算核心效率以及各子模块耗时逐一分析；4.4 节从数据规模与查询吞吐两个维度测试算法的可扩展性。</p>
+<h2>4.1 实验环境设置</h2>
+<p><strong>运行环境</strong><br>
+所有实验均在搭载 Ubuntu 22.04 LTS 系统的服务器上完成。服务器配置英特尔至强金 6348 中央处理器（主频 2.60 吉赫兹，112 线程）、英伟达 A800 图形处理器（配备 80GB 第二代高带宽内存）。所有算法均采用 GCC 11.4.0 编译器并开启<code class="notranslate">-O3</code>优化选项，实验全程基于 CUDA 12.4 实现 GPU 加速，代码使用 C++17 与 CUDA C++ 编写。</p>
+<p><strong>数据集</strong><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610114635.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610114635.png" alt="image.png" style="max-width: 100%;"></a><br>
+本次实验选用 8 个基准数据集，覆盖不同数据规模、向量维度与数据类型，以此实现全方位评测。各数据集详细参数如表 1 所示。</p>
+<ul>
+<li><strong>NYTimes[4]</strong>：该数据集收录《纽约时报》海量新闻文本，包含丰富的正文内容、元数据与分类信息。</li>
+<li><strong>DEEP[7]</strong>：Deep100M 数据集包含 1 亿组图像嵌入向量，向量提取自谷歌深度卷积网络（GoogLeNet）最后一层，并经主成分分析降维至 96 维，同时完成 L2 归一化处理。其两个子集 DEEP1M、DEEP10M 分别取自原数据集前 100 万条与前 1000 万条数据。</li>
+<li><strong>SIFT[29]</strong>：该基准数据集由 128 维尺度不变特征变换描述子构成，是评测近似最近邻搜索算法的经典数据集。</li>
+<li><strong>GIST[29]</strong>：数据集存储 GIST 描述子，这类低维全局图像特征可表征场景的空间轮廓信息。</li>
+<li><strong>GloVe200[49]</strong>：包含 120 万个词向量，每个向量维度为 200，基于全局词向量表示模型（GloVe）生成。</li>
+<li><strong>MNIST8M[37]</strong>：数据集包含近 800 万条数据样本，每条样本为 784 维浮点型向量。</li>
+</ul>
+<p><strong>参与评测算法</strong><br>
+本次实验共测评 6 款开源 GPU 加速近似最近邻搜索算法，具体说明见附录 A.5。由于 FlashANNS [58] 仅发布预览版本，故未纳入测试范围。Tagore [39] 与 GRNND [38] 的研究重心为优化图构建流程与图结构质量，并未提供独立的检索模块，为避免对比结果受到干扰，表 3 中剔除了这两款算法。</p>
+<p>为直观体现 GPU 的加速效果，实验同时选取两款主流 CPU 算法作为对照：HNSW [43] 基于 Faiss 库实现，VAMANA [28] 采用官方 DiskANN 代码库实现。</p>
+<p><strong>实验参数</strong><br>
+在索引构建阶段，尽管部分算法本身不限制节点最大度数，本实验仍统一设置所有算法的节点最大度数。检索阶段统一设置检索目标为前 10 个最近邻，并通过调整迭代次数，获取不同召回率下的每秒查询数结果。</p>
+<p><strong>评价指标</strong><br>
+为全面衡量算法性能，实验分别针对<strong>索引构建阶段</strong>与<strong>查询检索阶段</strong>设定多项评测指标。<br>
+<strong>索引构建阶段指标</strong></p>
+<ul>
+<li><strong>构建耗时（CT）</strong>：完成索引构建所需的总时长。</li>
+<li><strong>峰值内存占用（PMF）</strong>：索引构建全过程中的内存占用峰值，包含 CPU 内存与 GPU 显存。</li>
+<li><strong>平均度数（AD）</strong>：图结构中节点的平均出度。</li>
+<li><strong>连通分量数（CC）</strong>：图中相互独立的连通分量总数量。</li>
+<li><strong>平均路径长度（PL）</strong>：检索过程中遍历图节点的平均跳数。</li>
+</ul>
+<p><strong>检索阶段指标</strong></p>
+<ul>
+<li><strong>每秒查询数（QPS）</strong>：用于衡量检索吞吐能力，计算公式为：已处理查询总数量 ÷ 总耗时。</li>
+<li><strong>召回率 <a class="user-mention notranslate" data-hovercard-type="user" data-hovercard-url="/users/k/hovercard" data-octo-click="hovercard-link-click" data-octo-dimensions="link_type:self" href="https://github.com/k">@k</a></strong>：衡量检索精度，统计成功命中真实前 k 近邻的样本占比。计算公式：Recall@k=k∣Ak​(q)∩NNk​(q)∣​。</li>
+</ul>
+<h2>4.2 图索引构建效果评估</h2>
+<h3>4.2.1 构建效率评估</h3>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610114911.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610114911.png" alt="image.png" style="max-width: 100%;"></a><br>
+在近似最近邻搜索场景中，图索引构建效率至关重要，它不仅决定系统初始部署速度，也直接影响系统更新数据的频次。本次基于 8 个中大型数据集，对 7 款代表性算法的构建效率开展评测，核心观测四项指标：构建耗时、平均度数、连通分量数、峰值内存占用，同时对比 CPU 与 GPU 端表现。注：BANG 算法与 VAMANA [28] 采用相同的图构建机制，因此表格中不再单独列出 BANG。</p>
+<p>附录 A.6 的表 2 与表 4 结果显示，GPU 加速算法的构建速度大幅领先传统 CPU 算法。实验充分证明，依托 GPU 的大规模并行计算能力，是处理海量、高维数据集的必要条件。CAGRA [48]、GGNN [22] 等算法充分调用 GPU 资源，并行完成距离计算与图结构更新，相较于 CPU 串行执行方案，速度提升数个数量级。但提速的同时，这类算法的 GPU 显存占用也显著增加，部分算法在超大数据集场景下甚至出现显存溢出问题。</p>
+<p><strong>分析结论</strong>：后续优化需重点研究 CPU-GPU 混合架构方案，平衡构建速度与内存限制。利用主机内存存储海量图数据，同时保留 GPU 负责并行计算的优势，可有效解决显存溢出问题，保障算法在十亿级数据规模下的可扩展性。</p>
+<h3>4.2.2 图结构质量评估</h3>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610115032.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610115032.png" alt="image.png" style="max-width: 100%;"></a><br>
+以往相关综述 [56] 多以图结构与标准 k 近邻图的拓扑差异作为图质量评判依据，本文则采用<strong>面向检索</strong>的评价指标：达到目标检索精度所需的平均查询路径长度。高质量的图结构可让贪心检索以更短的遍历跳数快速找到近邻节点。</p>
+<p>实验固定不同数据集的图节点度数：GIST [29] 设为 128、DEEP10M [7] 设为 64、DEEP1M [7] 与 SIFT1M [29] 设为 32，统计召回率 <a class="user-mention notranslate" data-hovercard-type="user" data-hovercard-url="/users/10/hovercard" data-octo-click="hovercard-link-click" data-octo-dimensions="link_type:self" href="https://github.com/10">@10</a> 达到 90% 时的平均路径长度。</p>
+<p>由图 3 可知，各算法的图遍历效率存在明显差异。CAGRA [48] 与 BANG [33] 在所有数据集上均表现出更优的图质量，查询路径长度始终最短。实验结果表明，图质量的核心在于结构的<strong>可遍历性</strong>，而非单纯的连通性。CAGRA [48] 等采用高级边剪枝与邻接点筛选策略的算法，能够在高维空间中构建出高效 “检索通路”，让贪心检索只需更少跳转即可收敛到目标节点。</p>
+<p><strong>分析结论</strong>：后续研究应结合硬件特性优化图剪枝策略，让拓扑结构中的 “检索通路” 适配 GPU 内存访问规则，进一步减少遍历跳数与随机访问延迟。</p>
+<h2>4.3 检索性能分析</h2>
+<h3>4.3.1 含数据传输的检索测试</h3>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610115059.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610115059.png" alt="image.png" style="max-width: 100%;"></a><br>
+本部分将端到端检索延迟拆分为<strong>主机向设备传输（HtoD）</strong> 与<strong>设备端检索</strong>两个环节开展评测。由于查询得到的 Top-K 结果数据量极小，设备向主机传输（DtoH）产生的延迟可忽略且各算法表现基本一致，因此该环节不纳入统计。</p>
+<p>实验选用数据规模在 29 万至 1 亿条之间的多组数据集，统一测试 10000 条查询请求在召回率 <a class="user-mention notranslate" data-hovercard-type="user" data-hovercard-url="/users/10/hovercard" data-octo-click="hovercard-link-click" data-octo-dimensions="link_type:self" href="https://github.com/10">@10</a> 为 90% 时的总处理耗时。</p>
+<p>表 3 结果表明，SONG [62]、GGNN [22]、GANNS [60]、CAGRA [48] 等纯 GPU 算法面临严重的数据传输瓶颈。随着数据集规模增大，主机向设备的数据传输耗时呈非线性增长：在 DEEP1M [7] 数据集上，传输耗时占总延迟的 40%~80%；在 DEEP100M [7] 数据集上，该占比更是超过 97%，导致 GPU 计算核心的高速优势难以发挥。</p>
+<p>反观 BANG [33]、PilotANN [23] 等混合架构算法，借助 CPU 分担部分任务有效降低了传输耗时，但主机端的计算开销又造成检索整体延迟上升。</p>
+<p>以上现象说明，在大规模近似最近邻搜索场景中，<strong>PCIe 总线带宽</strong>而非 GPU 计算能力，才是制约性能的核心因素。当数据传输耗时占总运行时长 90% 以上时，单纯优化检索计算核心的收益会持续递减。</p>
+<p><strong>分析结论</strong>：后续研究需着力攻克 “内存墙” 难题，可采用传输与计算异步重叠、传输过程中对向量数据深度压缩、全索引常驻 GPU 显存等方案，从根源上削减数据传输开销。</p>
+<h3>4.3.2 传输开销拆解分析</h3>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610115219.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610115219.png" alt="image.png" style="max-width: 100%;"></a><br>
+为深入剖析数据传输瓶颈的构成，本实验将传输耗时划分为三部分：向量数据传输、图结构传输、查询向量传输，并统计各部分的耗时占比。</p>
+<p>由图 4 可见，SONG [62]、GGNN [22]、GANNS [60]、CAGRA [48] 等纯 GPU 算法的传输开销构成几乎一致，这类算法需要将全部向量数据与图索引完整迁移至 GPU。下文选取当前最优算法 CAGRA [48] 作为该类算法代表，其余纯 GPU 算法的详细结果见附录 A.7 图 11。</p>
+<p>混合架构算法的开销构成则差异明显，这源于 BANG [33] 与 PilotANN [23] 采用了不同的软硬件协同执行策略。</p>
+<p>纯 GPU 算法的传输瓶颈与数据总量强相关；而 BANG [33]、PilotANN [23] 等混合算法虽然通过任务下放至 CPU 免去了部分传输开销，但往往只是将瓶颈转移，同时还会新增软硬件同步延迟。</p>
+<p><strong>分析结论</strong>：后续系统优化需提升计算与传输的时间占比，一方面对占比最高的向量数据进行压缩，另一方面充分利用时间重叠技术，让数据传输与 GPU 计算并行执行。</p>
+<h3>4.3.3 无数据传输的检索测试</h3>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610115249.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610115249.png" alt="image.png" style="max-width: 100%;"></a><br>
+为探究算法的计算效率上限，本实验设定<strong>全图结构常驻 GPU 显存</strong>的静态场景，剔除数据传输带来的干扰，单独评测计算核心的检索性能，体现算法在 GPU 设备上的原生加速能力。</p>
+<p>结合图 5 与附录 A.8 图 10 可知，纯 GPU 算法相较传统 CPU 基准算法，提速幅度普遍超过 10 倍。其中在小规模数据集、召回率 <a class="user-mention notranslate" data-hovercard-type="user" data-hovercard-url="/users/10/hovercard" data-octo-click="hovercard-link-click" data-octo-dimensions="link_type:self" href="https://github.com/10">@10</a> 为 90% 的条件下，CAGRA [48] 的每秒查询数始终位居第一，且召回率提升时，其吞吐率依旧保持稳定。</p>
+<p>BANG [33]、PilotANN [23] 等混合架构算法虽然具备良好的可扩展性，但由于必须在 CPU 端执行部分逻辑产生额外延迟，纯检索吞吐率有时甚至不及 CPU 基准算法。</p>
+<p>实验证明，实现设备端最大化并行能力，是常驻式图检索取得高性能的关键。</p>
+<p><strong>分析结论</strong>：下一代高性能检索计算核心，需尽可能减少分支跳转与主机设备同步操作，充分释放 GPU 的海量计算吞吐潜力。</p>
+<h3>4.3.4 检索子模块耗时拆解</h3>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610115306.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610115306.png" alt="image.png" style="max-width: 100%;"></a><br>
+为定位影响检索延迟的关键操作，本实验将计算核心运行耗时细分为三大模块：并行候选节点查找（CL）、批量距离计算（DC）、数据结构维护（DM）。选取四类特征各异的数据集，统一将所有算法的召回率 <a class="user-mention notranslate" data-hovercard-type="user" data-hovercard-url="/users/10/hovercard" data-octo-click="hovercard-link-click" data-octo-dimensions="link_type:self" href="https://github.com/10">@10</a> 设定为 90%，统计各模块的时间占比。</p>
+<p>结合图 6 与附录 A.9 图 12 可得：对于 GGNN [22]、GANNS [60]、CAGRA [48] 等经过深度优化的原生 GPU 算法，<strong>距离计算</strong>是最主要的耗时模块，占总运行时长的 60%~80%。</p>
+<p>SONG [62] 等早期实现方案因其余模块优化不足，距离计算的耗时占比相对更低。现代混合算法则呈现不同特征：BANG [33] 引入乘积量化技术，将距离计算耗时占比降至 30%~40%；PilotANN [23] 受 CPU-GPU 协同机制限制，候选节点查找模块产生大量额外延迟。</p>
+<p>高维向量距离计算是绝大多数算法的核心瓶颈，而量化技术能够有效缓解这一计算压力。但需要注意的是，在 CPU-GPU 混合架构中，这类优化会将瓶颈转移至 CPU 端，复杂的检索逻辑与数据管理任务会造成 CPU 负载饱和。</p>
+<p><strong>分析结论</strong>：设计极致高速的检索计算核心时，需在 “通过量化减少运算量” 与 “合理分配软硬件负载” 之间取得平衡，避免 CPU 过载成为新的性能短板。</p>
+<h2>4.4 可扩展性测试</h2>
+<p>本章节统计的每秒查询数均基于计算核心运行时长计算，彻底剥离数据传输的影响，单独验证算法本身的可扩展能力。</p>
+<h3>4.4.1 数据规模可扩展性</h3>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610115337.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610115337.png" alt="image.png" style="max-width: 100%;"></a><br>
+基于 DEEP [7] 系列数据集开展测试，数据规模从 100 万条逐步提升至 1 亿条，评测各 GPU 加速算法在不同数据量下的性能表现。</p>
+<p>如图 7 (a) 所示，随着数据集规模增大，所有算法的性能均出现自然下降，但 CAGRA [48] 的性能衰减幅度最小。即便数据量达到 1 亿条，该算法仍能维持较高处理速度；其余对比算法则因图遍历深度增加、内存压力上升，吞吐率出现大幅下滑。</p>
+<p>CAGRA [48] 的优异表现证明，经过优化的线程束级并行机制，能够有效掩盖大图结构带来的延迟突增问题。</p>
+<p><strong>分析结论</strong>：算法的大规模可扩展性，核心在于屏蔽大图结构引发的内存延迟。后续研究需持续提升线程束占用率，确保数据规模拓展至十亿级时，图遍历复杂度不会制约整体吞吐能力。</p>
+<h3>4.4.2 吞吐能力测试</h3>
+<p>基于 SIFT1M 数据集，通过调整查询批次大小，测试各类基于图的近似最近邻搜索算法的吞吐特性，实验统一保持召回率 <a class="user-mention notranslate" data-hovercard-type="user" data-hovercard-url="/users/10/hovercard" data-octo-click="hovercard-link-click" data-octo-dimensions="link_type:self" href="https://github.com/10">@10</a> 为 90%。</p>
+<p>如图 7 (b) 所示，增大查询批次可显著提升所有算法的每秒查询数。由于每条查询任务都对应独立的 GPU 线程，更大的批次能够更好地掩盖内存访问延迟，硬件吞吐能力会随负载增加近似线性提升，直至硬件资源达到饱和状态。</p>
+<p><strong>分析结论</strong>：未来架构设计应重点实现动态批处理与多流并发执行，最大化硬件资源利用率。脱离固定批次大小的限制，让系统无论输入负载高低，都能充分发挥线程并行能力，并平摊任务启动带来的固定开销。</p>
+<h1>五、设计指导原则</h1>
+<p>现有基于 GPU 加速的图结构近似最近邻搜索算法仍存在明显短板。早期算法 SONG [62] 对检索环节的优化不足，整体性能表现一般。GGNN [22]、GANNS [60] 与 CAGRA [48] 相较传统 CPU 图索引算法虽有大幅提升，但随着数据集规模不断扩大，这类纯 GPU 算法会面临两大核心难题：</p>
+<ul>
+<li>主机向设备的数据传输开销持续走高：在 DEEP1M 数据集上，该开销占总耗时的 40% 至 80%；而在 DEEP100M 数据集上，占比更是超过 97%。</li>
+<li>GPU 显存需求呈指数级增长，极大制约了算法在超大规模数据集下的可扩展性。<br>
+BANG [33]、PilotANN [23] 这类 CPU-GPU 混合架构算法选择将大部分检索操作交由 CPU 执行，以此缓解 GPU 显存压力。但该方案只是将性能瓶颈转移至主机端：大量距离计算任务落在 CPU 上，支撑十亿级数据集仍需主机配备大容量内存，此时系统整体性能会受限于主机内存带宽与访问延迟，而非 GPU 的计算能力。</li>
+</ul>
+<p>据此，下一代基于 GPU 加速的图结构近似最近邻搜索算法需要在两大方向实现突破：</p>
+<ul>
+<li>针对百万至千万级数据集：减少向 GPU 传输的数据量，降低算法对显存的依赖。</li>
+<li>针对十亿级数据集：在削减主机内存占用的同时，充分发挥 GPU 的并行计算能力，进一步提升查询吞吐率。</li>
+</ul>
+<h1>六、总结</h1>
+<p>本文对基于图结构的 GPU 近似最近邻搜索算法开展了系统性分析。实验选用 8 个规模介于 29 万至 1 亿条样本的数据集，评测 6 款 GPU 算法与 2 款 CPU 算法，全面考察检索性能（每秒查询数、查询路径长度、距离计算耗时、批处理吞吐率及参数敏感度）与索引构建效率（构建耗时、内存占用、图连通性）。</p>
+<p>研究证实，距离计算是检索阶段的主要性能开销。本文还首次量化分析了 CPU 与 GPU 之间的数据传输成本，发现数据传输耗时远高于计算核心的执行耗时。同时，本文提出将平均查询路径长度作为衡量图结构质量的指标，该指标能更直观地反映图的遍历效率，也为后续算法优化指明了明确方向。</p>
+<h1>附录A</h1>
+<h2>GPU架构</h2>
+<p><strong>架构概述</strong><br>
+英伟达新一代架构依次历经安培架构、霍普架构至布莱克韦尔架构迭代，内存与通信带宽性能持续提升。以安培架构为例，据英伟达技术文档 [46] 介绍，该架构采用分层设计，包含多个图形处理集群（GPC）；每个图形处理集群又由纹理处理集群（TPC）与流式多处理器（SM）组成。标准安培架构 GPU 集成数十个流式多处理器，每个处理器内部搭载多组 CUDA 核心、张量核心以及共享内存单元。该架构可同时调度数千个线程并发运行，十分适配近似最近邻搜索任务的并行计算需求。</p>
+<p><strong>流式多处理器（SM）</strong><br>
+流式多处理器是 GPU 最基础的运算单元，单颗流式多处理器包含 128 个 CUDA 核心、4 个张量核心以及 128KB 可配置共享内存。其采用单指令多线程（SIMT）执行模型，线程以<strong>线程束</strong>为单位进行组织，每个线程束包含 32 个线程。单个流式多处理器可同时激活多个线程束，并由线程束调度器动态选取就绪线程束投入执行。流式多处理器的内部结构如图 8 所示。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610112910.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610112910.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h2>图类型</h2>
+<p>据现有综述文献 [56] 所述，目前各类基于图的近似最近邻搜索算法，本质上均由以下四类基础图结构衍生而来。其中，最小生成树的连通性较弱，检索平均路径偏长，因此仅用于保障图的基础连通性，不会直接作为最终使用的检索图。<br>
+<strong>德劳内图（DG）</strong><br>
+在d维欧氏空间Rd中，基于点集S构建的德劳内图G(V,E)需满足如下条件：对于任意一条连接顶点u与v的边e∈E，必然存在一个同时经过u、v两点的圆，该圆内部不含其他顶点，圆的边界上最多可存在三个顶点。</p>
+<p><strong>相对邻域图（RNG）</strong><br>
+基于点集S构建的相对邻域图G(V,E)具备以下特性：任取图中连接顶点u、v的边e∈E，对于集合中除u、v以外的任意顶点w，均满足dist(u,v)&lt;dist(u,w) 或 dist(u,v)&lt;dist(v,w)。</p>
+<p><strong>k 近邻图（KNNG）</strong><br>
+k 近邻图G(V,E)的构建规则为：将点集S中的每个数据点，与其距离最近的k个邻点相连。该结构不具备对称性，即若顶点u属于v的邻域集合N(v)，无法推出顶点v也属于u的邻域集合N(u)。</p>
+<p><strong>最小生成树（MST）</strong><br>
+针对点集S构建的最小生成树G(V,E)，是使所有边的权重之和∑i=1∣E∣​w(ei​)达到最小值的图结构。其中每条边ei​连接顶点u和v，边的权重w(ei​)定义为两点间的距离dist(u,v)。</p>
+<h2>GPU图搜索标准算法</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610125558.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610125558.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h2>超参数影响</h2>
+<p>本文选取<strong>CAGRA[48]</strong>（吞吐率最高且性能最稳定的算法）开展超参数影响分析。我们对该算法进行系统性测试，统计不同超参数配置下的每秒查询数与召回率，具体探究节点度数、内部近邻数量、搜索宽度以及线程组规模这四项参数对性能的影响。实验基于 SIFT [29] 数据集完成，实验结果如图 9 所示。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610125648.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610125648.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>现象 1</strong>：调整搜索宽度与内部近邻数量时，每秒查询数与召回率呈反向变化趋势；增大节点出度未必能提升检索性能。线程组规模不会改变召回率，但可加快检索速度。</p>
+<p><strong>分析 1</strong>：在基于图的检索任务中，各参数对算法的影响机制复杂且相互关联。在索引构建阶段，盲目增大节点度数反而可能降低图的可遍历性，新增的边无法持续优化遍历效率。这会导致检索过程需要访问更多节点才能定位到查询目标，进而增加计算开销。</p>
+<h2>面向GPU的图基anns算法</h2>
+<p><strong>SONG [62]</strong><br>
+SONG 是首款专为 GPU 设计的基于图的近似最近邻搜索算法，依托硬件架构优化实现高效检索。该算法将传统图检索流程拆解为<strong>候选节点查找、批量距离计算、数据结构维护</strong>三个独立阶段，消除流程间的串行依赖。算法采用固定度数邻接表、开放寻址哈希表与布隆过滤器，规避动态内存分配问题并优化内存访问模式。借助有界优先队列与选择性插入机制，SONG 实现对 GPU 内存的精细化管控；同时在并行距离计算过程中，保证数据表更新以串行方式执行。</p>
+<p><strong>GGNN [22]</strong><br>
+GGNN 采用<strong>自底向上的分层建图</strong>方案，同时提升索引构建效率与查询性能。建图阶段先将数据集划分为多个小批次，逐层递归合并子图，并通过双向连边强化图的连通性，每个节点的出边数量保持固定。检索阶段，该算法基于线程块级并行机制，搭配多功能共享内存缓存与自适应停止条件，快速定位近邻节点。<br>
+针对十亿级数据集，GGNN 支持<strong>多 GPU 分片架构</strong>：每个分片单独构建检索图以适配单块 GPU 的显存容量，统一查询请求会在所有分片上并行执行，最终由 CPU 通过高效多路归并算法汇总各分片结果，输出全局 k 近邻。</p>
+<p><strong>GANNS [60]</strong><br>
+GANNS 是一款基于近邻图的高性能 GPU 加速算法，图构建与检索全流程均使用 GPU 加速。建图阶段采用分治策略，将整体点集划分为多个子集，并行构建局部近邻图，再逐步合并得到全局图；图中同时保留正向边与反向边，保障图结构质量。<br>
+检索阶段以批次形式处理候选节点并完成距离计算，结合<strong>延迟更新</strong>与<strong>延迟校验</strong>机制，既规避动态数据结构带来的额外开销，又进一步提升并行执行能力。</p>
+<p><strong>CAGRA [48]</strong><br>
+CAGRA 的图构建与检索环节均基于 GPU 加速。建图时先通过 NN-Descent [15] 算法快速生成初始 k 近邻图，再对边进行重排序并新增反向边完成优化，以此增强图的连通性与检索性能。优化后的图采用固定节点出度设计，可充分发挥 GPU 的并行计算能力，提升硬件资源利用率。<br>
+检索阶段通过随机采样初始化候选节点列表，动态更新内部 Top-M 列表与候选列表，实现高效迭代检索。</p>
+<p><strong>BANG [33]</strong><br>
+BANG 是面向十亿级数据集设计的 GPU 加速近似最近邻搜索方法，其图结构基于经典 DiskANN [28] 算法构建。检索阶段将图结构与原始数据存放于主机内存，以此降低 GPU 显存占用；由 CPU 加载邻接节点，并将节点编号与对应数据依次传输至 GPU。<br>
+GPU 端采用分阶段执行策略，将任务划分为邻接节点过滤、等待邻接数据、距离计算、预取扩展候选节点、结果重排序多个环节。该算法结合异步数据传输与数据预取技术，在保障并行度的同时，有效缓解 CPU 与 GPU 之间的数据传输瓶颈。</p>
+<p><strong>PilotANN [23]</strong><br>
+PilotANN 是面向大规模近似最近邻搜索的<strong>CPU-GPU 混合架构</strong>框架。索引构建阶段，利用奇异值分解（SVD）[20,36] 将高维向量拆分为主分量与残差分量；通过节点采样构建子图，并采用压缩稀疏行（CSR）[51] 格式将子图存入 GPU 显存，完整图则保留在 CPU 内存中。<br>
+检索采用多阶段执行策略：首先依托 GPU、子图与向量主分量完成初步检索，筛选候选节点；再由 CPU 结合残差分量并遍历更多子图做进一步优化；最后在完整图上执行贪心检索，保障检索精度。该算法结合快速入口选择（FES）与高效数据管理方案，可在超大规模数据集上实现高吞吐检索。</p>
+<h2>索引构建评估补充说明</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610130016.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610130016.png" alt="image.png" style="max-width: 100%;"></a><br>
+表 4 为主体实验的补充内容，详细展示了各算法在中大规模数据集（DEEP10M、MNIST8M、DEEP100M）上的索引构建性能，直观体现不同算法的可扩展能力上限。HNSW [43]、PilotANN [23] 等 CPU 端算法在处理最大规模数据集时，频繁出现内存溢出问题；而 CAGRA [48]、GGNN [22] 等原生 GPU 算法则始终保持稳定的处理吞吐。</p>
+<h2>传输开销分析补充说明</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610130044.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610130044.png" alt="image.png" style="max-width: 100%;"></a><br>
+图 11 补充展示了 GGNN [22]、GANNS [60] 与 SONG [62] 三款算法的 ** 主机到设备（HtoD）** 数据传输开销明细。图表进一步证实，图拓扑结构与原始向量数据的传输占用了绝大部分带宽，也再次说明数据搬运仍是制约 GPU 加速近似最近邻搜索性能的核心瓶颈。</p>
+<h2>无数据传输场景下检索性能补充说明</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610130102.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610130102.png" alt="image.png" style="max-width: 100%;"></a><br>
+图 10 在更多数据集上开展检索性能测试，绘制高精度区间内每秒查询数随召回率 <a class="user-mention notranslate" data-hovercard-type="user" data-hovercard-url="/users/10/hovercard" data-octo-click="hovercard-link-click" data-octo-dimensions="link_type:self" href="https://github.com/10">@10</a> 变化的曲线。补充实验结果与正文结论一致：相较于其他 GPU 基准算法，CAGRA [48] 在不同数据规模与向量维度下，均能维持优异的检索吞吐能力。</p>
+<h2>检索子模块耗时补充说明</h2>
+<p>图 10 将模块耗时分析拓展至 DEEP10M 与 SIFT1M 数据集。实验结果与核心结论相符：** 批量距离计算（DC）** 占据了计算核心的绝大部分运行时长，耗时占比远高于候选节点查找（CL）与数据结构维护（DM）两个环节。</p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
