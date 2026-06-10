@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="LM-DiskANN: Low Memory Footprint in Disk-Native Dynamic Graph-Based ANN Indexing
+# 摘要
+近似最近邻（ANN）搜索是推荐系统、计算机视觉、自然语言处理等众多场景的基础操作。">
+<meta property="og:title" content="【论文阅读；23】LM-DiskANN：面向磁盘的低内存动态图ANNS索引">
+<meta property="og:description" content="LM-DiskANN: Low Memory Footprint in Disk-Native Dynamic Graph-Based ANN Indexing
+# 摘要
+近似最近邻（ANN）搜索是推荐系统、计算机视觉、自然语言处理等众多场景的基础操作。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/%E3%80%90-lun-wen-yue-du-%EF%BC%9B23%E3%80%91LM-DiskANN%EF%BC%9A-mian-xiang-ci-pan-de-di-nei-cun-dong-tai-tu-ANNS-suo-yin.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>【论文阅读；23】LM-DiskANN：面向磁盘的低内存动态图ANNS索引</title>
+
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">【论文阅读；23】LM-DiskANN：面向磁盘的低内存动态图ANNS索引</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/59" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>LM-DiskANN: Low Memory Footprint in Disk-Native Dynamic Graph-Based ANN Indexing</p>
+<h1>摘要</h1>
+<p>近似最近邻（ANN）搜索是推荐系统、计算机视觉、自然语言处理等众多场景的基础操作。大语言模型（LLM）的兴起，进一步推动了高性能 ANN 算法的研发，该算法也成为向量数据库的核心能力，充当大模型的长期记忆。目前业界已涌现出哈希型、树型、量化型等多种 ANN 索引结构，而<strong>图基算法</strong>凭借在召回率与查询延迟之间的优异平衡，成为当前最优主流方案。<br>
+但现有绝大多数图基索引只能部署在内存中：若将索引存放于磁盘，检索过程会产生大量磁盘 I/O。面对超大规模数据集，完整的图索引无法全部载入内存，也难以一次性在内存中完成构建。因此，实现图索引全磁盘存储、检索时按需加载，成为重要的优化方向。DiskANN 等方案虽将图索引存至磁盘，但仍需在内存中保留数据集的压缩版本，以此减少 I/O 开销、加速距离计算，内存占用问题并未彻底解决。<br>
+本文提出<strong>LM-DiskANN</strong>：一款面向磁盘部署的动态图基 ANN 索引。该方案在每个索引节点中存储完整的路由信息，大幅降低内存占用。在多个标准数据集上的大量实验表明，相较于当前主流图基 ANN 索引，LM-DiskANN 在保持相近<strong>召回率 - 延迟</strong>表现的同时，内存消耗显著降低。其良好的可扩展性与适配性，使其能够很好地应用于未来各类大数据场景。</p>
+<h1>一、引言</h1>
+<p>近邻搜索问题的核心，是设计高效的索引结构与配套算法，以便在指定数据集内快速找出任意查询点的<strong>k 近邻（KNN）</strong>。该问题是算法研究领域的基础课题，广泛应用于计算机视觉、文档检索、推荐系统等多个领域。在这类应用场景中，图像、文档、用户画像等数据会被映射至高维嵌入空间，数据间的相似度则通过对应嵌入向量的距离进行衡量。</p>
+<p>当前大语言模型（LLM）已具备强大的推理能力，但仍存在<strong>幻觉问题</strong>，即模型会生成看似合理却纯属虚构的内容。为解决这一问题，业界很自然地将大语言模型与存储 “事实类” 嵌入向量的向量数据库相结合 [1]。在该架构中，大语言模型充当 “大脑”，而向量数据库则作为其外部长期记忆，供模型检索调用。</p>
+<p>举个例子，若要搭建一篇科研论文的问答系统，可先将每篇论文的嵌入向量存入向量数据库。当用户提出诸如 “列出近期关于 k 近邻搜索的相关论文，并附上各论文链接” 这类问题时，系统不会生成虚假的论文与链接，而是先将查询语句映射到与论文向量相同的嵌入空间，再在论文向量集合中检索查询点的 k 个近邻。这 k 个近邻对应的原文内容，便可作为该问题的有效答案。上述应用场景，让业界再度聚焦于研发性能更优异的 k 近邻搜索算法，而这类算法也成为了向量数据库的核心组件。</p>
+<p>然而，数据集规模持续扩张，再加上<strong>维度灾难</strong>问题，若对数据进行全量遍历才能精确查找近邻，实际应用中往往难以落地。为此，<strong>近似最近邻搜索（ANN）</strong> 算法应运而生：该类算法适度放宽精度要求，以此大幅提升检索效率。算法的优化目标是在降低检索耗时的同时，提升<strong>k 召回率</strong>（成功检索到真实 k 个近邻的比例），在召回率与检索延迟之间实现权衡。</p>
+<p>现有近似最近邻搜索算法主要分为四类：基于哈希的算法（如局部敏感哈希 [2][3]）、基于树的算法（如 k-d 树 [4]）、基于量化的算法 [5][6] 以及基于图的算法 [7][8]，各类算法拥有独有的索引构建方式，也各有优劣。近年来，基于图的近似最近邻搜索算法凭借优异的邻接关系表达能力脱颖而出，只需比对数据集中少量样本，就能得到精度更高的检索结果，成为主流方案。</p>
+<p>基于图的近似最近邻搜索算法会在原始数据集上构建图索引：图中的顶点对应数据集中的样本点，存在邻接关系的顶点之间通过边相连。依托该图索引与查询点，近似最近邻搜索的目标就是找到距离查询点最近的一组顶点。具体检索流程为：首先选取一个（随机或预设）起始顶点作为检索起点，并维护一组候选点作为检索前沿；随后不断迭代更新检索前沿，筛选出距离查询点更近的邻点，直至满足终止条件，最终留存的候选点即为查询点的近邻。相较于其他索引结构，图类算法在精度与效率之间取得了更优的平衡，因此被各类向量数据库与近似最近邻检索框架广泛采用。</p>
+<p>目前主流的图类近似最近邻搜索索引存在一个突出问题：内存占用过高。当数据集规模达到十亿级样本时，在内存中构建并存储图索引几乎无法实现。现有部分方案会对数据集做聚类或分块处理，为每个数据块单独构建索引，并将各索引部署在不同节点上，但这类方案的可扩展性往往达不到预期。此外，当数据发生增删操作、图索引随之更新时，内存与磁盘之间还会产生复杂的数据同步问题。因此，研发可完全基于磁盘存储的索引方案具有重要价值。</p>
+<p>已有相关研究（如 DiskANN [9]）尝试将图索引存放于磁盘，但这类方案仍会在内存中保留数据集的压缩版本（例如采用乘积量化技术 [5] 压缩数据），以此减少磁盘 I/O 开销、加速距离计算。即便如此，数据集的压缩版本依旧会占用大量内存资源。</p>
+<p>现有图类近似最近邻搜索算法的核心痛点在于：图中每个节点所存储的信息不足以支撑路由判断，检索时必须加载该节点所有邻点的向量至内存，这会引发大量磁盘 I/O 操作。针对该问题，本文提出<strong>LM-DiskANN</strong>方案：图中每个节点都会完整保存其所有邻点的相关信息。具体实现为：在每个节点的原始向量后，紧随存储该节点全部邻点的乘积量化压缩 [5] 向量副本。</p>
+<p>检索过程中，只需计算查询向量的压缩版本与各邻点压缩向量之间的距离，即可完成相似度估算。由于节点向量与其邻点的压缩向量可一次性加载至内存，从而避免了多次随机磁盘访问。本文的主要创新点总结如下：</p>
+<ol>
+<li>提出全新的原生磁盘型图基近似最近邻检索索引 LM-DiskANN。该索引的每个节点均存储完整邻接信息以支撑路由决策，检索阶段的总 I/O 次数与 DiskANN [9] 基本持平，但内存占用大幅降低。</li>
+<li>LM-DiskANN 支持图索引增量构建，可动态处理数据的插入与删除操作。</li>
+<li>经过大量实验验证，在召回率与检索延迟表现相近的前提下，LM-DiskANN 的内存占用优于当前业界最优的图基近似最近邻检索索引。</li>
+</ol>
+<p>本文其余章节安排如下：第二章梳理相关研究现状；第三章介绍本文方法所用到的基础符号与前置技术；第四章详细阐述本文方案的核心思路；第五章通过多组对比实验，全面展示本方法与现有方案的性能差异；第六章总结全文工作，梳理研究贡献并展望未来研究方向。</p>
+<h1>二、相关工作</h1>
+<h2>2.1 近似最近邻搜索</h2>
+<p>近似最近邻（ANN）搜索是计算机视觉、机器学习、计算几何等多个领域的基础问题。其目标是在数据集中找到与查询点相近的数据样本，并不要求严格匹配到精确的最近邻。多年来，研究人员陆续提出多种方法与技术，以实现该问题的高效求解。<br>
+1）<strong>基于树的方法</strong><br>
+R 树 [10]、KD 树 [11]、M 树 [12]、球树 [13] 等树形结构是早期用于近似最近邻搜索的主流技术。KD 树在低维数据场景下表现高效，但维度升高后性能会明显下降。而球树将数据划分为超球形区域，能够更好地适配高维数据场景。<br>
+2）<strong>哈希技术</strong><br>
+局部敏感哈希（LSH）[14] 是近似最近邻搜索领域常用的哈希方法。该技术通过特定哈希规则处理输入数据，提升相似样本被映射至同一哈希桶的概率。为进一步优化检索效率与精度，学界又提出多探测局部敏感哈希 [15]、交叉多面体局部敏感哈希 [16] 等衍生算法。有一项综合性研究 [17] 重新梳理了各类近似最近邻哈希算法，研究结果出人意料：基于随机投影的局部敏感哈希算法，性能优于诸多当下主流的哈希方法，这与不少论文中的结论相悖。<br>
+3）<strong>量化方法</strong><br>
+乘积量化 [5]、优化乘积量化 [18] 等基于量化的方法，核心是将数据向量压缩为紧凑编码。这类方式既能节省存储空间，也能加快查询向量与压缩后数据之间的距离计算速度。<br>
+4）<strong>基于图的方法</strong><br>
+基于图的方法 [7-9,19,20] 会构建图结构索引，图中节点对应数据样本，距离相近的节点之间通过边相连。目前该类方法在检索精度与速度上均达到业界顶尖水平。<br>
+近年来，也出现了结合机器学习优化图索引构建与检索流程的相关研究：例如通过学习节点表征优化路由策略 [21]、训练决策树模型预判检索终止时机 [22]、学习低维向量嵌入以保留数据局部几何特征 [23]。王等人针对现阶段各类基于图的近似最近邻算法，完成了全面的综述与性能对比工作 [24]。<br>
+5）<strong>混合方法</strong><br>
+近期部分研究融合多种技术以提升整体性能。例如杜兹等人 [25] 将量化技术与图检索相结合；董等人 [26] 则把局部敏感哈希与神经网络嵌入技术进行融合。</p>
+<h2>2.2 学习型数据库索引</h2>
+<p>已有多项研究尝试将机器学习技术应用于数据库领域，重点优化索引结构的综合性能。《论学习型索引结构的可行性》[27] 指出，学习型索引能够挖掘数据的内在分布规律，并自适应优化索引结构，性能可超越传统索引。<br>
+ML-Index [28] 与面向空间查询的学习型索引 [29] 分别针对范围查询、空间查询设计了学习型索引，有效提升了对应查询场景的执行效率。Shift-Table [30] 面向范围查询设计学习型索引，借助模型修正机制降低索引处理延迟。ALEX [31] 是支持实时更新的自适应学习型索引；《支持精确定位的可更新学习型索引》[32] 则实现了可精准记录索引元素位置的索引结构。<br>
+《人工智能与数据库的结合》[33] 以及《面向云数据库的智能分区推荐器构建》[34] 均利用机器学习优化云数据库性能；《基于深度强化学习的索引推荐器》[35] 可根据业务负载与数据分布，自动推荐最优索引结构。<br>
+针对高维数据的复杂查询场景，学界也提出了多种多维索引方案。《多维学习型索引研究》[36] 系统总结了面向多维数据的各类学习型索引设计思路，涵盖数据分区、自适应索引等技术方向。<br>
+此外，还有研究利用维度（列）之间的关联特性设计专用索引。《关联索引》[37] 依托列之间的弱函数依赖关系，实现了数据的压缩存取；《基于列关联构建精简二级索引》[38] 借助机器学习挖掘列关联，以此优化二级索引性能。LISA [39] 是面向空间数据的学习型索引，该方法利用空间关联特性完成索引优化。<br>
+总体而言，将机器学习应用于数据库索引的相关研究，为提升数据库管理系统的整体性能与运行效率提供了新思路。上述论文提出的各类方案，也为设计高性能索引、优化数据库表现提供了实用的方法与参考。</p>
+<h1>三、相关基础理论</h1>
+<p>本节将介绍本文所用的问题符号定义，以及本研究依托的现有技术。</p>
+<h2>3.1 符号定义</h2>
+<p>为方便后续内容阐述，首先结合表 1 说明本文使用的各类符号。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610152315.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610152315.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h2>3.2 最优优先搜索（BFS）</h2>
+<p>当前绝大多数基于图的近似最近邻搜索算法，都会采用各类贪心路由策略，<strong>最优优先搜索（BFS）</strong> 及其衍生算法便是其中主流方案 [24]。</p>
+<p>最优优先搜索的执行流程为：首先选定一个起始节点s，之后算法不断向目标向量q逼近。每一步都会访问当前距离q最近的节点，并将该节点的所有邻点加入检索候选集。</p>
+<p>图 1 中以不同颜色区分各类节点：绿色节点为起始节点s，红色节点代表查询目标q；黑色节点为曾出现在检索候选集中的节点，蓝色节点为已完成访问的节点（所有蓝色节点均曾属于检索候选集）。红色虚线圈内的 4 个节点，是检索终止时候选集中距离目标最近的节点。每当一个蓝色节点被访问，其全部邻点都会被加入检索候选集。由于检索候选集的容量设有上限，当候选集中所有节点均被访问完毕，最优优先搜索流程便结束。若图索引构建合理，该算法能够很好地兼顾检索精度与执行效率。</p>
+<h2>3.3 广义稀疏邻域图</h2>
+<p>图索引需要具备良好的连通性，才能适配最优优先搜索这类贪心检索模式。<strong>稀疏邻域图（SNG）</strong> 是具备该特性的经典图结构之一 [40][41]，其连边规则为：一条边存在的充要条件是，该边并非任意三角形中的最长边。严谨定义如下：对索引节点p及其邻点p′，若存在另一节点p′′满足 d(p′,p′′)≤d(p,p′′)，则p与p′′之间不建立连边。</p>
+<p>该特性可在尽可能精简边数量的同时，保证每个节点都与其近邻相连。由此可证，在稀疏邻域图上执行最优优先搜索，最终一定能检索到目标近邻。但这类图结构缺少长距离连边，检索遍历的整体效率并不理想。</p>
+<p>为此，研究人员提出<strong>广义稀疏邻域图（GSNG）</strong>。该结构在一定程度上保留长距离连边，在图的稀疏性与可遍历性之间实现平衡。广义稀疏邻域图是对稀疏邻域图的扩展，规则如下：对索引节点p及其邻点p′，若存在节点p′′满足 α×d(p′,p′′)≤d(p,p′′)（其中α≥1），则p与p′′之间不建立连边。α取值越大，图中保留的长距离连边就越多。实践表明，广义稀疏邻域图能够有效提升最优优先搜索在图索引上的检索效率。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610152241.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610152241.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h1>四、LM-DiskANN</h1>
+<p>本节将详细介绍本文方法的各项核心算法。本方案基于 DiskANN [9] 与 FreshDiskANN [20] 实现。DiskANN 依托名为 Vamana 的新型图索引算法构建，属于<strong>静态图索引</strong>：索引一次性构建完成后，后续无法再进行修改。FreshDiskANN 在 DiskANN 的基础上进行扩展，支持在新增节点或删除已有节点时对索引执行动态更新。该方案着重优化内存占用，并完成内存数据结构与磁盘索引之间的数据同步。</p>
+<p>本文方案以磁盘存储为主、内存占用极低，且研究目标是探究彻底移除内存向量所带来的影响，因此仅保留了 FreshDiskANN 的核心逻辑。综上，本文方法可看作 DiskANN 的动态版本，并对检索、插入、删除三大核心流程做了针对性改造。</p>
+<h2>4.1 磁盘上增强型索引节点的存储布局</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610152654.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610152654.png" alt="image.png" style="max-width: 100%;"></a><br>
+每个节点在存储邻点编号后，紧接着存放所有邻点的压缩向量。单个节点的存储结构如图 2 所示：节点起始位置为自身编号，随后依次存储节点向量、全部邻点编号。若实际邻点数量小于最大邻点数，剩余空间用 0 补齐。节点末尾存储所有邻点的压缩向量，同样在邻点数量不足最大值时进行补零处理。</p>
+<p>以评测所用的 SIFT1M 数据集为例：该数据集每个数据向量维度为 128，本实验将节点最大邻点数设为 70。经计算，SIFT1M 数据集下单个索引节点的大小为 (1+128+70+70×8)×4=3036 字节。该尺寸可完整存入一个 4KB 磁盘页，加载本文设计的增强型节点不会比原始节点产生额外开销，这也是本方案能够落地的根本原因。</p>
+<h2>4.2 LM-Search（检索算法）</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610154023.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610154023.png" alt="image.png" style="max-width: 100%;"></a><br>
+检索是近似最近邻索引的核心功能。Vamana 算法采用经典的最优优先搜索，本文方案基于 Vamana 实现，因此同样沿用该最优优先搜索策略。二者唯一区别在于：检索过程中，本方法<strong>直接从节点自身读取邻域信息</strong>，而非单独读取内存中的向量数组。</p>
+<p>检索函数的输入包括图索引 G、查询向量 q、候选集最大容量 L 以及结果数量 k。检索开始时，算法从索引中随机选取一个节点作为起点，并将该起始节点 s 加入候选列表；同时初始化已访问节点集合 V 与距离映射表 D，其中 D(s)=d(s,q)，d(s,q) 代表节点 s 与查询向量 q 之间的距离。</p>
+<p>在每一轮迭代中，算法从候选列表里选出距离查询向量 q 最近且<strong>未被访问</strong>的节点 p∗，并将其所有邻点加入候选列表。若合并后的候选列表规模超出上限 L，则对候选集进行裁剪，仅保留距离查询向量最近的 L 个节点。</p>
+<p>本文所用增强型节点（结构见图 2）完整存储了邻域信息，因此距离映射表 D 主要依据<strong>压缩向量</strong>计算；仅当节点被访问后，才会更新其与查询向量的真实距离。该设计让本方法的运行效率与原有实现基本持平。</p>
+<p>当候选列表中不存在未访问节点时，检索流程结束。算法从候选集中选出距离最近的 k 个节点作为结果返回，同时一并返回所有已访问节点 —— 这类节点会在图索引增量构建阶段复用。</p>
+<p>不难看出，检索的收敛效率很大程度取决于参数 L：L 取值越大，检索迭代步数越多、耗时越长。同时，收敛效率也受图索引 G 规模影响，图中节点数量越多，检索收敛耗时越久。上述规律将在后续实验中加以验证。算法 1 给出了该检索算法的完整伪代码。</p>
+<h2>4.3 LM-Insert（插入算法）</h2>
+<p>本文索引通过 <strong>LM-Insert</strong> 算法实现动态更新，该算法也可用于从零开始构建整张图索引。</p>
+<p>LM-Insert 的输入为图索引 G 与待插入节点 p。执行完成后，图索引会新增节点 p，且整体仍满足广义稀疏邻域图（GSNG）特性。</p>
+<p>算法执行流程：首先在图索引 G 中检索节点 p 的近邻，并得到本轮检索的已访问节点集合 L；随后将集合 L 中的所有节点设为 p 的邻点，并执行邻边剪枝。反过来，再将节点 p 依次加入其各个邻点的邻接列表，同样执行剪枝操作。双向添加邻边并配合剪枝策略，能够保证更新后的图索引连通性不变，且始终符合 GSNG 约束。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610154912.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610154912.png" alt="image.png" style="max-width: 100%;"></a><br>
+若使用 LM-Insert 从零构建图索引，每新增一个节点，已有节点的邻接列表都会随之调整。由于 LM-Insert 依赖 LM-Search 完成检索，因此随着图索引规模不断扩大，插入操作的延迟也会逐步上升。算法 2 为 LM-Insert 的完整伪代码。</p>
+<h2>4.4 LM-Delete（删除算法）</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610160258.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610160258.png" alt="image.png" style="max-width: 100%;"></a><br>
+为支持动态更新，本方案还实现了节点删除功能。<strong>LM-Delete</strong> 算法以图索引G和待删除节点p作为输入。执行该算法后，输出的图索引G将移除节点p，同时尽可能保持图的连通性，并继续满足广义稀疏邻域图（GSNG）特性。</p>
+<p>算法首先将节点p标记为已删除，随后尽可能修复因节点删除而断裂的检索路径。针对p原本的每一个邻接节点，将p的其他所有邻接节点与该节点建立连接，随后执行剪枝操作。算法 3 给出了 LM-Delete 的详细伪代码。</p>
+<h2>4.5 LM-Prune（剪枝算法）</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610160312.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610160312.png" alt="image.png" style="max-width: 100%;"></a><br>
+在第 IV-C 节的插入算法中，会调用邻点剪枝函数。当节点的邻点数量超过预设的最大邻点数量时，会自动触发邻点剪枝流程。该流程的设计目标是保证索引图满足 ** 广义稀疏邻域图（GSNG）** 特性，从而在图的稀疏性与连通性之间取得平衡。</p>
+<p>该算法的输入包括：图索引G、需要进行邻点剪枝的节点p、距离阈值α，以及图索引中允许的最大邻点数量R。</p>
+<p>首先，使用节点p当前的所有邻点Nout​(p)初始化候选集C，并清空p当前的所有邻点。</p>
+<p>剪枝过程以迭代方式执行：每一步从候选集C中找到距离最近的节点p∗，将其加入p的邻点列表；随后移除Nout​(p)中所有满足条件 α×d(p∗,p′)≤d(p,p′) 的节点p′。</p>
+<p>本方案的邻点剪枝方法与 Vamana 的实现不同：所有邻点信息均存储在增强型节点p中，无需借助内存中的辅助数组，即可计算候选节点与p之间的距离，以及候选节点两两之间的距离。同样，本方法的执行效率与原始实现基本一致。算法 4 给出了详细的伪代码。</p>
+<h2>4.6 检索效率与 I/O 开销</h2>
+<p>如本文 4.2 节所述，给定起始节点s与查询点q并执行 LM-Search 检索函数时，算法会访问一批节点，同时将另一批节点加入候选集L（即检索前沿）。结合图 1 可知，每当蓝色节点被访问，其所有邻点都会被加入检索前沿；而为确定下一个待访问节点，还需要获取这些邻点与查询点之间的距离。</p>
+<p>因此，当 Vamana 算法在基于磁盘的索引上运行最优优先搜索（BFS）时，本质上需要将所有黑色节点与蓝色节点加载至内存，这会产生大量随机磁盘 I/O 操作。为缓解该问题，Vamana 在内存中存放一份全体向量的压缩副本，检索时仅需加载蓝色节点即可。</p>
+<p>本文方案采用另一种优化思路：不再于内存中维护向量数组，而是对磁盘上的节点结构进行扩展，在每个节点自身信息后追加存储其所有邻点的压缩向量。当蓝色节点被访问并加载至内存时，其全部邻域信息可通过<strong>单次 I/O 操作</strong>一并读入。该设计在不牺牲检索效率的前提下，仅增加了磁盘存储开销。</p>
+<h1>五、实验</h1>
+<p>本节将本文所提方法与当前主流的原生磁盘型近似最近邻检索算法 DiskANN 开展对比实验，基于多组数据集，从<strong>召回率 - 延迟曲线</strong>与<strong>内存占用</strong>两大维度完成性能评测。</p>
+<h2>5.1 实验环境与数据集</h2>
+<p>本次实验硬件平台采用谷歌云 E2 虚拟机，配置为 8 个虚拟 CPU（4 核）、32GB 内存以及 1TB 固态硬盘。</p>
+<p>实验选用业界公开基准数据集，相关参数如表 2 所示。所有数据集均划分为训练集与测试集：训练集用于构建图索引，测试集用于发起检索查询。每份训练集均包含 100 万个数据样本；每份测试集包含 1 万个数据样本，且预先算出了K最大取 100 时的精确 k 近邻检索结果，作为评测基准。</p>
+<p>为保证对比公平，本文严格参照文献 [9] 中的算法逻辑，使用 Python 重新实现了 Vamana 算法。原版 Vamana 属于静态索引，仅支持一次性构建、后续无法修改，因此本文参考现有方案 [20] 将其改造为动态索引，便于与本文方法进行横向对比。</p>
+<p>针对 Vamana 与本文方法，所有数据集均采用统一最优参数配置：最大邻点数R=70、候选集上限L=75、系数α=1.2、参数W=2。对于 Vamana 实现版本，考虑到测试集与训练集数据分布相近，本文利用测试集中 1 万个样本构建出大小为 32 字节的乘积量化（PQ）码本 [5]，该码本可在两类数据集间通用。</p>
+<p>实验流程：先向索引中依次插入训练集的 100 万个数据样本，再使用测试集的 1 万个样本执行检索，最后将这 1 万个样本从索引中逐一删除。全程统计检索延迟、检索精度与存储空间占用，实验结果将在下文逐一展示。</p>
+<h2>5.2 索引构建耗时</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610171849.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610171849.png" alt="image.png" style="max-width: 100%;"></a><br>
+本小节统计向索引插入全部 100 万个训练样本后的整体构建耗时，实验结果如表 3 所示。本文实现的 Vamana 版本耗时高于原论文数据，原因在于原版基于 C++ 语言开发且采用批量构建模式，而本文使用 Python 实现，并采用增量构建方式。</p>
+<p>同时可以看到，本文方法的索引构建耗时略长于 Vamana。这是因为插入新节点时，本方案需要在磁盘中完整存储该节点的全部邻域信息。无论是 Vamana 还是本文方法，在 GIST1M 数据集上的构建耗时都远高于另外两组数据集，究其原因是 GIST1M 的数据分布更为复杂，算法收敛所需的迭代步数更多。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610171913.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610171913.png" alt="image.png" style="max-width: 100%;"></a><br>
+构建索引的过程中，每插入 20 万个节点便采样一次单节点插入耗时，采样结果如图 3 所示。整体来看，本文方法的单节点插入耗时略高于 Vamana；且随着插入节点总量不断增加，两种算法的单节点插入耗时均呈上升趋势。这一现象符合预期：采用增量方式构建索引时，索引规模越大，为新节点匹配合适邻点所需的检索时间就越长。在所有阶段中，GIST1M 数据集的插入耗时均远超其余两者，差距约达一个数量级。</p>
+<h2>5.3 召回率 - 延迟曲线</h2>
+<p>完成 100 万条训练向量的索引构建后，依次使用 1 万条测试向量执行检索，统计平均检索延迟与<strong>10 - 召回率 <a class="user-mention notranslate" data-hovercard-type="user" data-hovercard-url="/users/10/hovercard" data-octo-click="hovercard-link-click" data-octo-dimensions="link_type:self" href="https://github.com/10">@10</a></strong>。通过调整候选集容量L改变检索复杂度，探究该参数对检索延迟与精度的影响，三组数据集的实验结果如图 4 所示。</p>
+<p>由图可知，在全部数据集上，本文方法与 Vamana 的整体性能表现基本持平。该结果也在情理之中，因为二者核心检索算法逻辑相近。本文方法性能略有衰减，原因是检索过程中需要读取每个节点完整的路由信息，带来了小幅额外 I/O 开销；但本文方法在实现相近召回率 - 延迟表现的同时，大幅降低了内存占用。</p>
+<p>图 5 展示了不同候选集容量L对 10 - 召回率 <a class="user-mention notranslate" data-hovercard-type="user" data-hovercard-url="/users/10/hovercard" data-octo-click="hovercard-link-click" data-octo-dimensions="link_type:self" href="https://github.com/10">@10</a> 指标的影响。实验设置：L初始值为 60，以 20 为步长递增，直至取值达到 200。本质上，增大L会提升检索到真实近邻的概率，但同时也会增加查询收敛的迭代步数。</p>
+<p>实验数据显示，当L=60时，所有数据集的 10 - 召回率 <a class="user-mention notranslate" data-hovercard-type="user" data-hovercard-url="/users/10/hovercard" data-octo-click="hovercard-link-click" data-octo-dimensions="link_type:self" href="https://github.com/10">@10</a> 均在 0.5 左右。而本文构建索引时采用的参数为L=70，这意味着若始终使用偏小的L值，随着索引规模持续扩张，检索质量会出现明显下降。因此，索引体量增大时，需要同步调大L取值。后续还需进一步研究L随索引规模动态调整的策略。</p>
+<h2>5.4 删除操作延迟</h2>
+<p>本文方法支持索引动态更新。在完成 1 万条测试向量的检索后，我们继续将这 1 万条向量插入索引，再逐一执行删除操作，统计得到平均删除延迟如表 4 所示。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610171930.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610171930.png" alt="image.png" style="max-width: 100%;"></a><br>
+可以发现，不同数据集对应的删除延迟差异较小。与插入操作不同，删除节点无需先在索引中执行检索，仅需修补因节点移除产生的链路空缺。GIST1M 数据集的删除延迟略高，大概率是由于该数据集图结构的连通密度更大：存在更多节点的邻点数达到上限，节点删除后需要修补的邻接关系也更多。</p>
+<h2>5.5 内存占用</h2>
+<p><a href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610171930.png" rel="nofollow">https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610171930.png</a><br>
+本小节针对所有数据集，对比 Vamana 与本文方法的内存占用情况。本文中内存占用特指堆内存使用量，在近似最近邻检索场景下，堆内存可划分为<strong>临时堆内存</strong>与<strong>常驻堆内存</strong>两类：</p>
+<ul>
+<li>临时堆内存：执行检索、插入、删除操作过程中临时占用的内存，其大小主要由检索候选集规模决定；</li>
+<li>常驻堆内存：图索引全生命周期内持续占用的内存。对于 Vamana，该部分主要由乘积量化压缩向量数组等辅助结构占用；对于本文方法，则主要存储全体节点编号集合。<br>
+表 5 统计了两类堆内存的峰值占用，并计算出总峰值内存（内存峰值一般出现在索引加载完全部训练集与测试集数据时）。数据表明，在所有数据集上，本文方法的临时堆内存略高于 Vamana，但常驻堆内存远低于后者。综合计算，LM-DiskANN 的总内存占用仅为 Vamana 的约四分之一。核心原因是本方案将每个节点的完整邻域信息随节点本身存储，不再需要在内存中单独维护一份全量向量压缩副本。</li>
+</ul>
+<h2>5.6 磁盘索引体积</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610172021.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260610172021.png" alt="image.png" style="max-width: 100%;"></a><br>
+为完成全面对比，本文还统计了索引加载全部训练集与测试集数据后的磁盘占用峰值，结果如表 6 所示。可以看到，本文方法的磁盘空间开销大于 Vamana，这是因为每个节点都额外存储了完整路由信息，产生了一定数据冗余。</p>
+<p>同时观察到数据集维度越高，本文方法额外增加的磁盘占比就越低：在 GIST1M 数据集上，本文方法的磁盘用量仅比 Vamana 高出 50%；而另外两组低维数据集的磁盘开销则高出 300%。</p>
+<p>总体而言，本文方法以<strong>增加磁盘存储开销为代价换取内存占用的大幅降低</strong>。当数据集规模持续增长时，该取舍方案具备较高的实用价值。</p>
+<h1>六、总结</h1>
+<p>本文针对近似最近邻（ANN）检索面临的难题展开研究。现有基于图结构的近似最近邻索引普遍存在<strong>内存占用过高</strong>的问题，难以适配大规模数据集场景。为此，本文提出 <strong>LM-DiskANN</strong>，设计了一种原生磁盘型图索引结构，在每个节点中完整存储路由所需的邻域信息，大幅降低内存开销。</p>
+<p>与现有方案不同，本方法消除了检索过程中大量随机磁盘访问的问题。在 LM-DiskANN 中，当某个数据节点被加载至内存时，其邻点信息可通过单次块 I/O 一并读入。这一创新设计不仅优化了检索流程，同时支持节点动态插入与删除，能够适配数据持续更新的业务场景。</p>
+<p>大量实验结果表明，LM-DiskANN 在保证召回率 — 延迟曲线与当前主流图基近似最近邻索引持平的前提下，内存使用效率表现优异。这种资源开销与检索性能的良好平衡，让 LM-DiskANN 有望应用于未来各类大数据场景，尤其适用于结合大语言模型的落地场景。</p>
+<p>随着算法领域不断发展，数据集的规模与复杂度也持续提升，LM-DiskANN 这类高效、可扩展的解决方案将愈发重要。本文的研究成果，也将为磁盘式近似最近邻检索方向的后续创新提供参考与思路。</p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
