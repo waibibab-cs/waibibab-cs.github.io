@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="AiSAQ : All-in-Storage ANNS with Product Quantization for DRAM-free Information Retrieval
+# 摘要
+基于图结构的 **近似最近邻搜索（ANNS）** 算法在大规模向量检索任务中表现优异。">
+<meta property="og:title" content="【论文阅读；24】AiSAQ：面向无内存架构的、基于乘积量化的全存储式ANNS">
+<meta property="og:description" content="AiSAQ : All-in-Storage ANNS with Product Quantization for DRAM-free Information Retrieval
+# 摘要
+基于图结构的 **近似最近邻搜索（ANNS）** 算法在大规模向量检索任务中表现优异。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/%E3%80%90-lun-wen-yue-du-%EF%BC%9B24%E3%80%91AiSAQ%EF%BC%9A-mian-xiang-wu-nei-cun-jia-gou-de-%E3%80%81-ji-yu-cheng-ji-liang-hua-de-quan-cun-chu-shi-ANNS.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>【论文阅读；24】AiSAQ：面向无内存架构的、基于乘积量化的全存储式ANNS</title>
+
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">【论文阅读；24】AiSAQ：面向无内存架构的、基于乘积量化的全存储式ANNS</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/60" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>AiSAQ : All-in-Storage ANNS with Product Quantization for DRAM-free Information Retrieval</p>
+<h1>摘要</h1>
+<p>基于图结构的 <strong>近似最近邻搜索（ANNS）</strong> 算法在大规模向量检索任务中表现优异。在这类方法里，DiskANN 结合内存（DRAM）与外部存储，在检索召回率和查询速度之间实现了出色的平衡。DiskANN 采用<strong>乘积量化（PQ）</strong> 降低内存占用，但其内存开销依旧与数据集规模成正比。<br>
+本文提出<strong>AiSAQ</strong>—— 一种结合乘积量化、将压缩向量全部下放至固态硬盘（SSD）索引的全存储式近似最近邻搜索方案。针对十亿级规模数据集，该方法执行查询检索时仅需约 10 兆字节内存，且查询延迟未出现明显恶化。同时，AiSAQ 大幅缩短了检索前的索引加载耗时，支持在多个十亿级索引之间快速切换。该算法可应用于检索增强生成（RAG）的检索模块，也能够依托多服务器集群，适配不断扩容的新型数据集。我们基于 DiskANN 实现的代码已开源至 GitHub。</p>
+<h1>一、引言</h1>
+<p>在图像、音乐、文档等大规模数据集里检索用户目标数据的任务中，<strong>近似最近邻检索（ANNS）</strong> 被广泛应用。该技术依托数据集预先构建索引，查找与查询向量相近的向量。为降低检索延迟，索引数据通常存放在高速内存（主存）中。但动态随机存取存储器（DRAM）成本高昂，难以承载十亿级别的海量数据集，因此也需要搭配固态硬盘（SSD）等速度较慢、成本更低的存储设备。</p>
+<p>当前大语言模型（LLM）发展趋势下，检索增强生成（RAG）[10] 的各类落地方案会将向量数据集作为外部知识库，以此生成更精准的回答。经典方案中采用<strong>稠密段落检索（Dense Passage Retrieval）</strong>[9] 作为检索器来调取外部知识库，该检索器基于<strong>层次化导航小世界图（HNSW）</strong>[11] 完成向量数据检索，也可根据应用需求替换为其他适配的近似最近邻检索算法。当检索增强生成链路需要调用多组知识库时，检索器要在不同索引间切换。这就要求所有知识库的索引数据要么在服务运行期间常驻内存，要么每次处理请求时都从存储设备重新加载。</p>
+<p><strong>DiskANN</strong>[7] 是目前基于图结构、面向外存的近似最近邻检索主流方案，也是神经信息处理系统大会（NeurIPS）Big-ANN 竞赛赛道的基准算法 [14]，同时被 Weaviate [5]、Zilliz [17] 等向量数据库服务采用。DiskANN 可在占用少量内存的前提下，实现十亿级数据集的高召回率检索。它通过<strong>乘积量化（PQ）</strong>[8] 压缩节点向量以削减内存占用，并从外存读取全精度向量，对检索路径上的所有节点重排序，以此保障高召回率。但该方案会将所有节点的乘积量化压缩向量常驻内存，内存开销会随数据集规模同步增长。此外，提升压缩率虽能减少内存占用，却也会造成召回率下降，二者形成明显权衡。这意味着 DiskANN 的数据集扩展能力有限，且不适用于多索引切换场景 —— 将全部量化向量加载至内存会耗费大量时间。</p>
+<p>本文提出 <strong>AiSAQ</strong>（结合乘积量化的全存储式近似最近邻检索），这是一种全新的索引数据部署方案。无论数据集规模大小，该方案的内存占用仅约 10 兆字节。尽管本方案将绝大部分索引数据存放于外存，但通过对存储索引的数据布局进行优化，检索延迟相比 DiskANN 仅有小幅上升。同时，在多个十亿级数据集之间切换索引仅需毫秒级耗时，在多服务器部署场景下也具备显著的成本优势。</p>
+<p>本文主要贡献如下：</p>
+<ol>
+<li>对于包括十亿级 SIFT1B 数据集在内的任意规模数据集，AiSAQ 检索过程仅需约 10 兆字节内存，同时保留了 DiskANN 原有的图结构与高召回率。</li>
+<li>依托固态硬盘的数据布局优化，AiSAQ 在极低内存占用下，实现了 95% 以上的 1-recall@1 指标，检索延迟控制在毫秒级。</li>
+<li>检索前的索引加载耗时几乎可以忽略，应用可根据用户请求灵活切换多个十亿级语料库。</li>
+<li>处于同一向量空间的不同数据集可共享乘积量化质心向量，进一步将索引切换耗时压缩至亚毫秒级。</li>
+<li>针对大规模索引的多服务器检索架构，能够有效降低整体内存与固态硬盘的综合使用成本。</li>
+</ol>
+<p>另有同期相关工作 LM-DiskANN [12] 在本文投稿前已发表。与之相比，本文针对未来数据集体量持续增长的趋势，验证了方案在十亿级数据集与多服务器架构下的可扩展性；同时提出<strong>索引切换耗时</strong>这一全新评估指标，进一步佐证了方案面向超大规模数据集的扩展能力，以上两点均未在 LM-DiskANN 的研究中提及。</p>
+<h1>二、预备知识</h1>
+<h2>2.1 基于图的近似最近邻检索算法</h2>
+<p>设数据集 X 包含 N 个d维向量 xi​∈Rd（i=1,2,…,N），给定查询向量 q∈Rd。<strong>最近邻检索（NNS）</strong> 指依据距离度量函数 d(⋅,⋅)，求解距离查询向量最近的向量 x=argminxi​​d(xi​,q)。暴力求解的最近邻检索时间复杂度为 O(Nd)，并不适用于大规模数据集场景。</p>
+<p>为缩短检索耗时，研究人员提出近似求解最近邻向量的方案，即<strong>近似最近邻检索（ANNS）</strong></p>
+<p>在各类近似最近邻检索方法中，基于图的检索方案采用有向图作为索引结构。索引构建阶段，算法将数据集中的向量 xi​ 视作图节点 vi​，并根据节点间的距离构建节点连边。检索阶段，算法从入口节点出发，沿着图的边进行遍历，逐步定位到距离查询向量 q 最近的候选节点。经实验验证，这类基于图的近似最近邻检索算法时间复杂度可达 O(dlogN)[3]。部分近似最近邻检索算法会放弃全精度向量，转而使用乘积量化等压缩向量开展计算，以此降低内存占用与运算开销，代价是距离计算的精度有所损失。</p>
+<h2>2.2 多数据源的索引切换</h2>
+<p>部分检索增强生成（RAG）系统依靠近似最近邻检索技术从外部数据源获取信息。随着检索增强生成技术在大语言模型中的应用不断深化，系统需要根据用户或应用的请求，在面向不同领域的多个索引之间完成切换。</p>
+<p>举例而言，若大语言模型需要产出涵盖经济、时政、文娱等多个领域的最新资讯，就必须整合多个领域的数据源生成统一回答。另一种典型场景是以 LangChain [4] 为代表的大语言模型链式调用架构，该架构会串行执行多轮大语言模型推理，将上一轮推理的输出作为下一轮推理的输入。在这类场景下，一轮检索增强生成推理所使用的数据源，可能与前一轮推理完全不同。现有的近似最近邻检索方案若要实现多索引切换，要么将所有索引数据常驻内存，要么每次处理请求时都从存储设备重新加载对应索引数据。两种方式分别会造成内存占用过高，或是索引加载耗时过长的问题。</p>
+<h2>2.3 DiskANN</h2>
+<p>DiskANN [7] 是一种典型的基于图的近似最近邻检索算法，该算法依托 Vamana 算法构建扁平化有向图索引。检索阶段，则采用由贪心搜索演化而来的集束搜索算法完成图遍历。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611150524.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611150524.png" alt="image.png" style="max-width: 100%;"></a><br>
+算法 1 展示了 DiskANN 所使用的集束搜索详细流程。乘积量化压缩向量存放于内存中，用于确定检索路径；而节点 vi​ 的全精度向量以及其出邻节点集合 Nout​(vi​) 的编号，则存储在固态硬盘等存储设备的连续<strong>逻辑块地址（LBA）</strong> 空间中（见图 1）。本文将单个节点 vi​ 对应的这部分数据单元称为该节点的<strong>节点数据块</strong>。在每一轮图节点跳转过程中，DiskANN 会读取当前节点 vi​ 的节点数据块，调用内存中常驻的乘积量化向量，计算查询向量与该节点所有出邻节点之间的乘积量化距离，以此确定下一步的检索路径。完成图遍历后，DiskANN 会根据全精度距离对检索路径上的候选节点重新排序，该过程称为<strong>重排序</strong>。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611150711.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611150711.png" alt="image.png" style="max-width: 100%;"></a><br>
+设单个全精度向量占用字节数为 bfull​，节点最大出度为 R，节点编号与出度数值的存储字节数为 bnum​（通常为 4 字节），则单个节点数据块的大小计算公式为：</p>
+<p>BDiskANN​=bfull​+bnum​(R+1)</p>
+<p>操作系统以<strong>数据块</strong>为单位向存储设备下发 I/O 请求，绝大多数操作系统的数据块默认大小 B 为 4KB。多数情况下满足 BDiskANN​≤B，此时一个物理数据块可存放单个或多个节点数据块（见图 1 (a)）。若 BDiskANN​&gt;B，则单个节点数据块会占用多个物理数据块（见图 1 (b)）。以上两种情况均遵循对齐规则：若一个物理数据块的剩余空间无法容纳下一个节点数据块，则该节点数据块会从下一个物理数据块的起始位置开始存储。DiskANN 执行检索时，会发起 I/O 请求读取单个节点数据块所占用的物理块数量，计算方式为<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611151248.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611151248.png" alt="image.png|123" style="max-width: 100%;"></a><br>
+。例如当物理块大小为 4KB 时，图 1 (a) 场景下单次 I/O 读取大小为 4KB，图 1 (b) 场景下则为 8KB。</p>
+<h2>2.4 DiskANN 的缺陷</h2>
+<p><strong>内存占用问题</strong><br>
+DiskANN 会将数据集中所有节点的乘积量化向量全部加载至内存，这意味着其内存占用量与数据集规模 N 大致呈正比。以 SIFT1B 数据集为例，若采用乘积量化后单个向量占用 32 字节（压缩率为原始向量的 1/4），对应的索引就需要占用 32GB 内存。即便提高乘积量化的压缩倍率，搭配重排序机制，检索召回率依然会出现下降，且内存占用依旧随数据集规模 N 线性增长。</p>
+<p><strong>空间利用率问题</strong><br>
+在基于集束搜索的检索过程中，用于距离计算的节点数量远小于数据集总规模 N。即便处理多组查询请求，被频繁访问的节点也仅占少数，绝大部分节点长期处于闲置状态，却依旧持续占用大量内存空间。</p>
+<p><strong>索引切换耗时问题</strong><br>
+包括 DiskANN 在内的传统基于图的近似最近邻检索算法，在正式检索前都需要将向量数据加载至内存，且加载耗时会随数据集规模 N 增大而增加。若业务需要使用多个大规模数据集，并根据应用请求切换对应语料库，传统方案只能将所有数据集的向量数据常驻内存，以此规避反复加载带来的时间开销。</p>
+<h1>三、本文提出的方法</h1>
+<p>针对上述问题，本文提出一种全新算法<strong>AiSAQ</strong>，即<strong>结合乘积量化的全存储式近似最近邻检索</strong>。该方案将乘积量化（PQ）向量数据从动态随机存取存储器（DRAM）迁移至外部存储设备，在检索延迟几乎无明显上升的前提下，实现近乎零内存占用。</p>
+<h2>3.1 方法原理</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611153059.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611153059.png" alt="image.png" style="max-width: 100%;"></a><br>
+在 DiskANN 的集束搜索过程中，当检索停留在节点 vi​ 时，该节点数据块中存储了其所有出邻节点 Nout​(vi​) 的编号，而这些出邻节点对应的乘积量化向量，同样可以一并存入该节点数据块中 —— 这正是 AiSAQ 算法的核心思路（见图 2）。</p>
+<p>AiSAQ 会对节点数据块结构进行调整，其节点数据块尺寸大于 DiskANN，此举旨在充分利用存储块空间，并将 I/O 延迟的增幅控制在最低水平。</p>
+<p>设单个乘积量化向量占用字节数为 bPQ​，则 AiSAQ 的单个节点数据块大小计算公式为：</p>
+<p>BAiSAQ​=BDiskANN​+RbPQ​=bfull​+bnum​+R(bnum​+bPQ​)</p>
+<p>工程上建议调整节点最大出度 R，使节点数据块大小满足 BAiSAQ​≤nB 或 BAiSAQ​≤nB​（其中 n 为自然数），以此适配存储块规格。</p>
+<p>在检索阶段，算法不再从内存读取出邻节点 Nout​(vi​) 的乘积量化向量，而是直接从外部存储的当前节点 vi​ 数据块中读取，并据此计算各向量与查询向量之间的乘积量化距离。</p>
+<p>AiSAQ 利用了 DiskANN 中原存储块的闲置空间来存放乘积量化向量，因此读取乘积量化向量<strong>无需额外发起 I/O 请求</strong>；每一轮节点跳转的距离计算均可依托节点数据块完成，全程无需依赖 DRAM。每完成一轮跳转的距离计算后，当前所用的乘积量化向量即可直接丢弃。</p>
+<p>由于单个节点的乘积量化向量会在上一轮跳转过程中获取，上述机制无法处理检索入口节点。为此，本方案仅在 DRAM 中留存 nep​ 个入口节点的乘积量化向量（绝大多数场景下 nep​ 取值为 1）。</p>
+<p>该算法在运行时，内存中最多仅需同时存放 (R+nep​) 个乘积量化向量。这一数量与数据集总规模 N 无关，且数值远小于 N，最终实现近乎零的内存占用。</p>
+<h2>3.2 工程实现</h2>
+<p>本文基于现有的 DiskANN 程序 [15] 实现了 AiSAQ 的索引构建算法；检索算法则为全新开发，仅复用了 DiskANN 中的部分通用工具函数。</p>
+<p>算法依托 DiskANN 生成的 Vamana 图结构与乘积量化向量，最终输出单一的 AiSAQ 索引文件。</p>
+<p>本次实现以<strong>降低内存占用</strong>为首要目标，因此并未兼容 DiskANN 的拓展功能，例如数据过滤 [6]、动态索引 [16] 等。</p>
+<h1>四、实验评估</h1>
+<p>本节基于 AiSAQ 索引文件开展检索实验，并在<strong>索引构建、检索条件完全一致</strong>的前提下，与 DiskANN 进行对比分析。</p>
+<h2>4.1 数据集与实验环境</h2>
+<p>本次实验采用多规模<strong>SIFT 数据集</strong>[2] 与<strong>KILT E5 数据集</strong>对 AiSAQ 和 DiskANN 进行基准测试。其中 KILT E5 是 1024 维向量数据集：基于 KILT 知识库 [13]，通过 e5-large-v2 模型 [18] 生成向量嵌入得到。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611154221.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611154221.png" alt="image.png" style="max-width: 100%;"></a><br>
+表 1 列出了构建 DiskANN 与 AiSAQ 索引所用数据集的详细参数。本节所有实验中，乘积量化（PQ）的每个子向量均划分为 256 个聚类，采用 8 比特（1 字节）存储；因此，乘积量化子向量的数量可直接换算为单个 PQ 压缩向量的字节大小bPQ​。</p>
+<p>实验均构建<strong>一次性索引</strong>，针对不同数据集调整图节点最大出度R，使节点数据块能够充分填满单个或多个存储块。所有检索实验统一设置集束宽度w=4，并调整候选列表长度L开展对照测试。</p>
+<p>4.2 节至 4.4 节的单服务器检索实验部署在<strong>AWS EC2 i4i.8xlarge</strong>实例上，该设备搭载 2 组 3750 GB 本地存储，并通过 RAID 0 阵列组建。多服务器实验的环境配置详见 4.5 节。</p>
+<h2>4.2 内存占用</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611154745.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611154745.png" alt="image.png" style="max-width: 100%;"></a><br>
+实验使用<code class="notranslate">/usr/bin/time</code>工具统计 DiskANN 与 AiSAQ 检索过程的<strong>峰值内存占用</strong>。由于两种算法都会将完整查询文件加载至内存，而这部分内存开销不影响算法本身的对比，因此本次内存测试仅使用各数据集中<strong>不含真值数据的 10 条查询样本</strong>。</p>
+<p>表 2 为各数据集在索引参数、检索参数一致时，两种算法的内存占用结果：处理 SIFT1B 十亿级数据集时，DiskANN 最高需占用 32 GB 内存；而 AiSAQ 即便面对十亿级检索任务，内存占用峰值也仅为 14 MB。</p>
+<p>通过<code class="notranslate">size</code>、<code class="notranslate">htop</code>等工具进一步拆解 AiSAQ 的内存构成：以 11 MB 总内存占用为例，其中 300 KB 用于检索程序本体及静态分配变量，5.8 MB 为共享库占用。当前版本的 AiSAQ 复用了部分 DiskANN 工具模块，后续对集束检索逻辑进行针对性优化后，内存占用仍有进一步下降空间。</p>
+<h2>4.3 检索耗时</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611160023.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611160023.png" alt="image.png" style="max-width: 100%;"></a><br>
+图 3 为各数据集下 DiskANN 与 AiSAQ 的<strong>召回率 - 检索延迟</strong>对比曲线。由于 AiSAQ 未改动原图拓扑结构，在检索条件相同时，二者的<strong>top1 召回率（recall@1）</strong> 完全一致。</p>
+<p>对于 SIFT1M、KILT E5 22M 这类数据集，AiSAQ 的单个节点数据块所需存储块数量多于 DiskANN，检索时单次 I/O 请求的数据量更大，因此检索延迟相比 DiskANN 有所上升。但依托固态硬盘（SSD）的 I/O 队列机制，加上本文针对 CPU 距离计算环节的耗时优化，整体延迟增幅处于可接受范围。</p>
+<p>而在 SIFT1B 数据集上，AiSAQ 与 DiskANN 的节点数据块大小相等（BAiSAQ​=BDiskANN​=4 KB），此时 AiSAQ 的检索速度反而更快。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611160201.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611160201.png" alt="image.png" style="max-width: 100%;"></a><br>
+实验还设置多组不同 PQ 向量字节大小bPQ​的索引，以此改变 DiskANN 的内存占用，并对比两种算法在<strong>recall@1 &gt; 95%</strong> 条件下的检索耗时（见图 4）。</p>
+<p>DiskANN 存在典型的<strong>内存 - 延迟权衡关系</strong>：若通过调小 PQ 向量尺寸降低内存占用，则必须增大候选列表长度L来保证高召回率，进而导致检索速度变慢。</p>
+<p>与之不同，无论bPQ​取何值，AiSAQ 的内存占用始终维持在极低水平。这意味着在高召回率场景下，AiSAQ 可同时实现<strong>近乎零内存占用</strong>与<strong>毫秒级检索延迟</strong>。</p>
+<h2>4.4 索引切换</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611160237.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611160237.png" alt="image.png" style="max-width: 100%;"></a><br>
+表 3 统计了检索正式启动前，DiskANN 与 AiSAQ 的<strong>索引加载耗时</strong>。DiskANN 的加载时间会随数据集规模增大而明显变长；而 AiSAQ 无需加载全量数据集的 PQ 向量，因此加载耗时始终维持在低位，且加载耗时与自身检索延迟处于同一数量级。由于 KILT E5 22M 为高维数据集，其 PQ 质心向量体量更大，因此该数据集的索引加载耗时略高于其他数据集。</p>
+<p>在大语言模型结合检索增强生成（LLM+RAG）的实际应用中，多个数据集可能共享同一向量空间（例如图像、文档经各自编码器映射至相同向量空间），这类数据集可进一步<strong>共用 PQ 质心向量</strong>。</p>
+<p>为验证该方案效果，实验将 KILT E5 22M 数据集拆分为 10 个子集，全部沿用原 22M 全集生成的 PQ 质心，为每个子集单独构建索引，并分别测试<strong>重新加载 PQ 质心</strong>与<strong>复用已有 PQ 质心</strong>两种模式下的索引切换耗时。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611160322.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611160322.png" alt="image.png" style="max-width: 100%;"></a><br>
+如表 4 所示：启用 PQ 质心共享后，切换索引仅需加载 4 KB 元数据，相比每次都重新加载质心的 AiSAQ 方案，索引切换耗时大幅降低。该优化对 KILT E5 这类高维数据集效果尤为显著。</p>
+<h2>4.5 成本分析与多服务器系统</h2>
+<p>AiSAQ 以极小的内存开销、极短的索引加载时间实现了与 DiskANN 相近的检索性能，但代价是<strong>索引在 SSD 上的存储体积有所增加</strong>。</p>
+<p>从存储开销来看：AiSAQ 需要在外部存储中额外存放 PQ 向量，总存储开销为RNbPQ​字节；DiskANN 则是将 PQ 向量存于内存，内存开销为NbPQ​字节。</p>
+<p>图节点最大出度R通常取 60 左右；根据<a href="https://link.wtturl.cn/?target=https%3A%2F%2FDRAMeXchange.com&amp;scene=im&amp;aid=497858&amp;lang=zh" title="autolink" rel="nofollow">DRAMeXchange.com</a>[1] 数据，DRAM 单位容量成本约为 SSD 的 30 倍（DRAM：1.8 美元 / GB，SSD：0.054 美元 / GB）。</p>
+<p>基于上述参数计算可知：<strong>单服务器场景下，AiSAQ 的综合成本并不占优</strong>。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611160426.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611160426.png" alt="image.png" style="max-width: 100%;"></a><br>
+但面向检索请求扩容、超大索引部署等场景时，系统通常会采用<strong>多服务器分布式架构</strong>（如图 5），此时 AiSAQ 将体现出明显成本优势。图 6 为两种算法在多服务器架构下的内存与固态硬盘总成本预估：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611160442.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611160442.png" alt="image.png" style="max-width: 100%;"></a><br>
+若使用n台服务器部署 DiskANN，总内存容量需同步扩大至n倍；而 AiSAQ 的 SSD 总存储容量与单服务器方案基本一致。</p>
+<p>当检索服务器数量<strong>超过 2 台</strong>时，AiSAQ 的整体资源成本开始低于 DiskANN，这一特性十分契合大规模分布式近似最近邻检索（ANNS）系统的部署需求。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611160542.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260611160542.png" alt="image.png" style="max-width: 100%;"></a><br>
+表 5 为多服务器架构下两种算法的实测结果与成本估算。实验采用 3 台存储服务器搭建 Lustre 分布式文件系统用于存放索引；检索程序部署在同一台物理机的 6 个 Docker 容器中（每个容器视作一台独立检索节点），该物理机搭载 EPYC 7402P 处理器与 224 GB 内存，所有节点通过 200 Gb 以太网 RDMA 互联。</p>
+<p>6 个容器同时运行时，DiskANN 的内存占用远高于 AiSAQ，这也是其总体成本偏高的核心原因。</p>
+<p>受以太网传输延迟影响，分布式环境下 AiSAQ 的索引加载耗时，相比直连 SSD 的单服务器场景略有上升，但仍处于合理区间；反观 DiskANN，其索引加载耗时已完全无法满足实际业务需求。</p>
+<h1>五、结论与未来工作</h1>
+<p>本文提出了<strong>AiSAQ</strong>这一全新的近似最近邻检索方案，该方案将检索索引数据下放至外部存储设备。该方法在<strong>性能无明显下降</strong>的前提下，仅占用约 10 兆字节内存，即可实现十亿级规模数据集的近似最近邻检索。AiSAQ 可适配所有基于图结构的近似最近邻检索算法，在多服务器部署场景中还具备成本优势。</p>
+<p>与此同时，该方案大幅缩短了检索前的索引加载耗时，支持根据不同用户请求在多个大规模数据集之间快速切换索引。这一特性能够助力结合检索增强生成（RAG）的大语言模型，进一步简化索引扩充与筛选检索类算法的设计与落地。</p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
