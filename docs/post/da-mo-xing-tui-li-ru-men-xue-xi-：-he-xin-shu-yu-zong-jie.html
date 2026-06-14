@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="# 基础知识
+## Transformer
+**Encoder-Decoder整体结构**
+![image.png](https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260328221726.png)
+编码器：“理解”输入的整个句子，读取所有输入词元，最终为每个词元生成一个富含上下文信息的向量表示。">
+<meta property="og:title" content="大模型推理入门学习：核心术语总结">
+<meta property="og:description" content="# 基础知识
+## Transformer
+**Encoder-Decoder整体结构**
+![image.png](https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260328221726.png)
+编码器：“理解”输入的整个句子，读取所有输入词元，最终为每个词元生成一个富含上下文信息的向量表示。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/da-mo-xing-tui-li-ru-men-xue-xi-%EF%BC%9A-he-xin-shu-yu-zong-jie.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>大模型推理入门学习：核心术语总结</title>
+
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">大模型推理入门学习：核心术语总结</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/62" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><h1>基础知识</h1>
+<h2>Transformer</h2>
+<p><strong>Encoder-Decoder整体结构</strong><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260328221726.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260328221726.png" alt="image.png" style="max-width: 100%;"></a><br>
+编码器：“理解”输入的整个句子，读取所有输入词元，最终为每个词元生成一个富含上下文信息的向量表示。<br>
+解码器：任务是“生成”目标句子，它会参考自己已经生成的前文，并“咨询”编码器的理解结果，来生成下一个词。</p>
+<p><strong>自注意力到多头注意力</strong><br>
+想象一下我们阅读这个句子：“The agent learns because it is intelligent.”。当我们读到加粗的"it"时，为了理解它的指代，我们的大脑会不自觉地将更多的注意力放在前面的 "agent" 这个词上。自注意力 (Self-Attention) 机制就是对这种现象的数学建模。它允许模型在处理序列中的每一个词时，都能兼顾句子中的所有其他词，并为这些词分配不同的“注意力权重”。权重越高的词，代表其与当前词的关联性越强，其信息也应该在当前词的表示中占据更大的比重。</p>
+<p>为了实现上述过程，自注意力机制为每个输入的词元向量引入了三个可学习的角色：<br>
+查询 (Query, Q)：代表当前词元，它正在主动地“查询”其他词元以获取信息。<br>
+键 (Key, K)：代表句子中可被查询的词元“标签”或“索引”。<br>
+值 (Value, V)：代表词元本身所携带的“内容”或“信息”。</p>
+<p>整个计算过程可包含：</p>
+<ol>
+<li>对于句子中的每个词元，都通过权重生成其QKV向量</li>
+<li>计算相关性得分：要计算词A的新表示，就用A的Q向量去和句子中所有词的K向量进行点积计算，这个得分反映了其他词对于理解词A的重要性</li>
+<li>加权求和：将上一步得到的权重分别乘以每个词对应的 向量，然后将所有结果相加即为上下文增量</li>
+</ol>
+<p>如果只进行一次上述的注意力计算（即单头），模型可能会只学会关注一种类型的关联。比如，在处理 "it" 时，可能学会了关注主语。但语言中的关系是复杂的，我们希望模型能同时关注多种关系（如指代关系、时态关系、从属关系等）。多头注意力机制应运而生。它的思想很简单：把一次做完变成分成几组，分开做，再合并。</p>
+<p>它将原始的 Q, K, V 向量在维度上切分成 h 份（h 就是“头”数），每一份都独立地进行一次单头注意力的计算。这就好比让 h 个不同的“专家”从不同的角度去审视句子，每个专家都能捕捉到一种不同的特征关系。最后，将这 h 个专家的“意见”（即输出向量）拼接起来，再通过一个线性变换进行整合，就得到了最终的输出。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260328223450.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260328223450.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>前馈神经网络FFN</strong><br>
+在 Transformer 的 Encoder 和 Decoder 层中，多头注意力子层后会衔接逐位置前馈网络（FFN），它独立作用于序列中每个词元向量且所有位置共享同一组权重，在保留位置独立处理能力的同时减少参数量；其结构为两次线性变换夹一个 ReLU 激活（公式为FFN(x)=max(0,xW1​+b1​)W2​+b2​），通常先将输入维度dmodel​扩展至更高维度dff​（如dff​=4×dmodel​），再映射回dmodel​维度，这种瓶颈结构能从注意力层聚合的信息中提取更高阶特征。</p>
+<p><strong>残差连接与归一化</strong><br>
+在 Transformer 的每个编码器和解码器层中，多头注意力、前馈网络等所有子模块都被<strong>Add &amp; Norm</strong>操作包裹，以保障模型稳定训练；该操作由残差连接（Add）和层归一化（Norm）两部分组成：残差连接将子模块输入 x 直接加到其输出 Sublayer(x) 上（公式为 Output=x+Sublayer(x)），通过让梯度绕开子模块传播解决了深度网络的梯度消失问题；层归一化则对单个样本的所有特征做均值为 0、方差为 1 的归一化，缓解了内部协变量偏移问题，使每层输入分布保持稳定，进而加速模型收敛并提升训练稳定性。</p>
+<p><strong>decoder-only架构</strong><br>
+Transformer 遵循 “先理解，再生成” 的设计哲学，而 OpenAI 在开发 GPT 时提出简化思想：语言核心任务是预测下一个词，因此抛弃编码器、仅保留解码器部分，形成 Decoder-Only 架构。该架构采用自回归工作模式：以起始文本为输入，逐词预测并将生成内容追加到输入后，不断重复直至满足停止条件；为避免模型 “偷看” 未来信息，它依赖掩码自注意力机制，在注意力分数计算后对当前位置之后的词施加掩码（替换为负无穷），经 Softmax 后这些位置概率为 0，确保模型仅能依赖已见过的历史信息，保证预测公平性与逻辑连贯性。</p>
+<h2>Transformer架构的推理流程</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260328230320.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260328230320.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h2>KV Cache</h2>
+<p>在大模型自回归生成过程中，由于历史 Token 的 <strong>K、V 向量</strong>在计算中保持固定，推理引擎引入了 <strong>KV Cache 机制</strong>以消除重复计算的浪费。<br>
+该机制在生成新 Token 时，不再重新输入完整的历史序列，而是仅计算最新 Token 的 <strong>Q、K、V 向量</strong>，并将其与缓存中的历史 <strong>K、V 向量</strong>直接进行 Attention 计算，随后将新生成的向量追加至缓存。这一优化将冗余的矩阵运算转化为增量计算，大幅提升了推理速度并降低了计算开销。</p>
+<p>我们以单头注意力，层数为1的LLM举例。输入prompt为“今天很”三字，经分词器，embedding和位置编码后，我们得到 <strong>I</strong> 矩阵，shape为(3,hiddim)<br>
+自回归第一次循环：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260328232018.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260328232018.png" alt="image.png" style="max-width: 100%;"></a><br>
+后续经过系列处理后，生成新Token "高" ，在没有KVCache情况下，我们需要把这个Token 经过embedding和位置编码后的向量拼接到原 <strong>I</strong> 序列矩阵，得到 <strong>I1</strong>（4，hiddim）矩阵。开始重复自回归生成循环：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260328232117.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260328232117.png" alt="image.png" style="max-width: 100%;"></a><br>
+可以看出Q，K，V生成，历史序列对应的向量都是没有变化的，每次重复计算都是无用消耗。我们将K，V值保存下来，计算新token的时候直接使用。只需计算该新token的Q，K，V 投影，并将KV添加在历史KV矩阵之后，后续使用该Token的Q向量进行计算即可。直接把attention计算的时间复杂度从O(n²) -&gt;O(n)。</p>
+<p>为什么不缓存Q值呢？- 因为不需要：attention计算完成后选取最后一行向量进行下一步计算，在有KVCache优化的系统中，仅计算新token的Q矩阵即可获得同样结果。</p>
+<h2>prefill和decode</h2>
+<p>推理引擎将LLM推理分成两个本质不同的阶段：<strong>Prefill</strong> 和 <strong>Decode</strong><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260328232440.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260328232440.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>Prefill（预填充阶段）：并行处理输入上下文</strong> 在此阶段，模型接收用户输入的全部 Token 序列（Prompt），并一次性计算这些 Token 的 <strong>Q、K、V 向量</strong>。由于输入序列是已知的，计算过程可以通过<strong>高度并行的矩阵乘法（GEMM）</strong> 在 GPU 上完成。其核心任务是为后续生成计算出所有历史 Token 的 <strong>KV Cache</strong> 并存入显存。该阶段的特征是<strong>计算密集型（Compute-bound）</strong>，性能主要受限于硬件的峰值浮点运算能力（TFLOPS）。</p>
+<p><strong>Decode（解码阶段）：逐个增量生成新 Token</strong> 预填充完成后进入解码循环。模型每次仅接收上一个生成的 Token 作为输入，计算其对应的 <strong>Q、K、V 向量</strong>，并与显存中缓存的 <strong>KV Cache</strong> 进行 <strong>Attention</strong> 计算，从而预测下一个 Token。由于每生成一个 Token 都需要将庞大的模型权重和缓存数据从显存搬运到计算核心，而实际的计算量（GEMV）相对较小，导致计算单元经常处于等待数据状态。该阶段的特征是<strong>访存密集型（Memory-bandwidth-bound）</strong>，性能主要受限于硬件的内存带宽。</p>
+<h2>MoE</h2>
+<p>在 Transformer 结构中，MoE 将标准的前馈神经网络（FFN）层替换为一个门控网络（Gating Network / Router）和多个独立的子 FFN（即 Experts）。其分发机制作用于词元（Token）级别：针对输入序列中的每一个 Token，门控网络通过内部的权重矩阵与 Softmax 操作计算出各专家的概率得分。系统随后执行 Top-K 截断策略（通常 K=1 或 2），仅激活得分最高的前 K 个专家进行前向传播计算，并将其输出按概率加权求和作为该层的最终输出。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260331214217.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260331214217.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h1>关键特性</h1>
+<h2>continuous batching</h2>
+<p>首先，我们将传统的批处理方法称静态批处理，因为批次大小在推理完成之前保持不变。以下是LLM推理中静态批处理的示例，其中黄色为prefill阶段，蓝色为decode阶段<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260329105304.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260329105304.png" alt="image.png" style="max-width: 100%;"></a><br>
+在上述情况下，由于批次中不同序列的生成长度与批次中最长的生成长度不同，GPU的利用率会降低。在上图右侧，序列1、3和4的序列结束标记后的白色方块就说明了这一点，这就是严重的算力气泡。</p>
+<p>发表于OSDI '22会议Orca是首个解决此问题的论文。Orca并非等待批次中的所有序列都生成完毕，而是实现了迭代级调度，每次迭代都会确定批次大小。这样一来，一旦批次中的一个序列生成完毕，就可以立即插入一个新的序列来替换它，从而比静态批处理方式获得更高的GPU利用率，如下图所示。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260329105812.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260329105812.png" alt="image.png" style="max-width: 100%;"></a><br>
+然而这带来了两个挑战：</p>
+<ol>
+<li>prefill和decode的冲突：gpu必须在同一个计算周期内，同时处理新请求的prefill和老请求的decode。现代推理引擎通过引入chunked prefill等技术，把新请求的超长文本切碎分批次融入老请求的解码过程中，防止老请求因为新请求到来而产生卡顿。</li>
+<li>每生成一个 Token，大模型都会产生一些中间结果（Key 和 Value 矩阵），这被称为 <strong>KV Cache</strong>。 在连续批处理中，请求的长短不一，不断地进进出出。如果用传统的连续内存分配方式，显存很快就会充满了无法使用的内存碎片。最终导致GPU明明还有显存，却因为找不到连续的大块空间而崩溃（OOM）。为了配合 Continuous Batching，加州大学伯克利分校的团队发明了著名的PagedAttention技术，它借用了操作系统的“虚拟内存分页”思想，把 KV Cache 切成一个个固定大小的小块（Block）。无论请求怎么动态进出，内存都能灵活分配，将内存浪费率从60%降到了不到4%。</li>
+</ol>
+<h2>paged attention</h2>
+<p><strong>kv cache内存问题</strong><br>
+假设我们使用一个13B 的模型，每个 Token 的 KV Cache 占用大约 800 KB。如果我们在处理一个 8K 上下文的请求，仅仅是一个用户的 KV Cache 就要占用约 6.4 GB 的显存！这意味着如果不做极致的显存管理，GPU 根本装不下几个用户的请求，Batch Size 极小，吞吐量惨不忍睹。</p>
+<p><strong>传统的静态内存分配</strong><br>
+在 PagedAttention 诞生之前，主流框架（如早期的 FasterTransformer）在管理 KV Cache 显存时，采用的是“静态连续分配”策略：当一个请求到来时，系统会预估它可能达到的最大长度（例如模型支持的最大长度是 2048 个 Token），然后一次性在显存中划出一块连续的巨大空间给这个请求。这种方式导致了三个问题：</p>
+<ol>
+<li><strong>内部碎片</strong>：实际生成长度往往远小于 max_seq_len，大部分显存浪费</li>
+<li><strong>外部碎片</strong>：不同请求长度不同，释放后难以复用</li>
+<li><strong>无法动态扩展</strong>：无法利用显存中零散的空闲块</li>
+</ol>
+<p><strong>OS的分页管理</strong><br>
+操作系统在处理物理内存时，采用了**分页（Paging）**策略：</p>
+<ul>
+<li>虚拟地址连续，但映射到物理内存的任意位置</li>
+<li>按固定大小（通常 4KB）分页，按需分配</li>
+<li>通过页表维护映射关系，灵活高效<br>
+vLLM 的 PagedAttention 借鉴了这一思想，将 KV Cache 也分块管理。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260329115044.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260329115044.png" alt="image.png" style="max-width: 100%;"></a></li>
+</ul>
+<p><strong>paged attention的核心设计</strong><br>
+PagedAttention 将 KV Cache 按固定大小（若干个 token 为一块）分块存储，通过一个块表（Block Table）维护逻辑序列到物理块的映射。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260329115201.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260329115201.png" alt="image.png" style="max-width: 100%;"></a><br>
+如上图所示，假设我们在进行对话生成，Block Size 为 4：</p>
+<ul>
+<li>
+<strong>时刻 1：</strong> 用户输入了一句长达 7 个 Token 的 Prompt。 系统立刻分配 2 个物理块（假设分配了物理块 1 和 7）。 块表记录：<code class="notranslate">[逻辑块 0 -&gt; 物理块 7], [逻辑块 1 -&gt; 物理块 1]</code>。 此时，逻辑块 1 只装了 3 个 Token，还有 1 个空位。</li>
+<li>
+<strong>时刻 2：</strong> 模型生成了第 8 个 Token。 系统直接把这个 Token 的 KV 数据塞进物理块 1 的空位里。此时物理块 1 满了。</li>
+<li>
+<strong>时刻 3：</strong> 模型生成了第 9 个 Token。 系统发现当前的块都满了，于是按需（On-demand）向 GPU 申请一个新的物理块（假设分配了 3）。 块表更新：<code class="notranslate">[逻辑块 2 -&gt; 物理块 3]</code>。<br>
+在标准的 PyTorch 或传统算子（如原版 FlashAttention）中，进行矩阵乘法的前提是：$K$ 和 $V$ 在显存中必须是物理连续的！ 如果是不连续的碎片，CUDA 核心根本没法做高效的张量计算。为了让这种“碎片化”的物理块能够参与运算，伯克利团队手工重写了 GPU 底层的 CUDA Kernel（核心代码）。<br>
+定制的 PagedAttention Kernel 在 GPU 线程网格上执行时，不会傻傻地读取一块连续内存，而是一边在块表（Block Table）中查字典寻址（Pointer Chasing），一边跨越不连续的物理显存地址，将分散的 $K$ 和 $V$ 抓取出来拼接到缓存池中，再进行点积运算。</li>
+</ul>
+<h2>copy on write</h2>
+<p><strong>写时复制</strong>（<strong>Copy-on-write</strong>，简称<strong>COW</strong>）是一种计算机程序设计领域的优化策略。其核心思想是，如果有多个调用者（callers）同时请求相同资源（如内存或磁盘上的数据存储），他们会共同获取相同的指针指向相同的资源，直到某个调用者试图修改资源的内容时，系统才会真正复制一份专用副本（private copy）给该调用者，而其他调用者所见到的最初的资源仍然保持不变。这过程对其他的调用者都是透明的。此作法主要的优点是如果调用者没有修改该资源，就不会有副本（private copy）被创建，因此多个调用者只是读取操作时可以共享同一份资源。</p>
+<p>在大模型推理中，以一个例子展示copy on write的机制：<br>
+假设我们要续写一句话：<code class="notranslate">"我最喜欢编程语言"</code>。用两个用户同时发出这个提问（分支 A 和分支 B）。设定物理块大小为 4 个 Token。<br>
+<strong>阶段 1：Prompt 预填充（只读共享）</strong></p>
+<ol>
+<li>输入包含8个 Token。系统为其分配了 2 个物理块：<code class="notranslate">Block #1</code> 和 <code class="notranslate">Block #2</code>。</li>
+<li>这两个块刚好被填满。</li>
+<li>系统创建分支 A 和分支 B。它们的“块表”<strong>同时指向</strong> <code class="notranslate">Block #1</code> 和 <code class="notranslate">Block #2</code>。</li>
+<li>此时，<code class="notranslate">Block #1</code> 和 <code class="notranslate">Block #2</code> 的 <strong>引用计数（Ref Count） = 2</strong>。 (生效：2 个分支共享了同一份显存，显存占用节省 50%)</li>
+</ol>
+<p><strong>阶段 2：安全分化（追加新块，无需复制）</strong></p>
+<ol>
+<li>模型开始生成。分支 A 生成了 <code class="notranslate">"Python"</code>，分支 B 生成了 <code class="notranslate">"Java"</code>。</li>
+<li>因为 <code class="notranslate">Block #2</code> 已经<strong>满了</strong>，它们都需要新的空间。</li>
+<li>此时<strong>不需要触发 CoW</strong>。系统直接向 GPU 申请两个<strong>全新</strong>的物理块：分支 A 拿到 <code class="notranslate">Block #3</code>，分支 B 拿到 <code class="notranslate">Block #4</code>。</li>
+<li>分支 A 将 <code class="notranslate">"Python"</code> 写入 <code class="notranslate">Block #3</code>；分支 B 将 <code class="notranslate">"Java"</code> 写入 <code class="notranslate">Block #4</code>。</li>
+<li>两个分支的块表发生分化：
+<ul>
+<li>分支 A: <code class="notranslate">[#1, #2, #3]</code></li>
+<li>分支 B: <code class="notranslate">[#1, #2, #4]</code> (效果持续：它们的前文依然完美共享 <code class="notranslate">#1</code> 和 <code class="notranslate">#2</code>！)</li>
+</ul>
+</li>
+</ol>
+<p><strong>阶段 3：终极考验 —— 触发真正的 Copy-on-Write</strong> 现在，我们稍微改变一下初始条件，来看 CoW 的触发效果（效果图见下面）。 假设初始输入只有 7 个 Token（<code class="notranslate">Block #2</code> 中有 3 个 Token，<strong>还剩 1 个空位</strong>）。</p>
+<ol>
+<li>此时，分支 A1 和 A2的块表同时指向 <code class="notranslate">#1</code> 和 <code class="notranslate">#7</code>。<code class="notranslate">Block #1</code> 的 <strong>引用计数 = 2</strong>。</li>
+<li>模型生成新词。分支 A1 生成了 <code class="notranslate">"fathers"</code>，分支 A2 生成了 <code class="notranslate">"mothers"</code>。</li>
+<li>分支 A1 想要把 <code class="notranslate">"fathers"</code> 写进 <code class="notranslate">Block #1</code> 的那个空位里。</li>
+<li>系统检查发现 <code class="notranslate">Block #1</code> 的引用计数大于 1（说明有人正在和它共享这个块）。如果分支 A1 直接把 <code class="notranslate">"fathers"</code> 写进去，就会污染分支 A2 的上下文！</li>
+<li><strong>触发 CoW：</strong> 系统立刻申请一个全新的物理块 <code class="notranslate">Block #3</code>。</li>
+<li>系统将 <code class="notranslate">Block #1</code> 中已有的 3 个 Token <strong>复制（Copy）</strong> 到 `Block #3 中。</li>
+<li>分支 A1 将新词 <code class="notranslate">"fathers"</code> 写入 <code class="notranslate">Block #3</code> 的空位中。</li>
+<li>分支 A1 的块表更新，指向 <code class="notranslate">Block #3</code>，并取消对 <code class="notranslate">Block #1</code> 的引用。</li>
+<li><code class="notranslate">Block #1</code> 的引用计数减 1（变成 1）。分支 A2 发现引用计数变成 1 了，它就可以把 <code class="notranslate">"mothers"</code> 直接写进 <code class="notranslate">Block #1</code> 的空位里了。</li>
+</ol>
+<p><strong>总结：</strong> 在大模型中，写时复制（CoW）<strong>仅仅发生在</strong>多个序列共享一个“未填满的物理块”，且它们即将写入不同 Token 的那一瞬间，对于已经填满的历史物理块，它们将被永久、安全地共享下去。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260329165634.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260329165634.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h2>radixattention</h2>
+<p>在 RadixAttention 诞生之前，业界普遍面临一个巨大的难题：<strong>如何高效处理跨请求的公共前缀？</strong>，例如：<br>
+你和 ChatGPT 聊天。 第一轮：<code class="notranslate">[System Prompt] + "你好"</code> 第二轮：<code class="notranslate">[System Prompt] + "你好" + [AI回复] + "请写个代码"</code> 第三轮：<code class="notranslate">[System Prompt] + "你好" + [AI回复] + "请写个代码" + [AI回复2] + "报错了"</code><br>
+<strong>痛点：</strong> 每一轮对话发送给服务器时，其实包含了大量的“历史重复文本”。传统框架在处理第二轮时，往往会把第一轮已经算好的 KV Cache 丢掉，重新把极长的历史记录算一遍。首字延迟（TTFT）越来越慢。</p>
+<p>为了解决“最长前缀匹配”问题，采用前缀树（trie）这个数据结构去组织kv cache<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260330190204.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260330190204.png" alt="image.png" style="max-width: 100%;"></a><br>
+上图演示了基数树响应各种请求的动态演变。这些请求包括两个聊天会话、一批小样本学习查询和自我一致性抽样。每个树边都带有一个标签，表示子字符串或标记序列。节点采用颜色编码以反映不同的状态：绿色表示新添加的节点，蓝色表示在该时间点访问的缓存节点，红色表示已被驱逐的节点。</p>
+<p>在步骤(1)中，基数树最初是空的。在步骤(2)中，服务器处理传入的用户消息“Hello”并以LLM输出“Hi”进行响应。系统提示“您是一个有用的助手”，用户留言“您好！”，LLM回复“您好！” 作为链接到新节点的单边合并到树中。在步骤(3)中，新的提示到达，服务器在基数树中找到该提示的前缀（即会话的第一轮）并重用其KV缓存。新的回合作为新节点附加到树中。在步骤(4)中，新的聊天会话开始。(3) 中的节点“b”被分成两个节点，以允许两个聊天会话共享系统提示。在步骤(5)中，第二聊天会话继续。但由于内存限制，(4) 中的节点“c”必须被驱逐。新的回合被附加在(4)中的节点“d”之后。在步骤(6)中，服务器接收小样本学习查询，对其进行处理，并将其插入到树中。根节点被拆分，因为新查询不与现有节点共享任何前缀。在步骤（7）中，服务器接收一批额外的小样本学习查询。这些查询共享同一组少数样本示例，因此研发团队从 (6) 中拆分节点“e”以实现共享。在步骤(8)中，服务器从第一聊天会话接收新消息。它从第二个聊天会话中驱逐所有节点（节点“g”和“h”），因为它们最近最少使用。在步骤(9)中，服务器接收到对来自(8)的节点“j”中的问题采样更多答案的请求，可能是为了自我一致性提示</p>
+<p>RadixAttention 巧妙地结合了 <strong>LRU（Least Recently Used，最近最少使用）算法</strong> 和树状结构：</p>
+<ol>
+<li>
+<strong>只有“叶子节点”才会被淘汰：</strong> 也就是树的最末端。因为它们是某个具体回答的结尾，被复用的概率最低。</li>
+<li>
+<strong>引用计数（Ref Count）：</strong> 如果一个节点正在被任何一个运行中的请求使用（比如公共前缀），它的引用计数 $&amp;gt;0$，绝对不能被删除。</li>
+<li>
+<strong>精准打击：</strong> 当显存不足时，系统遍历所有引用计数为 $0$ 的叶子节点，找出其中**“最后一次被访问时间最久远”**的那个节点，将其所在的物理块释放。</li>
+<li>
+<strong>树的收缩：</strong> 如果一个父节点的所有子节点都被删除了，这个父节点本身也会变成叶子节点，在未来显存吃紧时被纳入清理名单</li>
+</ol>
+<p>未来，预计可以开发先进的多层存储策略和驱逐策略。</p>
+<h2>PD分离</h2>
+<p>大模型推理要经历以下两个阶段：<strong>Prefill（预填充）</strong> 和 <strong>Decode（解码）</strong>，<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260330191629.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260330191629.png" alt="image.png" style="max-width: 100%;"></a><br>
+在传统的部署架构（乃至目前的开源 vLLM 默认配置）中，<strong>Prefill 和 Decode 是混居在同一张 GPU 上的</strong>（Co-location）。这会导致两个极其严重的问题：</p>
+<ol>
+<li>卡顿问题：假设你的 GPU 正在使用 Continuous Batching 同时为 10 个用户生成文本（Decode）。大家看着屏幕上的字一个一个往外蹦，非常流畅。 突然，第 11 个用户发来了一篇 20 万字的长篇小说要求总结（极其庞大的 Prefill 任务）。 由于 GPU 一次只能执行一个批次的计算，这 20 万字的 Prefill 瞬间霸占了所有的计算核心。 <strong>结果：</strong> 原本正在流畅看回答的 10 个用户，突然发现屏幕上的字<strong>卡住了</strong>，等了整整 5 秒钟才蹦出下一个字！</li>
+<li>资源浪费：当 GPU 运行 Prefill 时，昂贵的 HBM 显存带宽在睡大觉。当 GPU 运行 Decode 时，昂贵的 CUDA 算力核心在睡大觉。</li>
+</ol>
+<p>为了解决上述问题，<code class="notranslate">PD</code>分离架构将<code class="notranslate">Prefill</code>和<code class="notranslate">Decode</code>部署在不同规格的集群中：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260330192011.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260330192011.png" alt="image.png" style="max-width: 100%;"></a><br>
+通过这种分离部署方案，配合智能的任务调度策略，可以在满足<code class="notranslate">TTFT</code>和<code class="notranslate">TBT</code>指标的前提下，结合<code class="notranslate">Continuous Batching</code>机制最大化<code class="notranslate">Decode</code>阶段的并发处理能力，从而在提供更好用户体验的同时，显著提升算力利用率。</p>
+<p>在<code class="notranslate">PD</code>分离架构中：</p>
+<ul>
+<li><strong>Prefill集群</strong>：部署在高算力<code class="notranslate">GPU</code>（如<code class="notranslate">A100</code>、<code class="notranslate">H100</code>）上，充分利用其强大的并行计算能力，专注于快速处理输入序列</li>
+<li><strong>Decode集群</strong>：部署在大显存、高内存带宽的<code class="notranslate">GPU</code>（如大内存的<code class="notranslate">L40</code>等）上，专注于高效的<code class="notranslate">token</code>生成和<code class="notranslate">KV Cache</code>管理</li>
+<li><strong>网络互连</strong>：两个集群通过高速网络（如<code class="notranslate">NVLink</code>或<code class="notranslate">RDMA</code>）传输中间状态，主要是<code class="notranslate">KV Cache</code>数据</li>
+</ul>
+<p><code class="notranslate">PD</code>分离系统需要解决几个核心技术问题：</p>
+<ol>
+<li><strong>高效数据传输</strong>：如何在<code class="notranslate">Prefill</code>和<code class="notranslate">Decode</code>节点间高效传输大量的<code class="notranslate">KV Cache</code>数据</li>
+<li><strong>智能调度策略</strong>：如何设计调度算法确保请求在不同阶段间的平滑流转</li>
+<li><strong>并行策略优化</strong>：如何为每个阶段选择最优的张量并行、流水线并行等策略</li>
+<li><strong>状态一致性</strong>：如何保证分布式环境下<code class="notranslate">KV Cache</code>的一致性和正确性</li>
+</ol>
+<h2>AFD</h2>
+<p>attention ffn disaggregation<br>
+Attention 是“内存受限型”（Memory-bound），因为需要频繁读取大量的 KV Cache；而 FFN 是“计算受限型”（Compute-bound），涉及大规模的矩阵乘法。AFD则是将Attention与FFN子模块分别部署到不同设备上，通过调整不同的A与F配比可实现较高推理性能。</p>
+<h2>APC</h2>
+<p>auto prefix cache<br>
+自动前缀缓存，复用历史的KV cache信息，降低prefill阶段的计算量从而提升首token性能。radixattention是sglang中对这一机制的一种具体实现</p>
+<h2>speculative decoding</h2>
+<p>LLM推理主要是受内存带宽限制的——LLM每个解码步所用的推理时间大部分并不是用于模型的前向计算，而是消耗在了将LLM巨量的参数从GPU显存迁移到高速缓存（cache）上（以进行运算操作），这个问题随着LLM规模的增大愈发严重。并且，如下左图所示，目前LLM常用的自回归解码在每个解码步只能生成一个token。这导致GPU计算资源利用率低下（每个token的生成都需要重复读写LLM的巨量参数），并且序列的生成时间随着序列长度的增加而线性增加。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260330215815.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260330215815.png" alt="image.png" style="max-width: 100%;"></a><br>
+推测解码（Speculative Decoding），作为2023年新兴的一项LLM推理加速技术，正是提出了一种类似的解决方案：通过增加每个解码步LLM计算的并行性，减少总的解码步数（即减少了LLM参数的反复读写），从而实现推理加速。</p>
+<p>如上右图所示，在每个解码步，推测解码首先使用小模型高效地“推测”target LLM（待加速的LLM）未来多个解码步可能生成的token，然后再用target LLM同时验证这些token。通过验证的token作为当前解码步的解码结果。如果“推测”足够准确，推测解码就可以在单个解码步并行生成多个token，从而实现LLM推理加速。并且，使用target LLM的验证过程可以在理论上保证解码结果和target LLM自回归解码结果的完全一致</p>
+<p>这个过程没有<strong>减少计算量</strong>，而是靠“并行验证+跳步”减少了大模型调用次数，用小模型换推理速度，最终的效果取决于小模型推测token数的接受长度。</p>
+<p>为什么验证多个token的计算时间几乎不增加？因为相较于生成一个token，LLM参数的读取次数不变，也是一次，唯一变化的是做矩阵乘法的单个维度增长了一些，对于GPU来说开销很小</p>
+<h2>chunked prefill</h2>
+<p>分块预填充用来解决continuous batching中prefill和decode的冲突（gpu必须在同一个计算周期内同时处理新请求的prefill和老请求的decode），chunked prefill通过把新请求的超长文本切碎分批次融入老请求的decode过程中，防止老请求因为新请求到来而产生卡顿。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260330222009.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260330222009.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h2>W8A16</h2>
+<p>一种量化的格式，W8表示权重（Weight）使用 8 位整数（INT8）进行量化，A16：表示激活值（Activation）保留较高的精度，通常使用 16 位浮点数（FP16）或者混合精度。</p>
+<p><strong>权重（Weights）</strong> 是模型在训练阶段学习到的参数。它们被存储在磁盘或显存中，在推理过程中是<strong>固定不变</strong>的（除非进行微调）。</p>
+<ul>
+<li>
+<strong>物理本质：</strong> 权重决定了神经元之间连接的“强度”。在 Transformer 架构中，这些权重以巨大的矩阵（Matrix）形式存在，比如 $Q, K, V$ 矩阵和全连接层（MLP）的矩阵。</li>
+<li>
+<strong>W8 的含义：</strong> 在 W8A16 中，“W8”表示将原本使用 16 位浮点数（FP16/BF16，占用 2 字节）存储的权重，压缩为 <strong>8 位整数（INT8，占用 1 字节）</strong>。</li>
+</ul>
+<p><strong>激活（Activations）</strong> 指的是模型在推理过程中，每一层神经网络输出的<strong>中间结果</strong>（张量）。</p>
+<ul>
+<li><strong>物理本质：</strong> 当你输入一个 Token 时，它会与第一层权重相乘，产生一个输出，这个输出就是“激活值”。这个值会作为下一层的输入继续传递。</li>
+<li><strong>动态特性：</strong> 激活值是<strong>动态</strong>的。不同的输入（比如“今天天气不错”和“微积分怎么做”），产生的激活值完全不同。</li>
+<li><strong>A16 的含义：</strong> 在 W8A16 中，“A16”表示激活值<strong>不做量化</strong>，依然保持 <strong>16 位浮点数（FP16/BF16）</strong> 的高精度。</li>
+<li><strong>为什么 A（激活）通常不量化（保持 16 位）？</strong>
+<ul>
+<li><strong>精度敏感：</strong> 激活值中经常会出现“离群点”（Outliers），即某些维度的数值极大。如果强行把激活值压成 INT8，这些离群点会导致巨大的精度损失，让模型变笨（胡言乱语）。</li>
+<li><strong>计算收益对比：</strong> 权重是大头（几十 GB），而单次推理的激活值相对较小。保持激活值为 16 位，可以确保模型在“智商”几乎不降的前提下，享受权重压缩带来的速度红利。</li>
+</ul>
+</li>
+</ul>
+<h2>Multi-Lora</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260331112139.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260331112139.png" alt="image.png" style="max-width: 100%;"></a><br>
+在云服务或多任务场景下，不同用户可能需要不同的 LoRA 适配器（如法律、医疗、绘画等）。若为每个 LoRA 独立部署模型，显存将迅速耗尽（VRAM 爆炸）；若频繁从硬盘加载 LoRA，则会造成巨大的推理延迟。Multi-LoRA 的目标是：<strong>在显存中仅保留一份基础模型（Base Model），同时高效并发地处理成百上千个带有不同 LoRA 适配器的请求。</strong></p>
+<p>由于标准的 GPU 矩阵乘法（GEMM）要求 Batch 内的所有数据共享同一权重，无法直接处理“异构权重”。<strong>Punica</strong> 等系统引入了 <strong>SgMV（分段收集矩阵向量乘）</strong> 算子：</p>
+<ul>
+<li>
+<strong>数据分段：</strong> 将 Batch 中的 Token 按所属的 LoRA ID 进行逻辑分组。</li>
+<li>
+<strong>指针调度：</strong> 并不移动物理内存，而是利用“指针数组”引导 GPU 计算核心去显存的不同位置提取对应的 LoRA $A$ 和 $B$ 矩阵。</li>
+<li>
+<strong>并行合并：</strong> 在一次前向传播中，先计算共享的基座模型结果，再叠加个性化的 LoRA 偏移量，实现了“批处理”与“个性化”的并存。</li>
+</ul>
+<p>由于显存容量有限，无法同时存放所有 LoRA 适配器。</p>
+<ul>
+<li><strong>分级存储：</strong> 将海量 LoRA 存放在 CPU 内存（Host）中，仅在 GPU 显存中开辟一块 <strong>LoRA Cache</strong>。</li>
+<li><strong>LRU 换页：</strong> 采用类似操作系统的虚拟内存管理，将最近最少使用的 LoRA 换出到 CPU，并预先将下一个 Batch 待用的 LoRA 异步加载进显存，从而隐藏数据传输的时间开销。</li>
+</ul>
+<h2>guided decoder</h2>
+<p>引导解码器<br>
+大语言模型基于自回归机制，其输出本质上是概率分布的采样结果。在与结构化系统（如 API 调用、数据提取）交互时，仅依赖提示词工程（Prompt Engineering）无法在数学层面保证输出格式（如严格的 JSON Schema）的绝对正确性，易产生冗余字符或结构错误，导致下游解析异常。受控解码旨在通过算法干预，实现结构化文本的确定性生成。</p>
+<p>受控解码通过在模型生成阶段（解码前）介入来实现强制约束。系统预先将用户定义的正则表达式或 JSON Schema 编译为有限状态机（FSM）或下推自动机（PDA/CFG）。在模型预测下一个 Token 时，系统依据当前状态机所处的节点，验证模型词表（Vocabulary）中所有 Token 的合法性。对于非法 Token，将其在 Logits 层的概率值直接修改为负无穷（$-\infty$），在经过 Softmax 激活后，这些 Token 的被采样概率严格降为零，从而强制模型在预设的语法空间内进行生成。</p>
+<p>该机制会引入两类显著的计算开销：规则编译导致的首字延迟（TTFT）增加，以及逐字解码时因遍历词表匹配状态机导致的吞吐量（TPOT）下降。现代推理框架（如 vLLM、Outlines）通过引入<strong>状态机编译缓存（FSM Caching）</strong> 和<strong>预计算 Token 掩码位图（Pre-computed Token Mask Bitmaps）</strong>，将运行时的字符串正则匹配转化为高效的张量按位运算（Bitwise Operations），从而将掩码操作的额外延迟压缩至微秒级别。</p>
+<h2>tool call</h2>
+<p>在大模型从“纯文本生成器”向“智能体（Agent）”进化的过程中，Tool Call 是最核心的基础设施。它赋予了模型突破时间限制（获取实时信息）、突破空间限制（操作外部物理或软件系统）以及弥补数学缺陷（调用计算器）的能力。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260331114733.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260331114733.png" alt="image.png" style="max-width: 100%;"></a><br>
+从上图中可以看出，Tool Call 并不是一次简单的单向请求，而是一个由 <strong>Developer（开发者/客户端环境）</strong> 和 <strong>Model（大模型推理端）</strong> 共同交替完成的<strong>多轮异步交互过程</strong>。</p>
+<p>此外，它与guided  decoding是需要深度绑定的：例如，在 Step 2 中，模型必须输出极其严谨的 JSON 格式（如 <code class="notranslate">{"name": "get_weather", "arguments": "{\"location\": \"paris\"}"}</code>）。即使模型漏掉了一个双引号，也会导致 Developer 在解析时抛出 JSONDecodeError 异常，整个链路直接崩溃。因此，推理引擎会在检测到模型意图调用工具时，瞬间在底层激活<strong>受控解码状态机（FSM）</strong>。引擎会根据 Step 1 中传入的 JSON Schema，在每一个 Token 采样的 Logits 层面上进行硬性掩码（Masking），强制模型在预测参数结构时必须遵循规范，从物理层面抹除了格式出错的可能性。</p>
+<h2>DP/SP/TP/PP</h2>
+<p><strong>1. DP (数据并行, Data Parallelism) —— 提升吞吐的基础方案</strong><br>
+DP 的核心逻辑是“复制模型，切分数据”。在集群的多个 GPU 或节点上，每张卡都装载一个完整的模型副本。当海量请求涌入时，系统将全局的 Batch 数据均分给各张卡独立处理，互不干扰。</p>
+<ul>
+<li>
+<strong>优势：</strong> 线性提升系统的并发处理能力和总吞吐量，且推理时无须复杂的梯度同步。</li>
+<li>
+<strong>局限：</strong> 严重受限于“单卡显存墙”。一旦模型体积超过单张物理显卡的容量（如 70B 模型），DP 策略即告失效。<br>
+<strong>2. PP (流水线并行, Pipeline Parallelism) —— 突破单卡显存瓶颈</strong><br>
+当单卡无法装下整个模型时，PP 采用“层级切分模型，流水线作业”的策略。将 Transformer 模型的不同层（Layers）拆分并顺序部署在多张 GPU 上。数据请求像流水线一样依次穿过各个 GPU 节点完成计算。</li>
+<li>
+<strong>优势：</strong> 解决了超大模型的基础部署问题，且节点间只需传递隐藏层状态，通信开销极小，适合跨节点部署。
+<ul>
+<li>
+<strong>局限：</strong> 存在严重的“流水线气泡（Bubble）”问题，即下游节点必须等待上游计算完毕，导致算力空转。通常需结合微批处理（Micro-batching）来缓解。<br>
+<strong>3. TP (张量并行, Tensor Parallelism) —— 降低延迟的终极武器</strong><br>
+TP 是最底层的细粒度并行。它不切模型层，而是利用“切分算子矩阵，同层协同计算”的逻辑，用数学手术刀将单层内部极其庞大的权重矩阵（如 $W$）进行按行或按列的切割。多张 GPU 在同一时刻，利用相同的输入数据并发计算自己分配到的子矩阵，最后拼接结果。</li>
+</ul>
+</li>
+<li>
+<strong>优势：</strong> 极大地缩短了单步矩阵运算的时间，是降低首字延迟（TTFT）和单步生成延迟（TPOT）的核心技术。</li>
+<li>
+<strong>局限：</strong> 计算过程中要求极高频、极大量的数据同步（如 All-Reduce），因此深度依赖 NVLink 等高带宽总线，通常只能局限在单台物理机（Node）内部使用。<br>
+<strong>4. SP (序列并行, Sequence Parallelism) —— 长上下文时代的显存救星</strong><br>
+针对几十万甚至百万 Token 的超长上下文场景，SP 的逻辑是“切分输入序列，分摊激活显存”。它将超长的输入序列按长度等分，分配给不同的 GPU。在执行如 LayerNorm、Dropout 等不参与 TP 切分的非张量操作时，每张卡只处理自己的序列片段。</li>
+<li>
+<strong>优势：</strong> 极大降低了处理超长文本时呈平方级爆炸的激活显存（Activation Memory）峰值，补全了 TP 在非线性层操作上的显存短板，是长上下文推理不可或缺的拼图。</li>
+</ul>
+<h2>TBO/DBO</h2>
+<p>two batch overlap/dual batch overlap<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260331160254.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260331160254.png" alt="image.png" style="max-width: 100%;"></a><br>
+该机制利用 GPU 的多流（Multi-Stream）异步并发特性，将微批次 A （上图黄色的批次）的密集型数学计算任务与微批次 B （上图绿色的批次）的集合通信任务在物理时间上进行重叠，从而最大化计算核心（SM）与通信总线（NVLink/PCIe）的硬件利用率。<br>
+上图虚线表示CPU将计算/通信任务打包成指令放在GPU的某个任务队列上，实线则表示数据依赖</p>
+<h2>FlashAttention</h2>
+<p>一种加速Attention运算的算法，主要是两个版本FA1、FA2。</p>
+<p>在没有 FlashAttention 的<strong>标准实现（Standard Attention）</strong> 中，计算过程是割裂的，由多个独立的 CUDA Kernel 串行执行：</p>
+<ol>
+<li>
+<strong>Kernel 1 (Matmul):</strong> 在 SRAM 中计算 $Q K^T$，得到 $N \times N$ 的结果。<strong>因为 SRAM 太小存不下，必须把这个 $N \times N$ 矩阵完整地写回 HBM。</strong>
+</li>
+<li>
+<strong>Kernel 2 (Scale &amp; Mask):</strong> 从 HBM 把这个 $N \times N$ 矩阵读进来，除以 $\sqrt{d}$，加上 Causal Mask，然后再写回 HBM。</li>
+<li>
+<strong>Kernel 3 (Softmax):</strong> 从 HBM 把矩阵读进来，做指数归一化，得到 $P$ 矩阵（依然是 $N \times N$），再写回 HBM。</li>
+<li>
+<strong>Kernel 4 (Matmul):</strong> 从 HBM 把 $P$ 矩阵和 $V$ 矩阵（形状 $[N, d]$）读进来，在 SRAM 中计算 $P \times V$，得到最终输出 $[N, d]$，写回 HBM。</li>
+</ol>
+<p>FA1通过分块（Tiling）技术将输入矩阵划分为适合 SRAM 缓存的小块，并引入在线 Softmax（Online Softmax）递推公式。该机制在计算过程中仅在高速 SRAM 内部生成局部注意力分数，不再向显存（HBM）写回 $O(N^2)$ 复杂度的中间注意力矩阵，从而将显存占用降低至 $O(N)$。其本质是通过增加少量计算开销来大幅减少 HBM 的访存次数，解决了长文本场景下的访存受限（Memory-bound）瓶颈。</p>
+<p>FA2 进一步优化性能，采用更合理的分块策略并减少非张量运算操作数量，以缓解NVIDIA A/H架构中非张量计算核心性能偏低的问题。</p>
+<h1>指标总结</h1>
+<p><strong>TTFT</strong>：Time To First Token 首token生成时间<br>
+<strong>E2EL</strong>：End-to-End Latency 从输入prompt到返回结果的总时间<br>
+<strong>ITL</strong>：Inter Token Latency 解码阶段每个token的平均生成时间<br>
+<strong>TPOT</strong>： Time Per Output Token 全阶段每个token的平均生成时间<br>
+<strong>TBT</strong>：Time Between Tokens 某个token的生成时间<br>
+<strong>QPS</strong>：Queries Per Second 每秒处理的请求数量<br>
+<strong>TPS</strong>：Tokens Per Second 每秒输出的token数量<br>
+<strong>QPM</strong>：Queries Per Minute 每分钟处理的请求数量<br>
+<strong>TP90</strong>：Top Percentile 至少有90%或者99%的请求满足该条件，类似的指标还有TP50、TP99<br>
+<strong>RPS</strong>：Requests Per Second 每秒请求数<br>
+<strong>SLO</strong>：Service Level Objective 服务质量目标，是服务提供商对推理任务执行效率与可靠性设定的量化门槛</p>
+<h1>参考资料</h1>
+<p>1.<a href="https://zhuanlan.zhihu.com/p/1983137653336585901%EF%BC%88**%E6%A0%B8%E5%BF%83%E5%8F%82%E8%80%83**%EF%BC%89" rel="nofollow">https://zhuanlan.zhihu.com/p/1983137653336585901（**核心参考**）</a><br>
+2.<a href="https://www.bilibili.com/video/BV13z421U7cs/?spm_id_from=333.337.search-card.all.click&amp;vd_source=5a9892c5685e5b7e1d5cbd33baa8869e" rel="nofollow">https://www.bilibili.com/video/BV13z421U7cs/?spm_id_from=333.337.search-card.all.click&amp;vd_source=5a9892c5685e5b7e1d5cbd33baa8869e</a><br>
+3.<a href="https://www.bilibili.com/video/BV1TZ421j7Ke?spm_id_from=333.788.recommend_more_video.-1&amp;trackid=web_related_0.router-related-2479604-d9wfs.1774692777697.251&amp;vd_source=5a9892c5685e5b7e1d5cbd33baa8869e" rel="nofollow">https://www.bilibili.com/video/BV1TZ421j7Ke?spm_id_from=333.788.recommend_more_video.-1&amp;trackid=web_related_0.router-related-2479604-d9wfs.1774692777697.251&amp;vd_source=5a9892c5685e5b7e1d5cbd33baa8869e</a><br>
+4.<a href="https://datawhalechina.github.io/hello-agents/" rel="nofollow">https://datawhalechina.github.io/hello-agents/</a><br>
+5.<a href="https://www.zhihu.com/search?type=content&amp;q=kvcache" rel="nofollow">https://www.zhihu.com/search?type=content&amp;q=kvcache</a><br>
+6.<a href="https://infrasys-ai.github.io/aiinfra-docs/05Infer03Dispatch/01ContinousBatching.html" rel="nofollow">https://infrasys-ai.github.io/aiinfra-docs/05Infer03Dispatch/01ContinousBatching.html</a><br>
+7.<a href="https://infrasys-ai.github.io/aiinfra-docs/05Infer03Dispatch/01ContinuousBatching.html#batching" rel="nofollow">https://infrasys-ai.github.io/aiinfra-docs/05Infer03Dispatch/01ContinuousBatching.html#batching</a><br>
+8.<a href="https://www.anyscale.com/blog/continuous-batching-llm-inference" rel="nofollow">https://www.anyscale.com/blog/continuous-batching-llm-inference</a><br>
+9.<a href="https://www.bilibili.com/video/BV1kx4y1x7bu/?spm_id_from=333.337.search-card.all.click&amp;vd_source=5a9892c5685e5b7e1d5cbd33baa8869e" rel="nofollow">https://www.bilibili.com/video/BV1kx4y1x7bu/?spm_id_from=333.337.search-card.all.click&amp;vd_source=5a9892c5685e5b7e1d5cbd33baa8869e</a><br>
+10.<a href="https://zhuanlan.zhihu.com/p/2018710372320855817" rel="nofollow">https://zhuanlan.zhihu.com/p/2018710372320855817</a><br>
+11.<a href="https://zhuanlan.zhihu.com/p/678921340" rel="nofollow">https://zhuanlan.zhihu.com/p/678921340</a><br>
+12.<a href="https://zhuanlan.zhihu.com/p/678404136" rel="nofollow">https://zhuanlan.zhihu.com/p/678404136</a><br>
+13.<a href="https://zhuanlan.zhihu.com/p/1984729458444363168" rel="nofollow">https://zhuanlan.zhihu.com/p/1984729458444363168</a><br>
+14.<a href="https://zhuanlan.zhihu.com/p/1931793563127100738" rel="nofollow">https://zhuanlan.zhihu.com/p/1931793563127100738</a></p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script><script>MathJax = {tex: {inlineMath: [["$", "$"]]}};</script><script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</html>
