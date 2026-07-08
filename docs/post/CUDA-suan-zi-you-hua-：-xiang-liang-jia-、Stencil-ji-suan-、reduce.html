@@ -647,7 +647,7 @@ __global__ <span class="pl-k">void</span> <span class="pl-en">reduce_kernel_opt2
 __inline__ __device__ <span class="pl-k">double</span> <span class="pl-en">warpReduceSum</span>(<span class="pl-k">double</span> val)
 {
     <span class="pl-c"><span class="pl-c">//</span> 每次 offset 减半：16, 8, 4, 2, 1</span>
-    <span class="pl-k">for</span> (<span class="pl-k">int</span> offset = WARP_SIZE / <span class="pl-c1">2</span>; offset &gt; <span class="pl-c1">0</span>; offset /= <span class="pl-c1">2</span>)
+    <span class="pl-k">for</span> (<span class="pl-k">int</span> offset = <span class="pl-c1">WARP_SIZE</span> / <span class="pl-c1">2</span>; offset &gt; <span class="pl-c1">0</span>; offset /= <span class="pl-c1">2</span>)
     {
         val += <span class="pl-c1">__shfl_down_sync</span>(<span class="pl-c1">0xffffffff</span>, val, offset);
     }
@@ -661,8 +661,8 @@ __global__ <span class="pl-k">void</span> <span class="pl-en">reduce_kernel_fina
     __shared__ <span class="pl-k">double</span> shared_warp_sums[<span class="pl-c1">32</span>];
 
     <span class="pl-k">int</span> tid = threadIdx.<span class="pl-smi">x</span>;
-    <span class="pl-k">int</span> lane = tid % WARP_SIZE;       <span class="pl-c"><span class="pl-c">//</span> Warp 内的局部 ID (0~31)</span>
-    <span class="pl-k">int</span> wid = tid / WARP_SIZE;        <span class="pl-c"><span class="pl-c">//</span> Warp 的 ID (0~31)</span>
+    <span class="pl-k">int</span> lane = tid % <span class="pl-c1">WARP_SIZE</span>;       <span class="pl-c"><span class="pl-c">//</span> Warp 内的局部 ID (0~31)</span>
+    <span class="pl-k">int</span> wid = tid / <span class="pl-c1">WARP_SIZE</span>;        <span class="pl-c"><span class="pl-c">//</span> Warp 的 ID (0~31)</span>
     <span class="pl-k">int</span> i = blockIdx.<span class="pl-smi">x</span> * blockDim.<span class="pl-smi">x</span> + threadIdx.<span class="pl-smi">x</span>;
     <span class="pl-k">int</span> grid_stride = blockDim.<span class="pl-smi">x</span> * gridDim.<span class="pl-smi">x</span>;
 
@@ -687,7 +687,7 @@ __global__ <span class="pl-k">void</span> <span class="pl-en">reduce_kernel_fina
 
     <span class="pl-c"><span class="pl-c">//</span> 4. 让第一个 Warp 负责最后的规约</span>
     <span class="pl-c"><span class="pl-c">//</span> 共有 blockDim.x / WARP_SIZE 个有效 Warp 数据需要规约</span>
-    <span class="pl-k">int</span> num_warps = blockDim.<span class="pl-smi">x</span> / WARP_SIZE;
+    <span class="pl-k">int</span> num_warps = blockDim.<span class="pl-smi">x</span> / <span class="pl-c1">WARP_SIZE</span>;
     <span class="pl-k">if</span> (wid == <span class="pl-c1">0</span>)
     {
         <span class="pl-c"><span class="pl-c">//</span> 读取共享内存，如果超出了活跃 warp 数量，则补 0</span>

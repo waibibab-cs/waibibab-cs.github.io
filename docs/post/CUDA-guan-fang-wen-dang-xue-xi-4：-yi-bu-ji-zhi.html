@@ -241,7 +241,7 @@ kernel2&lt;&lt;&lt;grid, block, <span class="pl-c1">0</span>, stream&gt;&gt;&gt;
 cudaStream_t stream1;
 cudaStream_t stream2;
 
-<span class="pl-c1">size_t</span> size = LARGE_NUMBER;
+<span class="pl-c1">size_t</span> size = <span class="pl-c1">LARGE_NUMBER</span>;
 <span class="pl-k">float</span> *d_data;
 
 <span class="pl-c"><span class="pl-c">//</span> Create some data</span>
@@ -394,13 +394,13 @@ cudaGraph_t graph;
 cudaGraphExec_t instance;
 
 <span class="pl-c"><span class="pl-c">//</span> The graph will be executed NSTEP times</span>
-<span class="pl-k">for</span>(<span class="pl-k">int</span> istep=<span class="pl-c1">0</span>; istep&lt;NSTEP; istep++){
+<span class="pl-k">for</span>(<span class="pl-k">int</span> istep=<span class="pl-c1">0</span>; istep&lt;<span class="pl-c1">NSTEP</span>; istep++){
     <span class="pl-k">if</span>(!graphCreated){
         <span class="pl-c"><span class="pl-c">//</span> Capture the graph</span>
         <span class="pl-c1">cudaStreamBeginCapture</span>(stream, cudaStreamCaptureModeGlobal);
 
         <span class="pl-c"><span class="pl-c">//</span> Launch NKERNEL kernels</span>
-        <span class="pl-k">for</span>(<span class="pl-k">int</span> ikrnl=<span class="pl-c1">0</span>; ikrnl&lt;NKERNEL; ikrnl++){
+        <span class="pl-k">for</span>(<span class="pl-k">int</span> ikrnl=<span class="pl-c1">0</span>; ikrnl&lt;<span class="pl-c1">NKERNEL</span>; ikrnl++){
             shortKernel&lt;&lt;&lt;blocks, threads, <span class="pl-c1">0</span>, stream&gt;&gt;&gt;(out_d, in_d);
         }
 

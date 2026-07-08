@@ -233,26 +233,26 @@ socket 的写端被关闭（如调用<code class="notranslate">shutdown(sockfd, 
 <div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">struct</span> <span class="pl-en">pollfd</span> fds[<span class="pl-c1">2</span>];
 <span class="pl-c"><span class="pl-c">//</span> 监听socket的可读事件（比如是否有客户端连接、是否有数据发送过来）</span>
 fds[<span class="pl-c1">0</span>].fd = sockfd;
-fds[<span class="pl-c1">0</span>].events = POLLIN;
+fds[<span class="pl-c1">0</span>].events = <span class="pl-c1">POLLIN</span>;
 
 <span class="pl-c"><span class="pl-c">//</span> 监听文件描述符的可写+错误事件</span>
 fds[<span class="pl-c1">1</span>].fd = filefd;
-fds[<span class="pl-c1">1</span>].events = POLLOUT | POLLERR;
+fds[<span class="pl-c1">1</span>].events = <span class="pl-c1">POLLOUT</span> | <span class="pl-c1">POLLERR</span>;
 
 <span class="pl-k">int</span> ret = poll(fds, <span class="pl-c1">2</span>, <span class="pl-c1">5000</span>); <span class="pl-c"><span class="pl-c">//</span> 监听2个fd，超时5秒</span>
 <span class="pl-k">if</span>(ret &gt; <span class="pl-c1">0</span>){
     <span class="pl-c"><span class="pl-c">//</span> 检查第一个fd是否触发了可读事件</span>
-    <span class="pl-k">if</span>(fds[<span class="pl-c1">0</span>].<span class="pl-smi">revents</span> &amp; POLLIN){
+    <span class="pl-k">if</span>(fds[<span class="pl-c1">0</span>].<span class="pl-smi">revents</span> &amp; <span class="pl-c1">POLLIN</span>){
         <span class="pl-c"><span class="pl-c">//</span> 执行socket读操作，比如accept或者recv</span>
         <span class="pl-c1">handle_socket_read</span>(fds[<span class="pl-c1">0</span>].<span class="pl-smi">fd</span>);
     }
     <span class="pl-c"><span class="pl-c">//</span> 检查第二个fd是否触发了可写事件</span>
-    <span class="pl-k">if</span>(fds[<span class="pl-c1">1</span>].<span class="pl-smi">revents</span> &amp; POLLOUT){
+    <span class="pl-k">if</span>(fds[<span class="pl-c1">1</span>].<span class="pl-smi">revents</span> &amp; <span class="pl-c1">POLLOUT</span>){
         <span class="pl-c"><span class="pl-c">//</span> 执行文件写操作</span>
         <span class="pl-c1">handle_file_write</span>(fds[<span class="pl-c1">1</span>].<span class="pl-smi">fd</span>);
     }
     <span class="pl-c"><span class="pl-c">//</span> 检查是否出现错误</span>
-    <span class="pl-k">if</span>(fds[<span class="pl-c1">1</span>].<span class="pl-smi">revents</span> &amp; POLLERR){
+    <span class="pl-k">if</span>(fds[<span class="pl-c1">1</span>].<span class="pl-smi">revents</span> &amp; <span class="pl-c1">POLLERR</span>){
         <span class="pl-c"><span class="pl-c">//</span> 处理错误逻辑</span>
         <span class="pl-c1">handle_error</span>(fds[<span class="pl-c1">1</span>].<span class="pl-smi">fd</span>);
     }

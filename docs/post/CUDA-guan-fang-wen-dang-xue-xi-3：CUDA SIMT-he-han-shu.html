@@ -428,7 +428,7 @@ __global__ <span class="pl-k">void</span> <span class="pl-en">smem_cuda_transpos
 
     <span class="pl-c"><span class="pl-c">/*</span> declare a statically allocated shared memory array <span class="pl-c">*/</span></span>
 
-    __shared__ <span class="pl-k">float</span> smemArray[THREADS_PER_BLOCK_X][THREADS_PER_BLOCK_Y];
+    __shared__ <span class="pl-k">float</span> smemArray[<span class="pl-c1">THREADS_PER_BLOCK_X</span>][<span class="pl-c1">THREADS_PER_BLOCK_Y</span>];
 
     <span class="pl-c"><span class="pl-c">/*</span> determine my row tile and column tile index <span class="pl-c">*/</span></span>
 
@@ -449,11 +449,11 @@ __global__ <span class="pl-k">void</span> <span class="pl-en">smem_cuda_transpos
 <p>上述示例中所展示的根本性性能优化，在于确保在访问全局内存时，内存访问能够被正确地合并。在执行数据拷贝操作之前，每个线程都会计算其对应的 <code class="notranslate">tileRow</code>（分块行）和 <code class="notranslate">tileCol</code>（分块列）索引。这些索引定义了当前线程块所要操作的具体分块（Tile）位置，并且这些分块索引是基于正在执行的线程块编号计算得出的。</p>
 <p>同一线程块中的所有线程都拥有相同的 <code class="notranslate">tileRow</code> 和 <code class="notranslate">tileCol</code> 值，因此这两个值可以被视为该特定线程块负责操作的分块起始位置。</p>
 <p>随后，核函数开始执行拷贝操作：每个线程块负责通过以下语句，将矩阵中一个 <strong>32 × 32</strong> 的分块从全局内存拷贝到共享内存。由于一个线程束（Warp）的大小为 32 个线程，这次拷贝操作将由 <strong>32 个线程束</strong>共同完成（即 $32 \times 32 \div 32 = 32$），且这些线程束之间的执行顺序是不确定的。</p>
-<div class="highlight highlight-source-c++"><pre class="notranslate">smemArray[threadIdx.x][threadIdx.y] = a[INDX( tileRow + threadIdx.y, tileCol + threadIdx.x, m )];</pre></div>
+<div class="highlight highlight-source-c++"><pre class="notranslate">smemArray[threadIdx.x][threadIdx.y] = a[<span class="pl-c1">INDX</span>( tileRow + threadIdx.y, tileCol + threadIdx.x, m )];</pre></div>
 <p>请注意，由于 <code class="notranslate">threadIdx.x</code> 出现在 <code class="notranslate">INDX</code> 宏的第二个参数中，连续的线程正在访问内存中的连续元素，因此<strong>对数组 <code class="notranslate">a</code> 的读取操作是完美合并的</strong>。</p>
 <p>核函数的下一步是调用 <strong><code class="notranslate">__syncthreads()</code></strong> 函数。该函数确保线程块中的所有线程在继续执行后续代码之前，都已完成了前面代码的运行，从而保证将 <code class="notranslate">a</code> 写入共享内存的操作在进入下一步之前已经彻底完成。这一点至关重要，因为接下来的步骤涉及线程从共享内存中读取数据。如果没有 <code class="notranslate">__syncthreads()</code> 调用，就无法保证线程块中的所有线程束在某些线程束向代码深处推进之前，都已经完成了将数据存入共享内存的操作。</p>
 <p>此时，在核函数内部，每个线程块的 <code class="notranslate">smemArray</code>（共享内存数组）都存储了一个 32 × 32 的矩阵分块，其排列顺序与原始矩阵完全一致。为了确保分块内的元素被正确转置，线程在读取 <code class="notranslate">smemArray</code> 时交换了 <code class="notranslate">threadIdx.x</code> 和 <code class="notranslate">threadIdx.y</code> 的位置。同时，为了确保整个分块被放置在目标矩阵 <code class="notranslate">c</code> 中的正确位置，在写入 <code class="notranslate">c</code> 时也交换了 <code class="notranslate">tileRow</code> 和 <code class="notranslate">tileCol</code> 索引。为了确保写入时的合并性（Coalescing），<code class="notranslate">threadIdx.x</code> 被用作 <code class="notranslate">INDX</code> 宏的第二个参数，如下面的语句所示。</p>
-<div class="highlight highlight-source-c++"><pre class="notranslate">c[INDX( tileCol + threadIdx.y, tileRow + threadIdx.x, m )] = smemArray[threadIdx.y][threadIdx.x];</pre></div>
+<div class="highlight highlight-source-c++"><pre class="notranslate">c[<span class="pl-c1">INDX</span>( tileCol + threadIdx.y, tileRow + threadIdx.x, m )] = smemArray[threadIdx.y][threadIdx.x];</pre></div>
 <p>该核函数展示了共享内存的两种常见用途：</p>
 <ol>
 <li><strong>数据暂存以实现合并访存</strong>：共享内存被用作从全局内存到处理核心之间的中转站，以确保对全局内存的读取和写入操作都能正确实现合并。</li>

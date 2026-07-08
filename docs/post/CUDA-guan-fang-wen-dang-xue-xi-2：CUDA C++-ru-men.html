@@ -305,7 +305,7 @@ __global__ <span class="pl-k">void</span> <span class="pl-en">vecAdd</span>(<spa
      <span class="pl-c1">std::srand</span>(<span class="pl-c1">std::time</span>({}));
     <span class="pl-k">for</span>(<span class="pl-k">int</span> i=<span class="pl-c1">0</span>; i&lt;length; i++)
     {
-        A[i] = <span class="pl-c1">rand</span>() / (<span class="pl-k">float</span>)RAND_MAX;
+        A[i] = <span class="pl-c1">rand</span>() / (<span class="pl-k">float</span>)<span class="pl-c1">RAND_MAX</span>;
     }
 }
 

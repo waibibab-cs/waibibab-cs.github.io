@@ -270,22 +270,22 @@ total score       <span class="pl-c1">:</span> 20.136 / 100.000</pre></div>
 <span class="pl-k">void</span> <span class="pl-en">gemm</span>(<span class="pl-k">const</span> <span class="pl-k">float</span> *A, <span class="pl-k">const</span> <span class="pl-k">float</span> *B, <span class="pl-k">float</span> *C, <span class="pl-k">int</span> M, <span class="pl-k">int</span> N, <span class="pl-k">int</span> K)
 {
   <span class="pl-c"><span class="pl-c">//</span> 定义分块大小（需根据 CPU 的 L1/L2 Cache 大小调优）</span>
-  <span class="pl-k">const</span> <span class="pl-k">int</span> BM = <span class="pl-c1">64</span>;
-  <span class="pl-k">const</span> <span class="pl-k">int</span> BN = <span class="pl-c1">128</span>;
-  <span class="pl-k">const</span> <span class="pl-k">int</span> BK = <span class="pl-c1">64</span>;
+  <span class="pl-k">const</span> <span class="pl-k">int</span> <span class="pl-c1">BM</span> = <span class="pl-c1">64</span>;
+  <span class="pl-k">const</span> <span class="pl-k">int</span> <span class="pl-c1">BN</span> = <span class="pl-c1">128</span>;
+  <span class="pl-k">const</span> <span class="pl-k">int</span> <span class="pl-c1">BK</span> = <span class="pl-c1">64</span>;
 
   <span class="pl-c"><span class="pl-c">//</span> 外层：遍历块 (Blocks)</span>
-  <span class="pl-k">for</span> (<span class="pl-k">int</span> i0 = <span class="pl-c1">0</span>; i0 &lt; M; i0 += BM)
+  <span class="pl-k">for</span> (<span class="pl-k">int</span> i0 = <span class="pl-c1">0</span>; i0 &lt; M; i0 += <span class="pl-c1">BM</span>)
   {
-    <span class="pl-k">for</span> (<span class="pl-k">int</span> j0 = <span class="pl-c1">0</span>; j0 &lt; N; j0 += BN)
+    <span class="pl-k">for</span> (<span class="pl-k">int</span> j0 = <span class="pl-c1">0</span>; j0 &lt; N; j0 += <span class="pl-c1">BN</span>)
     {
-      <span class="pl-k">for</span> (<span class="pl-k">int</span> k0 = <span class="pl-c1">0</span>; k0 &lt; K; k0 += BK)
+      <span class="pl-k">for</span> (<span class="pl-k">int</span> k0 = <span class="pl-c1">0</span>; k0 &lt; K; k0 += <span class="pl-c1">BK</span>)
       {
 
         <span class="pl-c"><span class="pl-c">//</span> 处理边界情况，防止矩阵维度不是分块大小的整数倍导致越界</span>
-        <span class="pl-k">int</span> i_end = <span class="pl-c1">std::min</span>(i0 + BM, M);
-        <span class="pl-k">int</span> j_end = <span class="pl-c1">std::min</span>(j0 + BN, N);
-        <span class="pl-k">int</span> k_end = <span class="pl-c1">std::min</span>(k0 + BK, K);
+        <span class="pl-k">int</span> i_end = <span class="pl-c1">std::min</span>(i0 + <span class="pl-c1">BM</span>, M);
+        <span class="pl-k">int</span> j_end = <span class="pl-c1">std::min</span>(j0 + <span class="pl-c1">BN</span>, N);
+        <span class="pl-k">int</span> k_end = <span class="pl-c1">std::min</span>(k0 + <span class="pl-c1">BK</span>, K);
 
         <span class="pl-c"><span class="pl-c">//</span> 这里依然保持 i -&gt; k -&gt; j 的连续访存顺序</span>
         <span class="pl-k">for</span> (<span class="pl-k">int</span> i = i0; i &lt; i_end; ++i)
@@ -323,22 +323,22 @@ $Size = (BM \cdot BN + BM \cdot BK + BK \cdot BN) \times 4$</p>
 <span class="pl-k">void</span> <span class="pl-en">gemm</span>(<span class="pl-k">const</span> <span class="pl-k">float</span> *A, <span class="pl-k">const</span> <span class="pl-k">float</span> *B, <span class="pl-k">float</span> *C, <span class="pl-k">int</span> M, <span class="pl-k">int</span> N, <span class="pl-k">int</span> K)
 {
   <span class="pl-c"><span class="pl-c">//</span> 定义分块大小（需根据 CPU 的 L1/L2 Cache 大小调优）</span>
-  <span class="pl-k">const</span> <span class="pl-k">int</span> BM = M;
-  <span class="pl-k">const</span> <span class="pl-k">int</span> BN = N;
-  <span class="pl-k">const</span> <span class="pl-k">int</span> BK = K;
+  <span class="pl-k">const</span> <span class="pl-k">int</span> <span class="pl-c1">BM</span> = M;
+  <span class="pl-k">const</span> <span class="pl-k">int</span> <span class="pl-c1">BN</span> = N;
+  <span class="pl-k">const</span> <span class="pl-k">int</span> <span class="pl-c1">BK</span> = K;
 
   <span class="pl-c"><span class="pl-c">//</span> 外层：遍历块 (Blocks)</span>
-  <span class="pl-k">for</span> (<span class="pl-k">int</span> i0 = <span class="pl-c1">0</span>; i0 &lt; M; i0 += BM)
+  <span class="pl-k">for</span> (<span class="pl-k">int</span> i0 = <span class="pl-c1">0</span>; i0 &lt; M; i0 += <span class="pl-c1">BM</span>)
   {
-    <span class="pl-k">for</span> (<span class="pl-k">int</span> j0 = <span class="pl-c1">0</span>; j0 &lt; N; j0 += BN)
+    <span class="pl-k">for</span> (<span class="pl-k">int</span> j0 = <span class="pl-c1">0</span>; j0 &lt; N; j0 += <span class="pl-c1">BN</span>)
     {
-      <span class="pl-k">for</span> (<span class="pl-k">int</span> k0 = <span class="pl-c1">0</span>; k0 &lt; K; k0 += BK)
+      <span class="pl-k">for</span> (<span class="pl-k">int</span> k0 = <span class="pl-c1">0</span>; k0 &lt; K; k0 += <span class="pl-c1">BK</span>)
       {
 
         <span class="pl-c"><span class="pl-c">//</span> 处理边界情况，防止矩阵维度不是分块大小的整数倍导致越界</span>
-        <span class="pl-k">int</span> i_end = <span class="pl-c1">std::min</span>(i0 + BM, M);
-        <span class="pl-k">int</span> j_end = <span class="pl-c1">std::min</span>(j0 + BN, N);
-        <span class="pl-k">int</span> k_end = <span class="pl-c1">std::min</span>(k0 + BK, K);
+        <span class="pl-k">int</span> i_end = <span class="pl-c1">std::min</span>(i0 + <span class="pl-c1">BM</span>, M);
+        <span class="pl-k">int</span> j_end = <span class="pl-c1">std::min</span>(j0 + <span class="pl-c1">BN</span>, N);
+        <span class="pl-k">int</span> k_end = <span class="pl-c1">std::min</span>(k0 + <span class="pl-c1">BK</span>, K);
 
         <span class="pl-c"><span class="pl-c">//</span> 这里依然保持 i -&gt; k -&gt; j 的连续访存顺序</span>
         <span class="pl-k">for</span> (<span class="pl-k">int</span> i = i0; i &lt; i_end; ++i)
@@ -416,26 +416,26 @@ total score       <span class="pl-c1">:</span> 37.288 / 100.000</pre></div>
 <span class="pl-k">void</span> <span class="pl-en">gemm</span>(<span class="pl-k">const</span> <span class="pl-k">float</span> *A, <span class="pl-k">const</span> <span class="pl-k">float</span> *B, <span class="pl-k">float</span> *C, <span class="pl-k">int</span> M, <span class="pl-k">int</span> N, <span class="pl-k">int</span> K)
 {
   <span class="pl-c"><span class="pl-c">//</span> 定义分块大小（需根据 CPU 的 L1/L2 Cache 大小调优）</span>
-  <span class="pl-k">const</span> <span class="pl-k">int</span> BM = <span class="pl-c1">64</span>;
-  <span class="pl-k">const</span> <span class="pl-k">int</span> BN = <span class="pl-c1">128</span>;
-  <span class="pl-k">const</span> <span class="pl-k">int</span> BK = <span class="pl-c1">64</span>;
+  <span class="pl-k">const</span> <span class="pl-k">int</span> <span class="pl-c1">BM</span> = <span class="pl-c1">64</span>;
+  <span class="pl-k">const</span> <span class="pl-k">int</span> <span class="pl-c1">BN</span> = <span class="pl-c1">128</span>;
+  <span class="pl-k">const</span> <span class="pl-k">int</span> <span class="pl-c1">BK</span> = <span class="pl-c1">64</span>;
 
   <span class="pl-c"><span class="pl-c">//</span> 外层：遍历块 (Blocks)</span>
   <span class="pl-c"><span class="pl-c">//</span> 开启多线程并行</span>
   <span class="pl-c"><span class="pl-c">//</span> collapse(2) 表示将 i0 和 j0 这两层外循环合并为一个大的任务池进行分配</span>
   <span class="pl-c"><span class="pl-c">//</span> schedule(dynamic) 让计算快的线程主动领新任务，防止各个核心工作量不均</span>
 #<span class="pl-k">pragma</span> omp parallel for collapse(2) schedule(dynamic)
-  <span class="pl-k">for</span> (<span class="pl-k">int</span> i0 = <span class="pl-c1">0</span>; i0 &lt; M; i0 += BM)
+  <span class="pl-k">for</span> (<span class="pl-k">int</span> i0 = <span class="pl-c1">0</span>; i0 &lt; M; i0 += <span class="pl-c1">BM</span>)
   {
-    <span class="pl-k">for</span> (<span class="pl-k">int</span> j0 = <span class="pl-c1">0</span>; j0 &lt; N; j0 += BN)
+    <span class="pl-k">for</span> (<span class="pl-k">int</span> j0 = <span class="pl-c1">0</span>; j0 &lt; N; j0 += <span class="pl-c1">BN</span>)
     {
-      <span class="pl-k">for</span> (<span class="pl-k">int</span> k0 = <span class="pl-c1">0</span>; k0 &lt; K; k0 += BK)
+      <span class="pl-k">for</span> (<span class="pl-k">int</span> k0 = <span class="pl-c1">0</span>; k0 &lt; K; k0 += <span class="pl-c1">BK</span>)
       {
 
         <span class="pl-c"><span class="pl-c">//</span> 处理边界情况，防止矩阵维度不是分块大小的整数倍导致越界</span>
-        <span class="pl-k">int</span> i_end = (i0 + BM &lt; M) ? i0 + BM : M;
-        <span class="pl-k">int</span> j_end = (j0 + BN &lt; N) ? j0 + BN : N;
-        <span class="pl-k">int</span> k_end = (k0 + BK &lt; K) ? k0 + BK : K;
+        <span class="pl-k">int</span> i_end = (i0 + <span class="pl-c1">BM</span> &lt; M) ? i0 + <span class="pl-c1">BM</span> : M;
+        <span class="pl-k">int</span> j_end = (j0 + <span class="pl-c1">BN</span> &lt; N) ? j0 + <span class="pl-c1">BN</span> : N;
+        <span class="pl-k">int</span> k_end = (k0 + <span class="pl-c1">BK</span> &lt; K) ? k0 + <span class="pl-c1">BK</span> : K;
 
         <span class="pl-c"><span class="pl-c">//</span> 这里依然保持 i -&gt; k -&gt; j 的连续访存顺序</span>
         <span class="pl-k">for</span> (<span class="pl-k">int</span> i = i0; i &lt; i_end; ++i)
@@ -487,26 +487,26 @@ total score       <span class="pl-c1">:</span> 56.292 / 100.000</pre></div>
   }
 
   <span class="pl-c"><span class="pl-c">//</span> 定义分块大小（需根据 CPU 的 L1/L2 Cache 大小调优）</span>
-  <span class="pl-k">const</span> <span class="pl-k">int</span> BM = <span class="pl-c1">64</span>;
-  <span class="pl-k">const</span> <span class="pl-k">int</span> BN = <span class="pl-c1">128</span>;
-  <span class="pl-k">const</span> <span class="pl-k">int</span> BK = <span class="pl-c1">64</span>;
+  <span class="pl-k">const</span> <span class="pl-k">int</span> <span class="pl-c1">BM</span> = <span class="pl-c1">64</span>;
+  <span class="pl-k">const</span> <span class="pl-k">int</span> <span class="pl-c1">BN</span> = <span class="pl-c1">128</span>;
+  <span class="pl-k">const</span> <span class="pl-k">int</span> <span class="pl-c1">BK</span> = <span class="pl-c1">64</span>;
 
   <span class="pl-c"><span class="pl-c">//</span> 外层：遍历块 (Blocks)</span>
   <span class="pl-c"><span class="pl-c">//</span> 开启多线程并行</span>
   <span class="pl-c"><span class="pl-c">//</span> collapse(2) 表示将 i0 和 j0 这两层外循环合并为一个大的任务池进行分配</span>
   <span class="pl-c"><span class="pl-c">//</span> schedule(dynamic) 让计算快的线程主动领新任务，防止各个核心工作量不均</span>
 #<span class="pl-k">pragma</span> omp parallel for collapse(2) schedule(dynamic)
-  <span class="pl-k">for</span> (<span class="pl-k">int</span> i0 = <span class="pl-c1">0</span>; i0 &lt; M; i0 += BM)
+  <span class="pl-k">for</span> (<span class="pl-k">int</span> i0 = <span class="pl-c1">0</span>; i0 &lt; M; i0 += <span class="pl-c1">BM</span>)
   {
-    <span class="pl-k">for</span> (<span class="pl-k">int</span> j0 = <span class="pl-c1">0</span>; j0 &lt; N; j0 += BN)
+    <span class="pl-k">for</span> (<span class="pl-k">int</span> j0 = <span class="pl-c1">0</span>; j0 &lt; N; j0 += <span class="pl-c1">BN</span>)
     {
-      <span class="pl-k">for</span> (<span class="pl-k">int</span> k0 = <span class="pl-c1">0</span>; k0 &lt; K; k0 += BK)
+      <span class="pl-k">for</span> (<span class="pl-k">int</span> k0 = <span class="pl-c1">0</span>; k0 &lt; K; k0 += <span class="pl-c1">BK</span>)
       {
 
         <span class="pl-c"><span class="pl-c">//</span> 处理边界情况，防止矩阵维度不是分块大小的整数倍导致越界</span>
-        <span class="pl-k">int</span> i_end = (i0 + BM &lt; M) ? i0 + BM : M;
-        <span class="pl-k">int</span> j_end = (j0 + BN &lt; N) ? j0 + BN : N;
-        <span class="pl-k">int</span> k_end = (k0 + BK &lt; K) ? k0 + BK : K;
+        <span class="pl-k">int</span> i_end = (i0 + <span class="pl-c1">BM</span> &lt; M) ? i0 + <span class="pl-c1">BM</span> : M;
+        <span class="pl-k">int</span> j_end = (j0 + <span class="pl-c1">BN</span> &lt; N) ? j0 + <span class="pl-c1">BN</span> : N;
+        <span class="pl-k">int</span> k_end = (k0 + <span class="pl-c1">BK</span> &lt; K) ? k0 + <span class="pl-c1">BK</span> : K;
 
         <span class="pl-c"><span class="pl-c">//</span> 这里依然保持 i -&gt; k -&gt; j 的连续访存顺序</span>
         <span class="pl-k">for</span> (<span class="pl-k">int</span> i = i0; i &lt; i_end; ++i)
