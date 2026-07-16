@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="原文链接：
+[2.6. Unified and System Memory](https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/understanding-memory.html)
+# 前言
+异构系统拥有多处可存储数据的物理内存：主机 CPU 外接有 DRAM 内存，系统内每一块 GPU 也都配备独立的专属 DRAM 显存。">
+<meta property="og:title" content="CUDA官方文档学习5：统一内存（一）">
+<meta property="og:description" content="原文链接：
+[2.6. Unified and System Memory](https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/understanding-memory.html)
+# 前言
+异构系统拥有多处可存储数据的物理内存：主机 CPU 外接有 DRAM 内存，系统内每一块 GPU 也都配备独立的专属 DRAM 显存。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/CUDA-guan-fang-wen-dang-xue-xi-5%EF%BC%9A-tong-yi-nei-cun-%EF%BC%88-yi-%EF%BC%89.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>CUDA官方文档学习5：统一内存（一）</title>
+<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">CUDA官方文档学习5：统一内存（一）</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/69" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>原文链接：<br>
+<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/understanding-memory.html" rel="nofollow">2.6. Unified and System Memory</a></p>
+<h1>前言</h1>
+<p>异构系统拥有多处可存储数据的物理内存：主机 CPU 外接有 DRAM 内存，系统内每一块 GPU 也都配备独立的专属 DRAM 显存。数据存放于访问端处理器的本地内存中时，程序性能最优。CUDA 提供可手动管控数据内存布局的应用程序接口（例如：cudaMalloc、cudaMallocHost等），但这类接口代码冗余度高，还会增加软件开发难度。为此 CUDA 推出多项功能特性，简化不同物理内存间的数据分配、布局调度与数据迁移工作。</p>
+<p>本章旨在讲解上述相关功能特性，阐明其在功能实现与性能优化层面对应用开发者的实际作用。统一内存存在多种实现形式，具体形态由操作系统、驱动版本以及所用 GPU 硬件共同决定。本章将说明如何判定设备所适配的统一内存运行模式，以及各类模式下统一内存的运行机制。在”==<a href="">CUDA官方文档学习6：统一内存（二）（暂未发布）</a>==“中会对统一内存展开更为详尽的讲解。</p>
+<p>本章将定义并阐释以下核心概念：<br>
+<strong>统一虚拟地址空间（Unified Virtual Address Space，UVA）</strong>：CPU内存与各GPU内存，在同一个虚拟地址空间内划分出相互独立的地址区间</p>
+<p><strong>统一内存（Unified Memory，UM）</strong> ：CUDA专属功能，支持托管内存在CPU与GPU之间完成自动数据迁移</p>
+<blockquote>
+<p><strong>受限统一内存（Limited Unified Memory）</strong>：存在功能约束的统一内存运行模式<br>
+<strong>完整统一内存（Full Unified Memory）</strong>：全面兼容统一内存各项功能<br>
+<strong>具有硬件一致性的完整统一内存（Full Unified Memory）</strong>：依托硬件能力实现全功能统一内存<br>
+<strong>统一内存提示（Unified Memory Hints）</strong>：CUDA 提供的一组 API，用于指导 Unified Memory 的行为</p>
+</blockquote>
+<p><strong>页锁定主机内存（Page-locked Host Memory，Pinned Memory）</strong>：不可被操作系统换页的系统内存，是部分 CUDA 运算操作的必备条件</p>
+<blockquote>
+<p><strong>映射内存(Mapped Memory)</strong> ：可在内核函数中直接访问主机内存的机制，与统一内存分属不同技术方案</p>
+</blockquote>
+<p>同时，本章介绍研究统一内存与系统内存时常用专业术语：<br>
+<strong>异构托管内存（Heterogeneous Managed Memory，HMM）</strong> ：Linux 内核自带功能，通过软件方式实现 Full Unified Memory 所需的一致性管理<br>
+<strong>地址转换服务（Address Translation Services，ATS）</strong>：硬件级特性，当 GPU 通过 NVLink Chip-to-Chip（C2C）与 CPU 相连时，ATS 可以提供 Hardware Coherency（硬件一致性），从而支持 Full Unified Memory。</p>
+<h1>1.统一虚拟地址空间</h1>
+<p>在同一个操作系统进程（OS process）中，所有主机内存以及系统中所有 GPU 的全局内存共同使用一个统一的虚拟地址空间（Unified Virtual Address Space，UVA）。无论是主机内存还是 GPU 内存，所有的内存分配都会位于这一统一虚拟地址空间中。这一点对于以下两类内存分配方式都成立：</p>
+<ul>
+<li>使用CUDA API分配的内存，例如：<code class="notranslate">cudaMalloc()</code>、<code class="notranslate">cudaMallocHost()</code></li>
+<li>使用操作系统或C/C++提供的内存分配接口，例如：<code class="notranslate">new</code>、<code class="notranslate">malloc()</code>、<code class="notranslate">mmap()</code><br>
+在该统一虚拟地址空间中：CPU 内存以及每一块 GPU 的显存都分别占据一个互不重叠的、唯一的地址区间（unique range）。</li>
+</ul>
+<p>这意味着：</p>
+<ol>
+<li><strong>可以仅根据指针的数值判断该内存属于哪里</strong>。通过调用<code class="notranslate">cudaPointerGetAttributes()</code>，即可根据一个指针的值判断：该指针指向的是 CPU 主机内存，还是某一块 GPU 的显存（以及具体是哪一块 GPU）。也就是说，指针本身已经携带了所属内存区域的信息，不需要程序员额外记录该指针来自哪里。</li>
+<li><strong>cudaMemcpy()可以自动判断拷贝方向</strong>。调用<code class="notranslate">cudaMemcpy()</code>时，参数<code class="notranslate">cudaMemcpyKind</code>可以设置为<code class="notranslate">cudaMemcpyDefault</code>，此时，CUDA Runtime 会根据<strong>源指针（source pointer）</strong> 和<strong>目标指针（destination pointer）</strong> 所在的地址区间，自动判断本次数据拷贝属于哪一种类型，而无需程序员手动指定。</li>
+</ol>
+<h1>2.统一内存</h1>
+<p>统一内存是 CUDA 提供的一项内存管理特性，它允许一种称为 <strong>Managed Memory（托管内存）</strong> 的内存分配，被运行在CPU或GPU上的代码共同访问。在<a href="https://waibibab-cs.github.io/post/CUDA-guan-fang-wen-dang-xue-xi-2%EF%BC%9ACUDA%20C%2B%2B-ru-men.html#2.1-%E7%BB%9F%E4%B8%80%E5%86%85%E5%AD%98" rel="nofollow">CUDA官方文档学习2：CUDA C++入门</a>中的2.1小节已经初步介绍过，统一内存适用于所有CUDA支持的系统。</p>
+<p>在某些系统上，托管内存必须显式分配。 在CUDA中，可以通过以下几种方式显式分配 Managed Memory：</p>
+<ul>
+<li>使用<code class="notranslate">cudaMallocManaged()</code></li>
+<li>使用<code class="notranslate">cudaMallocFromPoolAsync()</code>，其中所使用的Memory Pool必须设置：<code class="notranslate">allocType=cudaMemAllocationTypeManaged</code></li>
+<li>使用带有<code class="notranslate">__managed__</code>修饰符的全局变量（可参考：<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cpp-language-extensions.html#memory-space-specifiers" rel="nofollow">5.4. C/C++ Language Extensions</a>）<br>
+而在支持 HMM（异构托管内存）或 ATS（地址转换服务）的系统上，所有系统内存（System Memory）都会被隐式视为 Managed Memory，而不论它们是通过何种方式分配的。因此无需进行任何特殊的Managed Memory分配。</li>
+</ul>
+<h2>2.1 统一内存范式</h2>
+<p>Unified Memory（统一内存）的功能和行为会随着以下因素的不同而有所变化：</p>
+<ul>
+<li>操作系统（Operating System）</li>
+<li>Linux 的内核版本（Kernel Version）</li>
+<li>GPU 硬件（GPU Hardware）</li>
+<li>CPU 与 GPU 之间的互连方式（GPU-CPU Interconnect）<br>
+因此，不同平台所支持的 Unified Memory 能力并不完全相同。</li>
+</ul>
+<p>可以通过调用<code class="notranslate">cudaDeviceGetAttribute()</code>查询以下几个设备属性，从而判断当前系统支持的是哪一种 Unified Memory 形式：</p>
+<ol>
+<li><code class="notranslate">cudaDevAttrConcurrentManagedAccess</code>：用于判断是否支持<strong>Full Unified Memory</strong>，返回值是1，表明支持Full Unified Memory，返回值为0，表明仅支持Limited Unified Memory</li>
+<li><code class="notranslate">cudaDevAttrPageableMemoryAccess</code>：用于判断普通系统内存（Pageable System Memory）是否也属于 Fully-supported Unified Memory。如果返回值为1，表示所有系统内存都被视为 Fully-supported Unified Memory。无论它们是通过<code class="notranslate">new</code>、<code class="notranslate">malloc()</code>、<code class="notranslate">mmap()</code>还是其他普通方式分配，GPU都可以直接按照Unified Memory的方式访问。如果返回值为0，表示只有显式分配的 Managed Memory 才属于 Fully-supported Unified Memory。也就是说必须使用：<code class="notranslate">cudaMallocManaged()</code>等方式分配，GPU 才能按照 Unified Memory 的方式访问，普通<code class="notranslate">malloc()</code>得到的内存，并不具备完整 Unified Memory 语义。</li>
+<li><code class="notranslate">cudaDevAttrPageableMemoryAccessUsesHostPageTables</code>：用于判断CPU 与 GPU 如何保持一致性（Coherence）。如果返回值为1，表明使用Hardware Coherency（硬件一致性），如果返回值为0，表明使用软件一致性。</li>
+</ol>
+<p>图 21（Figure 21）给出了一个可视化流程，用于判断当前系统属于哪一种 Unified Memory 模式<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260716160459.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260716160459.png" alt="image.png" style="max-width: 100%;"></a><br>
+总之，Unified Memory 共有四种工作模式（paradigms）：</p>
+<ul>
+<li>显式分配的托管内存（Managed Memory）提供完整支持（Full support for explicit managed memory allocations）</li>
+<li>对所有内存分配提供完整支持，并采用软件一致性（Full support for all allocations with software coherence）（见2.2.2）</li>
+<li>对所有内存分配提供完整支持，并采用硬件一致性（Full support for all allocations with hardware coherence）（见2.2.1）</li>
+<li>有限统一内存支持（Limited unified memory support）（见2.3）</li>
+</ul>
+<blockquote>
+<p>图21解释：目前所有 GPU 都使用统一虚拟地址空间（Unified Virtual Address Space），并支持 Unified Memory。当 <code class="notranslate">cudaDevAttrConcurrentManagedAccess</code> 的值为 1 时，表示系统支持完整 Unified Memory（Full Unified Memory Support）；否则，仅支持有限 Unified Memory（Limited Unified Memory Support）。当支持完整 Unified Memory 时，如果 <code class="notranslate">cudaDevAttrPageableMemoryAccess</code>的值也为1，则表示所有系统内存（System Memory）都是 Unified Memory。否则，只有通过 CUDA API（例如 <code class="notranslate">cudaMallocManaged</code>）分配的内存才属于 Unified Memory。当所有系统内存都属于 Unified Memory 时，<code class="notranslate">cudaDevAttrPageableMemoryAccessUsesHostPageTables</code>用于指示一致性的实现方式：当其值为 1时，一致性由硬件（Hardware）提供；当其值为0时，一致性由软件（Software）提供。</p>
+</blockquote>
+<p>下表展示了与图 21相同的信息，并提供了指向本章相关章节的链接，以及本指南后续章节中更完整的文档说明。</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th align="center">统一内存工作模式</th>
+<th align="center">设备属性</th>
+<th align="center">完整文档/参考资料</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="center">有限 Unified Memory 支持</td>
+<td align="center"><code class="notranslate">cudaDevAttrConcurrentManagedAccess</code>的值为 0</td>
+<td align="center"><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/unified-memory.html#um-legacy-devices" rel="nofollow">1.Unified Memory on Windows, WSL, and Tegra</a><a href="https://docs.nvidia.com/cuda/cuda-for-tegra-appnote/index.html#memory-management" rel="nofollow">2.CUDA for Tegra Memory Management</a><a href="https://docs.nvidia.com/cuda/cuda-for-tegra-appnote/index.html#effective-usage-of-unified-memory-on-tegra" rel="nofollow">3.Unified memory on Tegra</a></td>
+</tr>
+<tr>
+<td align="center">显式分配 Managed Memory 的完整支持</td>
+<td align="center"><code class="notranslate">cudaDevAttrPageableMemoryAccess</code> 的值为0，且 <code class="notranslate">cudaDevAttrConcurrentManagedAccess</code> 的值为 1</td>
+<td align="center"><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/unified-memory.html#um-no-pageable-systems" rel="nofollow">Unified Memory on Devices with only CUDA Managed Memory Support</a></td>
+</tr>
+<tr>
+<td align="center">对所有内存分配提供完整支持（软件一致性）</td>
+<td align="center"><code class="notranslate">cudaDevAttrPageableMemoryAccessUsesHostPageTables</code> 的值为0，且 <code class="notranslate">cudaDevAttrPageableMemoryAccess</code> 的值为1，且 <code class="notranslate">cudaDevAttrConcurrentManagedAccess</code>的值为 1</td>
+<td align="center"><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/unified-memory.html#um-pageable-systems" rel="nofollow">Unified Memory on Devices with Full CUDA Unified Memory Support</a></td>
+</tr>
+<tr>
+<td align="center">对所有内存分配提供完整支持（硬件一致性）</td>
+<td align="center"><code class="notranslate">cudaDevAttrPageableMemoryAccessUsesHostPageTables</code> 的值为1，且 <code class="notranslate">cudaDevAttrPageableMemoryAccess</code> 的值为1，且 <code class="notranslate">cudaDevAttrConcurrentManagedAccess</code> 的值为1</td>
+<td align="center"><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/unified-memory.html#um-pageable-systems" rel="nofollow">Unified Memory on Devices with Full CUDA Unified Memory Support</a></td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h2>2.2 完整统一内存支持</h2>
+<p>大多数 Linux 系统都支持完整 Unified Memory（Full Unified Memory）。如果设备属性 <code class="notranslate">cudaDevAttrPageableMemoryAccess</code>的值为1，则所有系统内存（System Memory），无论是通过 CUDA API 还是系统 API 分配——都以 Unified Memory 的方式运行，并支持完整的功能。也包括使用 <code class="notranslate">mmap</code> 创建的文件映射内存（file-backed memory allocations）。</p>
+<p>如果 <code class="notranslate">cudaDevAttrPageableMemoryAccess</code>的值为0，则只有通过CUDA分配为Managed Memory 的内存才会以Unified Memory的方式工作。通过系统API分配的内存不是Managed Memory，并且不一定能够被GPU Kernel访问。</p>
+<p>通常情况下，对于支持完整功能的Unified Memory分配：</p>
+<ul>
+<li>Managed Memory通常会分配在首次访问它的处理器的内存空间中。</li>
+<li>当Managed Memory 被当前驻留处理器之外的另一个处理器使用时，通常会发生迁移（migrated）。</li>
+<li>Managed Memory的迁移或访问，以<strong>内存页</strong>为粒度（软件一致性，software coherence），或以<strong>缓存行</strong>为粒度（硬件一致性，hardware coherence）。</li>
+<li>允许<strong>超额分配（Oversubscription）</strong>：应用程序可以分配比 GPU 实际物理内存容量更多的 Managed Memory。</li>
+</ul>
+<p>内存分配和迁移行为可能与上述情况有所不同。程序员可以通过提示（hints）和预取（prefetches）来影响这些行为。（见2.4）<br>
+关于完整 Unified Memory 支持的详细内容，可参见==<a href="">CUDA官方文档学习6：统一内存（二）（暂未发布）</a>==中的**《Unified Memory on Devices with Full CUDA Unified Memory Support》**小节。</p>
+<h3>2.2.1 具有硬件一致性的完整统一内存</h3>
+<p>在Grace Hopper和Grace Blackwell等硬件平台上，当使用NVIDIA CPU，且CPU与GPU之间通过 NVLink Chip-to-Chip（C2C）互连时，可提供Address Translation Services（ATS）。当 ATS 可用时，设备属性 <code class="notranslate">cudaDevAttrPageableMemoryAccessUsesHostPageTables</code>的值为1。</p>
+<p>在 ATS 可用的情况下，除支持所有主机内存分配（host allocations）的完整 Unified Memory之外，还具有以下特性：</p>
+<ul>
+<li>驻留在GPU上的Managed Memory分配（例如通过 <code class="notranslate">cudaMallocManaged</code>分配）可以被 CPU 访问，而无需迁移（此时 <code class="notranslate">cudaDevAttrDirectManagedMemAccessFromHost</code>的值为1）。</li>
+<li>CPU与GPU之间的互连支持原生原子操作（native atomics）（此时 <code class="notranslate">cudaDevAttrHostNativeAtomicSupported</code>的值为1）</li>
+<li>相比软件一致性（software coherence），硬件一致性（hardware coherence）能够提升性能。</li>
+</ul>
+<p>ATS提供了HMM的全部能力。当ATS可用时，HMM会被自动禁用。关于硬件一致性与软件一致性的进一步讨论，请参见==<a href="">CUDA官方文档学习6：统一内存（二）（暂未发布）</a>==中的 <strong>《CPU and GPU Page Tables: Hardware Coherency vs. Software Coherency》</strong> 小节。</p>
+<p>注意：硬件一致性并不能使主机访问仅分配给 GPU 的内存，例如使用 <code class="notranslate">cudaMalloc</code>分配的内存</p>
+<h3>2.2.2 HMM——具有软件一致性的完整统一内存</h3>
+<p>Heterogeneous Memory Management（HMM，异构内存管理）是 Linux 操作系统（需要合适版本的内核）提供的一项功能，它能够实现采用软件一致性（software-coherent）的完整 Unified Memory 支持（Full Unified Memory Support）。</p>
+<p>异构内存管理（HMM）为通过PCIe连接的 GPU 提供了 ATS 所具备的部分能力和便利性。<br>
+在 Linux 系统上，当内核版本至少为 <strong>Linux Kernel 6.1.24、6.2.11 或 6.3 及以上</strong>时，可能支持异构内存管理（HMM）。<br>
+可以使用以下命令查看当前系统是否采用HMM地址模式：</p>
+<pre class="notranslate"><code class="notranslate">$ nvidia-smi -q | grep Addressing
+Addressing Mode : HMM
+</code></pre>
+<p>当HMM可用时：</p>
+<ul>
+<li>支持完整 Unified Memory（Full Unified Memory）；</li>
+<li>所有系统内存分配（System Allocations）都会隐式地作为 Unified Memory。</li>
+</ul>
+<h2>2.3 有限统一内存支持</h2>
+<p>在Windows（包括 Windows Subsystem for Linux，WSL）以及部分Tegra系统上，仅提供 Unified Memory功能的有限子集（limited subset）。<br>
+在这些系统上，虽然支持Managed Memory，但Managed Memory 在 CPU 与 GPU 之间的迁移方式（migration）与完整 Unified Memory 不同。</p>
+<p>其行为如下：</p>
+<ul>
+<li>Managed Memory 最初分配在 CPU 的物理内存（physical memory）中。</li>
+<li>Managed Memory 的迁移粒度大于虚拟内存页（virtual memory pages）。</li>
+<li>当 GPU 开始执行时，Managed Memory 会迁移到 GPU。</li>
+<li>当 GPU 处于活动状态（active）时，CPU 不得访问Managed Memory。</li>
+<li>当 GPU 完成同步（synchronized）后，Managed Memory 会迁移回 CPU。</li>
+<li><strong>不允许</strong> GPU 内存超额分配（Oversubscription）。</li>
+<li><strong>只有</strong>通过 CUDA 显式分配为 <strong>Managed Memory</strong> 的内存才属于 Unified Memory。</li>
+</ul>
+<p>关于这一工作模式的完整说明，请参见==<a href="">CUDA官方文档学习6：统一内存（二）（暂未发布）</a>==中的 <strong>《Unified Memory on Windows, WSL, and Tegra》</strong>。</p>
+<h2>2.4 内存建议与预取</h2>
+<p>程序员可以向负责管理<strong>Unified Memory</strong>的<strong>NVIDIA Driver</strong>提供<strong>提示（hints）</strong>，帮助其尽可能提高应用程序的性能。</p>
+<p>CUDA API <code class="notranslate">cudaMemAdvise</code>允许程序员为内存分配指定一些属性（properties），这些属性会影响：</p>
+<ul>
+<li>内存应当放置（placed）在哪里；</li>
+<li>当该内存被其他设备访问时，是否需要迁移（migrated）。<br>
+CUDA API <code class="notranslate">cudaMemPrefetchAsync</code>允许程序员建议（suggest）系统异步地（asynchronously）将某一块指定的内存分配迁移（migrate）到另一个位置，并开始这一迁移过程。</li>
+</ul>
+<p>一种常见的用法是在 <strong>Kernel 启动之前</strong>，提前开始传输该 Kernel 将要使用的数据。这样，数据拷贝可以在<strong>其他 GPU Kernel 正在执行</strong>时同时进行。</p>
+<p>==<a href="">CUDA官方文档学习6：统一内存（二）（暂未发布）</a>==中的**《Performance Hints》** 一节介绍了可以传递给 <code class="notranslate">cudaMemAdvise</code>的各种提示（hints），并给出了使用<code class="notranslate">cudaMemPrefetchAsync</code>的示例。</p>
+<h1>3.页锁定主机内存</h1>
+<p>在之前博客的入门代码示例中，我们使用 <code class="notranslate">cudaMallocHost</code>在CPU上分配内存。该函数在主机（Host）上分配页锁定内存（Page-locked Memory），也称为<strong>固定内存（Pinned Memory）</strong>。</p>
+<p>通过传统内存分配机制（如 <code class="notranslate">malloc</code>、<code class="notranslate">new</code> 或 <code class="notranslate">mmap</code>）分配的主机内存不是页锁定内存，这意味着它们可能会被操作系统换出到磁盘（swapped to disk），或者重新映射到其他物理地址（physically relocated）。</p>
+<p>而页锁定主机内存是 <strong>CPU 与 GPU 之间进行异步数据拷贝（asynchronous copies）</strong> 所必需的。页锁定主机内存还能够提高<strong>同步数据拷贝（synchronous copies）</strong> 的性能。此外，页锁定内存还可以被<strong>映射（mapped）</strong> 到 GPU，使 GPU Kernel 能够直接访问。</p>
+<p>CUDA Runtime 提供了用于分配页锁定主机内存，或将已有内存页锁定的 API：</p>
+<ul>
+<li><code class="notranslate">cudaMallocHost</code>：分配页锁定主机内存。</li>
+<li><code class="notranslate">cudaHostAlloc</code>：默认行为与 <code class="notranslate">cudaMallocHost</code>相同，但还可以通过传入标志（flags）指定其他内存参数。</li>
+<li><code class="notranslate">cudaFreeHost</code>：释放由 <code class="notranslate">cudaMallocHost</code>或<code class="notranslate">cudaHostAlloc</code>分配的内存。</li>
+<li><code class="notranslate">cudaHostRegister</code>：将 CUDA API 之外分配的一段已有内存（例如通过 <code class="notranslate">malloc</code>或 <code class="notranslate">mmap</code>分配）设置为页锁定内存。</li>
+</ul>
+<blockquote>
+<p><strong>注意（Note）</strong>：页锁定主机内存可用于系统中所有 GPU的异步数据拷贝和映射内存。在不支持 I/O 一致性（non I/O coherent）的 Tegra 设备上，页锁定主机内存不会被缓存（cached）。此外，<code class="notranslate">cudaHostRegister()</code>在不支持 I/O 一致性的 Tegra 设备上不受支持。</p>
+</blockquote>
+<h2>3.1 映射内存</h2>
+<p>在支持HMM或ATS的系统上，所有主机内存（Host Memory）都可以通过主机指针（host pointers）被 GPU 直接访问。<br>
+当ATS或HMM不可用时，可以通过<strong>将主机内存映射（mapping）到 GPU 的内存空间</strong>，使主机内存能够被 GPU 访问。<strong>Mapped Memory 始终是页锁定内存（page-locked memory）</strong>。</p>
+<p>下面的代码示例将演示以下数组复制 Kernel，它直接在映射后的主机内存（mapped host memory）上执行。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__global__ <span class="pl-k">void</span> <span class="pl-en">copyKernel</span>(<span class="pl-k">float</span>* a, <span class="pl-k">float</span>* b)
+{
+    <span class="pl-k">int</span> idx = threadIdx.<span class="pl-smi">x</span> + blockDim.<span class="pl-smi">x</span> * blockIdx.<span class="pl-smi">x</span>;
+    a[idx] = b[idx];
+}</pre></div>
+<p>虽然在某些场景下，Mapped Memory 很有用，例如某些不会复制到 GPU、但又需要在 Kernel 中访问的数据，但在 Kernel 中访问 Mapped Memory，需要通过 <strong>CPU–GPU 互连（CPU-GPU interconnect）</strong> 发起访问事务（transactions），例如</p>
+<ul>
+<li>PCIe</li>
+<li>NVLink C2C<br>
+与访问<strong>设备内存（device memory）</strong> 相比，这种访问具有<strong>更高的延迟（higher latency）</strong> 和<strong>更低的带宽（lower bandwidth）</strong>。<br>
+对于大多数 Kernel 的内存需求而言，<strong>Mapped Memory 不应被视为 Unified Memory 或显式内存管理（explicit memory management）的高性能替代方案。</strong></li>
+</ul>
+<h2>3.2 cudaMallocHost与cudaHostAlloc</h2>
+<p>使用 <code class="notranslate">cudaMallocHost</code> 或 <code class="notranslate">cudaHostAlloc</code> 分配的主机内存（Host Memory）会自动完成映射（mapped）。这些 API 返回的指针可以直接在 Kernel 代码中使用，以访问位于主机上的这块内存。对这块主机内存的访问，是通过 CPU–GPU 互连（CPU-GPU interconnect）完成的。</p>
+<p>一个使用cudaMallocHost的例子：</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">void</span> <span class="pl-en">usingMallocHost</span>() {
+  <span class="pl-k">float</span>* a = <span class="pl-c1">nullptr</span>;
+  <span class="pl-k">float</span>* b = <span class="pl-c1">nullptr</span>;
+  
+  <span class="pl-c1">CUDA_CHECK</span>(<span class="pl-c1">cudaMallocHost</span>(&amp;a, vLen*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>)));
+  <span class="pl-c1">CUDA_CHECK</span>(<span class="pl-c1">cudaMallocHost</span>(&amp;b, vLen*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>)));
+
+  <span class="pl-c1">initVector</span>(b, vLen);
+  <span class="pl-c1">memset</span>(a, <span class="pl-c1">0</span>, vLen*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+
+  <span class="pl-k">int</span> threads = <span class="pl-c1">256</span>;
+  <span class="pl-k">int</span> blocks = vLen/threads;
+  copyKernel&lt;&lt;&lt;blocks, threads&gt;&gt;&gt;(a, b);
+  <span class="pl-c1">CUDA_CHECK</span>(<span class="pl-c1">cudaGetLastError</span>());
+  <span class="pl-c1">CUDA_CHECK</span>(<span class="pl-c1">cudaDeviceSynchronize</span>());
+
+  <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Using cudaMallocHost: <span class="pl-pds">"</span></span>);
+  <span class="pl-c1">checkAnswer</span>(a,b);
+}</pre></div>
+<p>一个使用cudaHostAlloc的例子：</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">void</span> <span class="pl-en">usingCudaHostAlloc</span>() {
+  <span class="pl-k">float</span>* a = <span class="pl-c1">nullptr</span>;
+  <span class="pl-k">float</span>* b = <span class="pl-c1">nullptr</span>;
+
+  <span class="pl-c1">CUDA_CHECK</span>(<span class="pl-c1">cudaHostAlloc</span>(&amp;a, vLen*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>), cudaHostAllocMapped));
+  <span class="pl-c1">CUDA_CHECK</span>(<span class="pl-c1">cudaHostAlloc</span>(&amp;b, vLen*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>), cudaHostAllocMapped));
+
+  <span class="pl-c1">initVector</span>(b, vLen);
+  <span class="pl-c1">memset</span>(a, <span class="pl-c1">0</span>, vLen*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+
+  <span class="pl-k">int</span> threads = <span class="pl-c1">256</span>;
+  <span class="pl-k">int</span> blocks = vLen/threads;
+  copyKernel&lt;&lt;&lt;blocks, threads&gt;&gt;&gt;(a, b);
+  <span class="pl-c1">CUDA_CHECK</span>(<span class="pl-c1">cudaGetLastError</span>());
+  <span class="pl-c1">CUDA_CHECK</span>(<span class="pl-c1">cudaDeviceSynchronize</span>());
+
+  <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Using cudaHostAlloc: <span class="pl-pds">"</span></span>);
+  <span class="pl-c1">checkAnswer</span>(a, b);
+}</pre></div>
+<h2>3.3 cudaHostRegister</h2>
+<p>当ATS和HMM不可用时，通过系统内存分配器（system allocators）分配的内存，仍然可以使用 <code class="notranslate">cudaHostRegister</code>进行映射（mapped），从而允许 GPU Kernel 直接访问。<br>
+但是，与通过 CUDA API 创建的内存不同，这类内存不能在 Kernel 中直接使用主机指针（host pointer）进行访问。必须通过 <code class="notranslate">cudaHostGetDevicePointer()</code>获取一个位于设备内存地址空间（device's memory region）中的指针，并且 Kernel 中必须使用该设备指针（device pointer）来访问这块内存。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">void</span> <span class="pl-en">usingRegister</span>() {
+  <span class="pl-k">float</span>* a = <span class="pl-c1">nullptr</span>;
+  <span class="pl-k">float</span>* b = <span class="pl-c1">nullptr</span>;
+  <span class="pl-k">float</span>* devA = <span class="pl-c1">nullptr</span>;
+  <span class="pl-k">float</span>* devB = <span class="pl-c1">nullptr</span>;
+
+  a = (<span class="pl-k">float</span>*)<span class="pl-c1">malloc</span>(vLen*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+  b = (<span class="pl-k">float</span>*)<span class="pl-c1">malloc</span>(vLen*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+  <span class="pl-c1">CUDA_CHECK</span>(<span class="pl-c1">cudaHostRegister</span>(a, vLen*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>), <span class="pl-c1">0</span> ));
+  <span class="pl-c1">CUDA_CHECK</span>(<span class="pl-c1">cudaHostRegister</span>(b, vLen*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>), <span class="pl-c1">0</span>  ));
+
+  <span class="pl-c1">CUDA_CHECK</span>(<span class="pl-c1">cudaHostGetDevicePointer</span>((<span class="pl-k">void</span>**)&amp;devA, (<span class="pl-k">void</span>*)a, <span class="pl-c1">0</span>));
+  <span class="pl-c1">CUDA_CHECK</span>(<span class="pl-c1">cudaHostGetDevicePointer</span>((<span class="pl-k">void</span>**)&amp;devB, (<span class="pl-k">void</span>*)b, <span class="pl-c1">0</span>));
+
+  <span class="pl-c1">initVector</span>(b, vLen);
+  <span class="pl-c1">memset</span>(a, <span class="pl-c1">0</span>, vLen*<span class="pl-k">sizeof</span>(<span class="pl-k">float</span>));
+
+  <span class="pl-k">int</span> threads = <span class="pl-c1">256</span>;
+  <span class="pl-k">int</span> blocks = vLen/threads;
+  copyKernel&lt;&lt;&lt;blocks, threads&gt;&gt;&gt;(devA, devB);
+  <span class="pl-c1">CUDA_CHECK</span>(<span class="pl-c1">cudaGetLastError</span>());
+  <span class="pl-c1">CUDA_CHECK</span>(<span class="pl-c1">cudaDeviceSynchronize</span>());
+
+  <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Using cudaHostRegister: <span class="pl-pds">"</span></span>);
+  <span class="pl-c1">checkAnswer</span>(a, b);
+}</pre></div>
+<h2>3.4 比较统一内存和映射内存</h2>
+<p>Mapped Memory使CPU 内存能够被GPU访问，但并不保证所有类型的访问（例如原子操作（atomics））在所有系统上都受到支持。而 <strong>Unified Memory</strong> 保证支持所有类型的访问。</p>
+<p>Mapped Memory 始终驻留在CPU 内存中，这意味着 GPU 对它的所有访问都必须经过CPU与 GPU之间的互连，即：</p>
+<ul>
+<li>PCIe</li>
+<li>NVLink<br>
+通过这些互连进行访问的延迟（latency）明显高于访问 GPU 内存，同时可用的总带宽（bandwidth）也更低。</li>
+</ul>
+<p>因此，将 Mapped Memory 用于 Kernel 的全部内存访问，通常<strong>无法充分利用 GPU 的计算资源。</strong></p>
+<p>Unified Memory 通常会迁移（migrated）到当前访问它的处理器（processor）的物理内存中。在第一次迁移之后，如果 Kernel 重复访问同一个内存页（memory page）或缓存行（cache line），则可以利用 GPU 的全部内存带宽。</p>
+<blockquote>
+<p><strong>注意（Note）</strong><br>
+Mapped Memory 在以前的文档中也称为 <strong>Zero-copy Memory（零拷贝内存）</strong>。<br>
+在所有 CUDA 应用程序都采用统一虚拟地址空间之前，需要额外的 API 来启用内存映射，例如：<code class="notranslate">cudaSetDeviceFlags</code>、<code class="notranslate">cudaDeviceMapHost</code>，现在已经不再需要这些 API。<br>
+作用于映射主机内存（mapped host memory）上的原子函数（Atomic Functions）（参见 <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cpp-language-extensions.html#memory-space-specifiers" rel="nofollow">5.4. C/C++ Language Extensions</a>），从主机（Host）或其他 GPU 的角度来看，并不是原子的。<br>
+CUDA Runtime 要求：由设备（Device）发起、对主机内存进行的以下自然对齐（naturally aligned）读写操作：1 字节、2 字节、4 字节、8 字节、16 字节，从主机和其他设备的角度来看，都必须保持为一次单独的访问（single accesses）。<br>
+在某些平台上，硬件可能会将对内存执行的原子操作拆分为独立的加载（load）和存储（store）操作。这些拆分后的加载和存储操作，同样需要满足上述关于自然对齐访问保持完整性的要求。<br>
+CUDA Runtime 不支持这样一种PCI Express总线拓扑：即 PCI Express Bridge（PCI Express 桥）会将一个自然对齐的 8 字节访问拆分成多个访问。此外，NVIDIA 目前尚不了解任何会将自然对齐的 16 字节访问拆分开的 PCI Express 拓扑。</p>
+</blockquote>
+<h1>4.总结</h1>
+<p>在支持 Heterogeneous Memory Management（HMM） 或 Address Translation Services（ATS） 的 Linux 平台上，所有通过系统分配的内存（system-allocated memory）都是 Managed Memory。</p>
+<p>在不支持 HMM 或 ATS 的 Linux 平台、Tegra 处理器以及所有 Windows 平台上，Managed Memory 必须通过 CUDA 显式分配，可采用以下方式：cudaMallocManaged()；或cudaMallocFromPoolAsync()，其中使用的内存池（memory pool）需设置：allocType = cudaMemAllocationTypeManaged</p>
+<p>在 Windows 和 Tegra 处理器上，Unified Memory 存在一定的限制（limitations）。<br>
+在采用 NVLink C2C 互连并支持 ATS 的系统上，通过 cudaMallocManaged 分配的设备内存（device memory）可以被 CPU 或其他 GPU 直接访问。</p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
