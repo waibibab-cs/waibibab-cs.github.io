@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="原文链接：
+[4.1. Unified Memory](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/unified-memory.html#um-legacy-devices)
+# 前言
+本节将详细介绍目前可用的各种统一内存工作模式（paradigms）的行为及其使用方式。">
+<meta property="og:title" content="CUDA官方文档学习6：统一内存（二）">
+<meta property="og:description" content="原文链接：
+[4.1. Unified Memory](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/unified-memory.html#um-legacy-devices)
+# 前言
+本节将详细介绍目前可用的各种统一内存工作模式（paradigms）的行为及其使用方式。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/CUDA-guan-fang-wen-dang-xue-xi-6%EF%BC%9A-tong-yi-nei-cun-%EF%BC%88-er-%EF%BC%89.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>CUDA官方文档学习6：统一内存（二）</title>
+<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">CUDA官方文档学习6：统一内存（二）</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/70" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>原文链接：<br>
+<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/unified-memory.html#um-legacy-devices" rel="nofollow">4.1. Unified Memory</a></p>
+<h1>前言</h1>
+<p>本节将详细介绍目前可用的各种统一内存工作模式（paradigms）的行为及其使用方式。之前的文章<a href="https://waibibab-cs.github.io/post/CUDA-guan-fang-wen-dang-xue-xi-5%EF%BC%9A-tong-yi-nei-cun-%EF%BC%88-yi-%EF%BC%89.html" rel="nofollow">CUDA官方文档学习5：统一内存（一）</a>一节已经介绍了如何判断当前系统所采用的 Unified Memory 工作模式，并对每一种工作模式进行了简要说明。</p>
+<p>如前所述，Unified Memory 编程共有四种工作模式：</p>
+<ul>
+<li>对显式分配的 Managed Memory 提供完整支持（Full support for explicit managed memory allocations）（见1）</li>
+<li>对所有内存分配提供完整支持，并采用软件一致性（Full support for all allocations with software coherence）（见2）</li>
+<li>对所有内存分配提供完整支持，并采用硬件一致性（Full support for all allocations with hardware coherence）（见2）</li>
+<li>有限 Unified Memory 支持（Limited unified memory support）（见3）<br>
+前三种工作模式均属于<strong>完整 Unified Memory 支持（Full Unified Memory Support）</strong>，它们具有非常相似的行为和编程模型，将在后续 <strong>《具备完整CUDA统一内存支持的设备上的统一内存》</strong> 一节中介绍，并指出它们之间存在的差异。</li>
+</ul>
+<p>最后一种工作模式，即<strong>Unified Memory 支持受限</strong>的情况，将在后续 <strong>《Windows、WSL与Tegra上的统一内存》</strong> 一节中进行详细介绍。</p>
+<h1>1.具备完整CUDA统一内存支持的统一内存</h1>
+<p>这些系统包括<strong>硬件一致性内存系统（hardware-coherent memory systems）</strong>，例如NVIDIA Grace Hopper，以及启用了<strong>异构内存管理（Heterogeneous Memory Management，HMM）</strong> 的现代 Linux 系统提供了软件一致性。（本小节“具备完整CUDA统一内存支持”默认指的是支持ATS/HMM的平台，排除了“仅对显式分配的 Managed Memory 提供完整支持”的平台）</p>
+<p>HMM 是一种基于软件的内存管理系统，其提供的编程模型与硬件一致性内存系统相同。Linux HMM要求：</p>
+<ul>
+<li>Linux 内核版本 6.1.24+、6.2.11+ 或 6.3+；</li>
+<li>计算能力（Compute Capability）7.5 或更高的设备；</li>
+<li>安装 535+版本的 CUDA 驱动，并使用 <a href="https://docs.nvidia.com/datacenter/tesla/driver-installation-guide/kernel-modules.html#open-gpu-kernel-modules-installation" rel="nofollow">Open Kernel Modules</a>。</li>
+</ul>
+<blockquote>
+<p>注意（Note）：我们将 CPU 和 GPU 共用同一页表（combined page table）的系统称为<strong>硬件一致性系统（hardware-coherent systems）</strong>。CPU 和 GPU 分别使用独立页表（separate page tables）的系统称为<strong>软件一致性系统（software-coherent systems）</strong>。</p>
+</blockquote>
+<p>像NVIDIA Grace Hopper这样的硬件一致性系统，为 CPU 和 GPU 提供了逻辑上的统一页表，将在后续 <strong>《CPU 与 GPU 页表：硬件一致性 vs 软件一致性》</strong> 中介绍。</p>
+<p>后续的 <strong>《访问计数器迁移》</strong> 这一小节仅适用于硬件一致性系统。</p>
+<h2>1.1 统一内存：深度实例解析</h2>
+<p>具有完整 CUDA Unified Memory 支持的系统允许设备（Device）访问与该设备交互的主机进程（host process）所拥有的任意内存。</p>
+<p>本节将通过几个高级用例进行说明，这些示例均使用一个简单的 Kernel，该 Kernel 仅将输入字符数组的前8个字符输出到标准输出流（standard output stream）。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__global__ <span class="pl-k">void</span> <span class="pl-en">kernel</span>(<span class="pl-k">const</span> <span class="pl-k">char</span>* type, <span class="pl-k">const</span> <span class="pl-k">char</span>* data) {
+  <span class="pl-k">static</span> <span class="pl-k">const</span> <span class="pl-k">int</span> n_char = <span class="pl-c1">8</span>;
+  <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>%s - first %d characters: '<span class="pl-pds">"</span></span>, type, n_char);
+  <span class="pl-k">for</span> (<span class="pl-k">int</span> i = <span class="pl-c1">0</span>; i &lt; n_char; ++i) <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>%c<span class="pl-pds">"</span></span>, data[i]);
+  <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>'<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>);
+}</pre></div>
+<p>接下来展示了使用系统分配内存调用该内核的多种方式：<br>
+<strong>Malloc</strong></p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">void</span> <span class="pl-en">test_malloc</span>() {
+  <span class="pl-k">const</span> <span class="pl-k">char</span> test_string[] = <span class="pl-s"><span class="pl-pds">"</span>Hello World<span class="pl-pds">"</span></span>;
+  <span class="pl-k">char</span>* heap_data = (<span class="pl-k">char</span>*)<span class="pl-c1">malloc</span>(<span class="pl-k">sizeof</span>(test_string));
+  <span class="pl-c1">strncpy</span>(heap_data, test_string, <span class="pl-k">sizeof</span>(test_string));
+  kernel&lt;&lt;&lt;<span class="pl-c1">1</span>, <span class="pl-c1">1</span>&gt;&gt;&gt;(<span class="pl-s"><span class="pl-pds">"</span>malloc<span class="pl-pds">"</span></span>, heap_data);
+  <span class="pl-c1">ASSERT</span>(<span class="pl-c1">cudaDeviceSynchronize</span>() == cudaSuccess,
+    <span class="pl-s"><span class="pl-pds">"</span>CUDA failed with '%s'<span class="pl-pds">"</span></span>, <span class="pl-c1">cudaGetErrorString</span>(<span class="pl-c1">cudaGetLastError</span>()));
+  <span class="pl-c1">free</span>(heap_data);
+}</pre></div>
+<p>这段代码的作用是验证GPU能否直接访问由<code class="notranslate">malloc</code>分配的普通系统内存，一般来说如果是ATS/HMM平台上可以，否则不能。</p>
+<p><strong>Managed</strong></p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">void</span> <span class="pl-en">test_managed</span>() {
+  <span class="pl-k">const</span> <span class="pl-k">char</span> test_string[] = <span class="pl-s"><span class="pl-pds">"</span>Hello World<span class="pl-pds">"</span></span>;
+  <span class="pl-k">char</span>* data;
+  <span class="pl-c1">cudaMallocManaged</span>(&amp;data, <span class="pl-k">sizeof</span>(test_string));
+  <span class="pl-c1">strncpy</span>(data, test_string, <span class="pl-k">sizeof</span>(test_string));
+  kernel&lt;&lt;&lt;<span class="pl-c1">1</span>, <span class="pl-c1">1</span>&gt;&gt;&gt;(<span class="pl-s"><span class="pl-pds">"</span>managed<span class="pl-pds">"</span></span>, data);
+  <span class="pl-c1">ASSERT</span>(<span class="pl-c1">cudaDeviceSynchronize</span>() == cudaSuccess,
+    <span class="pl-s"><span class="pl-pds">"</span>CUDA failed with '%s'<span class="pl-pds">"</span></span>, <span class="pl-c1">cudaGetErrorString</span>(<span class="pl-c1">cudaGetLastError</span>()));
+  <span class="pl-c1">cudaFree</span>(data);
+}</pre></div>
+<p>这个示例的意义就是验证 <code class="notranslate">cudaMallocManaged()</code> 分配的 Managed Memory 在所有支持 Full CUDA Unified Memory 的平台（包括 Explicit Managed、HMM 和 ATS）上，都能够被 GPU 直接访问。</p>
+<p><strong>Stack variable</strong></p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">void</span> <span class="pl-en">test_stack</span>() {
+  <span class="pl-k">const</span> <span class="pl-k">char</span> test_string[] = <span class="pl-s"><span class="pl-pds">"</span>Hello World<span class="pl-pds">"</span></span>;
+  kernel&lt;&lt;&lt;<span class="pl-c1">1</span>, <span class="pl-c1">1</span>&gt;&gt;&gt;(<span class="pl-s"><span class="pl-pds">"</span>stack<span class="pl-pds">"</span></span>, test_string);
+  <span class="pl-c1">ASSERT</span>(<span class="pl-c1">cudaDeviceSynchronize</span>() == cudaSuccess,
+    <span class="pl-s"><span class="pl-pds">"</span>CUDA failed with '%s'<span class="pl-pds">"</span></span>, <span class="pl-c1">cudaGetErrorString</span>(<span class="pl-c1">cudaGetLastError</span>()));
+}</pre></div>
+<p>该案例验证GPU能否直接访问CPU栈上的局部变量</p>
+<p><strong>File-scope static variable</strong></p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">void</span> <span class="pl-en">test_static</span>() {
+  <span class="pl-k">static</span> <span class="pl-k">const</span> <span class="pl-k">char</span> test_string[] = <span class="pl-s"><span class="pl-pds">"</span>Hello World<span class="pl-pds">"</span></span>;
+  kernel&lt;&lt;&lt;<span class="pl-c1">1</span>, <span class="pl-c1">1</span>&gt;&gt;&gt;(<span class="pl-s"><span class="pl-pds">"</span>static<span class="pl-pds">"</span></span>, test_string);
+  <span class="pl-c1">ASSERT</span>(<span class="pl-c1">cudaDeviceSynchronize</span>() == cudaSuccess,
+    <span class="pl-s"><span class="pl-pds">"</span>CUDA failed with '%s'<span class="pl-pds">"</span></span>, <span class="pl-c1">cudaGetErrorString</span>(<span class="pl-c1">cudaGetLastError</span>()));
+}</pre></div>
+<p>该案例验证GPU能否直接访问CPU静态存储区中的数据</p>
+<p><strong>Global-scope variable</strong></p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">const</span> <span class="pl-k">char</span> global_string[] = <span class="pl-s"><span class="pl-pds">"</span>Hello World<span class="pl-pds">"</span></span>;
+
+<span class="pl-k">void</span> <span class="pl-en">test_global</span>() {
+  kernel&lt;&lt;&lt;<span class="pl-c1">1</span>, <span class="pl-c1">1</span>&gt;&gt;&gt;(<span class="pl-s"><span class="pl-pds">"</span>global<span class="pl-pds">"</span></span>, global_string);
+  <span class="pl-c1">ASSERT</span>(<span class="pl-c1">cudaDeviceSynchronize</span>() == cudaSuccess,
+    <span class="pl-s"><span class="pl-pds">"</span>CUDA failed with '%s'<span class="pl-pds">"</span></span>, <span class="pl-c1">cudaGetErrorString</span>(<span class="pl-c1">cudaGetLastError</span>()));
+}</pre></div>
+<p>该案例验证GPU能否直接访问CPU全局变量中的数据</p>
+<p><strong>Global-scope extern variable</strong></p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> declared in separate file, see below</span>
+<span class="pl-k">extern</span> <span class="pl-k">char</span>* ext_data;
+
+<span class="pl-k">void</span> <span class="pl-en">test_extern</span>() {
+  kernel&lt;&lt;&lt;<span class="pl-c1">1</span>, <span class="pl-c1">1</span>&gt;&gt;&gt;(<span class="pl-s"><span class="pl-pds">"</span>extern<span class="pl-pds">"</span></span>, ext_data);
+  <span class="pl-c1">ASSERT</span>(<span class="pl-c1">cudaDeviceSynchronize</span>() == cudaSuccess,
+    <span class="pl-s"><span class="pl-pds">"</span>CUDA failed with '%s'<span class="pl-pds">"</span></span>, <span class="pl-c1">cudaGetErrorString</span>(<span class="pl-c1">cudaGetLastError</span>()));
+}
+
+<span class="pl-c"><span class="pl-c">/*</span>* This may be a non-CUDA file(the other file) <span class="pl-c">*/</span></span>
+<span class="pl-k">char</span>* ext_data;
+<span class="pl-k">static</span> <span class="pl-k">const</span> <span class="pl-k">char</span> global_string[] = <span class="pl-s"><span class="pl-pds">"</span>Hello World<span class="pl-pds">"</span></span>;
+
+<span class="pl-k">void</span> <span class="pl-en">__attribute__</span> ((constructor)) setup(<span class="pl-k">void</span>) {
+  ext_data = (<span class="pl-k">char</span>*)<span class="pl-c1">malloc</span>(<span class="pl-k">sizeof</span>(global_string));
+  <span class="pl-c1">strncpy</span>(ext_data, global_string, <span class="pl-k">sizeof</span>(global_string));
+}
+
+<span class="pl-k">void</span> <span class="pl-en">__attribute__</span> ((destructor)) tear_down(<span class="pl-k">void</span>) {
+  <span class="pl-c1">free</span>(ext_data);
+}</pre></div>
+<p>该案例验证GPU能否直接访问其他源文件中定义的全局指针所指向的系统内存。其中<code class="notranslate">ext_data</code>这个指针变量位于CPU全局存储区，<code class="notranslate">ext_data</code>指向的数据位于CPU堆，<code class="notranslate">global_string</code>位于CPU静态存储区<br>
+<code class="notranslate">__attribute__</code>介绍：这是GCC/Clang的扩展语法，不是C/C++标准语法，其作用是：<strong>给编译器添加一些特殊属性，控制函数或变量的行为</strong>，语法形式：</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-en">__attribute__</span>((属性名))
+or
+__attribute__((属性<span class="pl-c1">1</span>,属性<span class="pl-c1">2</span>,...))</pre></div>
+<p>上述代码中使用的属性是：<code class="notranslate">constructor</code>，表示：<strong>程序启动时，在<code class="notranslate">main()</code>执行之前自动调用<code class="notranslate">setup()</code>这个函数</strong>，同时<code class="notranslate">destructor</code>表示程序结束时，自动调用<code class="notranslate">tear_down()</code></p>
+<p>注意，对于 <code class="notranslate">extern</code> 变量而言，它可能是在<strong>第三方库</strong>中声明的，其所指向的内存也是由该第三方库负责分配和管理，即使这块内存完全由一个<strong>从未接触 CUDA 的第三方库</strong>负责分配和管理，GPU 仍然可以直接访问它（前提是 HMM 或 ATS 平台）。<br>
+还需要注意的是，栈变量（stack variables）、文件作用域变量（file-scope variables）以及全局作用域变量（global-scope variables），GPU 只能通过指针（pointer）来访问它们。在本例中，这一点比较方便，因为字符数组本身就是以指针类型 <code class="notranslate">const char*</code> 的形式使用的。<br>
+然而，请考虑下面这个使用全局作用域整数变量（global-scope integer）的示例：</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> this variable is declared at global scope</span>
+<span class="pl-k">int</span> global_variable;
+
+__global__ <span class="pl-k">void</span> <span class="pl-en">kernel_uncompilable</span>() {
+  <span class="pl-c"><span class="pl-c">//</span> this causes a compilation error: global (__host__) variables must not</span>
+  <span class="pl-c"><span class="pl-c">//</span> be accessed from __device__ / __global__ code</span>
+  <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>%d<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>, global_variable);
+}
+
+<span class="pl-c"><span class="pl-c">//</span> On systems with pageableMemoryAccess set to 1, we can access the address</span>
+<span class="pl-c"><span class="pl-c">//</span> of a global variable. The below kernel takes that address as an argument</span>
+__global__ <span class="pl-k">void</span> <span class="pl-en">kernel</span>(<span class="pl-k">int</span>* global_variable_addr) {
+  <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>%d<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>, *global_variable_addr);
+}
+<span class="pl-k">int</span> <span class="pl-en">main</span>() {
+  kernel&lt;&lt;&lt;<span class="pl-c1">1</span>, <span class="pl-c1">1</span>&gt;&gt;&gt;(&amp;global_variable);
+  ...
+  <span class="pl-k">return</span> <span class="pl-c1">0</span>;
+}</pre></div>
+<p>在上面的示例中，我们需要确保将指向全局变量的指针传递给内核，而非在内核中直接访问该全局变量。这是因为未添加 <code class="notranslate">__managed__</code> 说明符的全局变量默认会被声明为仅 <code class="notranslate">__host__</code> 可用，因此目前大多数编译器都不允许在设备代码中直接使用这类变量（即使是在ATS/HMM平台上），而如果添加了__managed__说明符，那么在ATS/HMM以及非ATS与HMM的全统一内存支持的平台上都可以直接访问这个变量</p>
+<h3>1.1.1 文件后端的统一内存</h3>
+<p>由于支持完整 CUDA Unified Memory（Full CUDA Unified Memory Support）的系统允许设备访问属于主机进程的任意内存，因此GPU也可以直接访问文件后端内存（file-backed memory）。</p>
+<blockquote>
+<p>文件后端内存（file-backed memory）简介<br>
+Linux内存分类两大种：File-backed memory与Anonymous memory<br>
+File-backed memory的内存页关联磁盘上真实文件，来源包括读取程序二进制、库文件、配置、日志、数据文件、mmap映射文件，特点为：内存不足时直接写回原磁盘文件，不用单独开辟交换分区，且回收极快，系统优先回收这类内存。<br>
+Anonymous memory无对应磁盘文件，进程堆、栈、临时数据、malloc分配的内存都属于它，内存不够只能丢去swap交换分区</p>
+</blockquote>
+<p>下面我们将前一节中的初始示例稍作修改，改为使用文件后端内存，使 GPU 能够直接从输入文件中读取字符串并输出。在下面的示例中，这块内存以后端为物理文件（physical file）的方式进行管理；不过，该示例同样适用于内存后端文件（memory-backed file）。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__global__ <span class="pl-k">void</span> <span class="pl-en">kernel</span>(<span class="pl-k">const</span> <span class="pl-k">char</span>* type, <span class="pl-k">const</span> <span class="pl-k">char</span>* data) {
+  <span class="pl-k">static</span> <span class="pl-k">const</span> <span class="pl-k">int</span> n_char = <span class="pl-c1">8</span>;
+  <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>%s - first %d characters: '<span class="pl-pds">"</span></span>, type, n_char);
+  <span class="pl-k">for</span> (<span class="pl-k">int</span> i = <span class="pl-c1">0</span>; i &lt; n_char; ++i) <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>%c<span class="pl-pds">"</span></span>, data[i]);
+  <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>'<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>);
+}</pre></div>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">void</span> <span class="pl-en">test_file_backed</span>() {
+  <span class="pl-k">int</span> fd = <span class="pl-c1">open</span>(<span class="pl-c1">INPUT_FILE_NAME</span>, <span class="pl-c1">O_RDONLY</span>);
+  <span class="pl-c1">ASSERT</span>(fd &gt;= <span class="pl-c1">0</span>, <span class="pl-s"><span class="pl-pds">"</span>Invalid file handle<span class="pl-pds">"</span></span>);
+  <span class="pl-k">struct</span> <span class="pl-en">stat</span> file_stat;
+  <span class="pl-k">int</span> status = <span class="pl-c1">fstat</span>(fd, &amp;file_stat);
+  <span class="pl-c1">ASSERT</span>(status &gt;= <span class="pl-c1">0</span>, <span class="pl-s"><span class="pl-pds">"</span>Invalid file stats<span class="pl-pds">"</span></span>);
+  <span class="pl-k">char</span>* mapped = (<span class="pl-k">char</span>*)<span class="pl-c1">mmap</span>(<span class="pl-c1">0</span>, file_stat.<span class="pl-smi">st_size</span>, <span class="pl-c1">PROT_READ</span>, <span class="pl-c1">MAP_PRIVATE</span>, fd, <span class="pl-c1">0</span>);  <span class="pl-c1">ASSERT</span>(mapped != <span class="pl-c1">MAP_FAILED</span>, <span class="pl-s"><span class="pl-pds">"</span>Cannot map file into memory<span class="pl-pds">"</span></span>);
+  kernel&lt;&lt;&lt;<span class="pl-c1">1</span>, <span class="pl-c1">1</span>&gt;&gt;&gt;(<span class="pl-s"><span class="pl-pds">"</span>file-backed<span class="pl-pds">"</span></span>, mapped);  <span class="pl-c1">ASSERT</span>(<span class="pl-c1">cudaDeviceSynchronize</span>() == cudaSuccess,
+    <span class="pl-s"><span class="pl-pds">"</span>CUDA failed with '%s'<span class="pl-pds">"</span></span>, <span class="pl-c1">cudaGetErrorString</span>(<span class="pl-c1">cudaGetLastError</span>()));
+  <span class="pl-c1">ASSERT</span>(<span class="pl-c1">munmap</span>(mapped, file_stat.<span class="pl-smi">st_size</span>) == <span class="pl-c1">0</span>, <span class="pl-s"><span class="pl-pds">"</span>Cannot unmap file<span class="pl-pds">"</span></span>);
+  <span class="pl-c1">ASSERT</span>(<span class="pl-c1">close</span>(fd) == <span class="pl-c1">0</span>, <span class="pl-s"><span class="pl-pds">"</span>Cannot close file<span class="pl-pds">"</span></span>);
+}</pre></div>
+<p>mmap函数解释：</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">void</span> *<span class="pl-en">mmap</span>(
+	<span class="pl-k">void</span> *addr, <span class="pl-c"><span class="pl-c">//</span>映射的起始地址（由内核选择时填0）</span>
+	<span class="pl-c1">size_t</span> length, <span class="pl-c"><span class="pl-c">//</span>映射的长度（字节数）（一般是文件的完整大小）</span>
+	<span class="pl-k">int</span> prot, <span class="pl-c"><span class="pl-c">//</span>内存保护权限（PROT_READ表示映射区仅允许读操作，写操作会触发段错误SIGSEGV）</span>
+	<span class="pl-k">int</span> flags, <span class="pl-c"><span class="pl-c">//</span>映射类型与行为标志（MAP_PRIVATE表示私有映射，对映射区修改不会写回原文件</span>
+	<span class="pl-k">int</span> fd, <span class="pl-c"><span class="pl-c">//</span>要映射的文件描述符</span>
+	<span class="pl-c1">off_t</span> offset <span class="pl-c"><span class="pl-c">//</span>文件内的偏移量（从哪里开始映射）</span>
+)</pre></div>
+<p>请注意，在不具备 hostNativeAtomicSupported 属性（见后续 <strong>《主机原生原子操作》</strong> 小节）的系统上，包括启用了 Linux HMM 的系统，均不支持对文件映射内存执行原子访问。</p>
+<h3>1.1.2 统一内存的进程间通信（IPC）</h3>
+<blockquote>
+<p>注意：将 IPC 与统一内存结合使用可能会带来显著的性能影响。</p>
+</blockquote>
+<p>许多应用倾向于让每个进程管理一个 GPU，但仍然需要使用统一内存，例如用于超额分配内存，以及从多个 GPU 访问该内存。</p>
+<p>CUDA IPC（参见“<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/inter-process-communication.html#interprocess-communication" rel="nofollow">进程间通信</a>”）不支持托管内存（managed memory）：此类内存的句柄不能通过本节讨论的任何机制进行共享。在支持完整 CUDA 统一内存的系统上，系统分配的内存具备 IPC 能力。一旦系统分配的内存已与其他进程共享，就适用相同的编程模型，这与文件后端统一内存类似。</p>
+<p>有关在 Linux 下创建具备 IPC 能力的系统分配内存的各种方法，请参阅以下资料：</p>
+<ul>
+<li><a href="https://man7.org/linux/man-pages/man2/mmap.2.html" rel="nofollow">使用 <code class="notranslate">MAP_SHARED</code> 的 <code class="notranslate">mmap</code></a></li>
+<li><a href="https://pubs.opengroup.org/onlinepubs/007904875/functions/shm_open.html" rel="nofollow">POSIX IPC API</a></li>
+<li><a href="https://man7.org/linux/man-pages/man2/memfd_create.2.html" rel="nofollow">Linux <code class="notranslate">memfd_create</code></a><br>
+请注意，使用这种技术无法在不同主机及其设备之间共享内存。</li>
+</ul>
+<h2>1.2 性能调优</h2>
+<p>为了通过统一内存获得良好性能，以下几点非常重要：</p>
+<ul>
+<li>了解系统中的分页机制如何工作，以及如何避免不必要的缺页；</li>
+<li>了解各种能够使数据保持在访问该数据的处理器本地的机制；</li>
+<li>考虑根据系统的内存传输粒度对应用程序进行调优。<br>
+作为一般性建议，性能提示（参见后续章节 <strong>《性能提示》</strong> ）可能会提升性能，但如果使用不当，与默认行为相比，性能反而可能下降。还需要注意，任何提示都会在主机端产生相应的性能开销，因此，有效的提示至少必须带来足够的性能提升，以抵消这一开销。</li>
+</ul>
+<h3>1.2.1 内存分页与页面大小</h3>
+<p>为了更好地理解统一内存对性能的影响，有必要先理解<strong>虚拟寻址（virtual addressing）</strong>、<strong>内存页（memory pages）</strong> 以及<strong>页大小（page sizes）</strong> 等概念。本小节旨在定义这些必要术语，并解释为什么<strong>分页（paging）</strong> 会对系统性能产生重要影响。</p>
+<p>目前所有支持统一内存的系统都采用<strong>虚拟地址空间（virtual address space）</strong>。这意味着，应用程序所使用的内存地址表示的是一个<strong>虚拟地址（virtual location）</strong>，它会被映射（mapped）到内存实际存放数据的<strong>物理地址（physical location）</strong>。</p>
+<p>此外，目前所有受支持的处理器（包括 CPU 和 GPU）都采用了<strong>内存分页机制（memory paging）</strong>。由于系统采用虚拟地址空间，因此内存页可以分为两类：</p>
+<ul>
+<li><strong>虚拟页（Virtual pages）</strong>：表示操作系统为每个进程维护的一块<strong>固定大小、连续的虚拟内存区域</strong>，该区域可以映射到物理内存中。需要注意的是，<strong>虚拟页本身对应的是一种映射关系</strong>。例如，同一段虚拟地址空间，可以采用不同大小的页映射到物理内存中。</li>
+<li><strong>物理页（Physical pages）</strong>：表示处理器主<strong>内存管理单元（Memory Management Unit，MMU）</strong> 所支持的一块<strong>固定大小、连续的物理内存区域</strong>，虚拟页最终会被映射到这些物理页上。</li>
+</ul>
+<p>目前，各类处理器支持的物理页大小如下：</p>
+<ul>
+<li>所有x86_64 CPU默认采用4 KiB的物理页大小。</li>
+<li>Arm CPU根据具体型号支持多种物理页大小，包括4 KiB、16 KiB、32 KiB 和 64 KiB。</li>
+<li>NVIDIA GPU同样支持多种物理页大小，但通常更倾向于使用2 MiB 或更大的物理页。<br>
+需要注意的是，这些页大小可能会随着未来硬件的发展而发生变化。</li>
+</ul>
+<p>通常情况下，虚拟页的默认大小会与物理页大小保持一致。不过，只要操作系统和硬件均支持，应用程序也可以选择不同的虚拟页大小。<br>
+一般来说，支持的虚拟页大小需要满足以下两个条件：</p>
+<ol>
+<li>必须是 <strong>2 的幂（power of 2）</strong>；</li>
+<li>必须是<strong>物理页大小的整数倍</strong>。</li>
+</ol>
+<p>负责维护虚拟页到物理页映射关系的逻辑结构称为<strong>页表（Page Table）</strong>。<br>
+其中，每一条将某个虚拟页（具有特定页大小）映射到一个或多个物理页的记录，称为<strong>页表项（Page Table Entry，PTE）</strong>。</p>
+<p>为了加速虚拟地址到物理地址的转换，目前所有受支持的处理器都提供了专门缓存页表内容的硬件缓存，这种缓存称为：<strong>Translation Lookaside Buffer（TLB，快表/地址转换后备缓冲区）</strong> ，TLB 可以缓存最近使用的页表项，从而避免每次访问内存时都查询页表，大幅降低地址转换开销。</p>
+<p>对于应用程序的性能调优而言，有两个方面尤为重要：</p>
+<ol>
+<li><strong>虚拟页大小（virtual page size）的选择。</strong></li>
+<li><strong>系统采用的是 CPU 与 GPU 共用同一套页表（combined page table），还是 CPU 与 GPU 分别维护各自独立的页表（separate page tables）。</strong><br>
+这两个因素都会显著影响统一内存的数据访问效率、地址转换开销以及页面迁移（page migration）的性能。</li>
+</ol>
+<h4>1.2.1.1 选择正确的页大小</h4>
+<p>一般来说，较小的页大小能够减少（虚拟）内存碎片（memory fragmentation），但会导致<strong>TLB 未命中（TLB misses）</strong> 增多；而较大的页大小则会增加内存碎片，但能够减少 TLB 未命中的发生。</p>
+<p>此外，由于内存迁移（memory migration）通常是<strong>以整个内存页为单位进行迁移</strong>，因此较大页大小的迁移开销通常高于较小页大小。这意味着，在使用大页的应用程序中，一次页面迁移可能需要移动更多的数据，从而导致更大的访问延迟峰值（latency spikes）。关于页面错误（page faults）的更多细节，可参考后续内容。</p>
+<p>对于性能调优而言，一个十分重要的特点是：<strong>GPU 上发生一次 TLB 未命中的代价通常远高于 CPU。</strong> 这意味着，如果一个 GPU 线程频繁随机访问采用较小页大小映射的统一内存，其访问速度可能会比访问采用较大页大小映射的统一内存慢得多。</p>
+<p>类似的情况在 CPU 上也可能发生。例如，一个 CPU 线程随机访问一大片采用小页映射的内存时，也会因为 TLB 未命中增加而导致性能下降。但与 GPU 相比，这种性能下降通常没有那么明显。<br>
+因此，对于 CPU 而言，应用程序往往可以在以下两者之间进行权衡：</p>
+<ul>
+<li>使用较小页，获得更低的内存碎片；</li>
+<li>接受一定程度的 TLB 未命中带来的性能下降。</li>
+</ul>
+<p>最后需要注意的是：通常情况下，应用程序不应该针对某种处理器的物理页大小（physical page size）进行性能优化。这是因为<strong>物理页大小可能会随着硬件平台的不同而发生变化</strong>。因此，上述关于性能调优的建议仅适用于虚拟页大小（virtual page size），而不适用于物理页大小。</p>
+<h4>1.2.1.2 CPU与GPU页表：硬件一致性vs软件一致性</h4>
+<p>像NVIDIA Grace Hopper这样的硬件一致性（hardware-coherent）系统，为 CPU 和 GPU 提供了一套<strong>逻辑上共享的页表（logically combined page table）</strong>。这一点十分重要，因为GPU 在访问由操作系统分配（system-allocated）的内存时，会直接使用 CPU 为该内存创建的页表项（Page Table Entry，PTE）。如果该页表项采用的是 CPU 默认的页大小（例如4 KiB或 64 KiB），那么当 GPU 访问一大片连续的虚拟内存区域时，就会产生大量 TLB 未命中，从而导致显著的性能下降。</p>
+<p>相反，在软件一致性（software-coherent）系统中，CPU 和 GPU <strong>各自维护独立的逻辑页表（logical page table）</strong>。在这类系统中，性能调优需要考虑另外一些因素。为了保证 CPU 与 GPU 之间的数据一致性（coherency），这类系统通常会在某个处理器访问了一块当前映射到另一个处理器物理内存中的地址时触发页面错误（page fault）。发生页面错误后，系统需要完成以下几个步骤：</p>
+<ol>
+<li>保证当前拥有该物理页的处理器（即当前该物理页所在的处理器）不能继续访问该页面。<br>
+为此，系统需要：
+<ul>
+<li>删除对应的页表项（Page Table Entry），或者</li>
+<li>更新该页表项，使其失效。</li>
+</ul>
+</li>
+<li>保证请求访问该页面的处理器能够访问该页面。<br>
+为此，系统需要：
+<ul>
+<li>创建新的页表项，或者</li>
+<li>更新已有的页表项，使其重新变为有效（valid/active）。</li>
+</ul>
+</li>
+<li>将支撑该虚拟页的物理页迁移（move/migrate）到请求访问的处理器。<br>
+这一操作通常代价较高，并且迁移所需的工作量与页大小成正比——页越大，需要搬迁的数据越多，因此迁移开销也越高。</li>
+</ol>
+<p>总体而言，在CPU 和 GPU 线程频繁并发访问同一块内存页的场景下，<strong>硬件一致性系统相比软件一致性系统具有明显的性能优势</strong>，主要体现在以下两个方面：</p>
+<ol>
+<li>更少的页面错误：硬件一致性系统<strong>无需依赖页面错误（page fault）来实现数据一致性或页面迁移</strong>。也就是说：
+<ul>
+<li>不需要因为 CPU/GPU 交替访问同一块内存而频繁触发 page fault</li>
+<li>不需要不断修改页表</li>
+<li>不需要频繁迁移整页数据<br>
+因此能够显著降低访问延迟</li>
+</ul>
+</li>
+<li>更少的竞争：硬件一致性系统是在<strong>缓存行（cache line）粒度</strong>而不是<strong>页面（page）粒度</strong>上维护一致性的。也就是说：
+<ul>
+<li>当多个处理器竞争同一个缓存行时，系统只需要交换这一条缓存行（通常64B或128B），而缓存行远小于最小的内存页（通常4KiB）。</li>
+<li>如果 CPU 和 GPU 分别访问的是同一页面中的不同缓存行，  那么它们之间不会发生竞争。</li>
+</ul>
+</li>
+</ol>
+<p>相比之下，软件一致性系统通常以整页（4KB、64KB甚至更大）作为一致性维护单位，因此即使 CPU 和 GPU 修改的是同一页中的不同数据，也可能导致整个页面迁移，造成大量额外开销。上述差异会直接影响以下典型场景的性能：</p>
+<ul>
+<li>CPU 和 GPU 同时对同一个内存地址执行原子更新（atomic updates）。例如<code class="notranslate">atomicAdd(counter, 1);</code>，CPU与GPU可以同时更新同一个计数器，而无需迁移整个页面</li>
+<li>CPU线程与GPU线程之间进行信号通知（Signaling）。例如：CPU 写入一个 flag，通知 GPU 开始执行；GPU 修改一个 flag，通知 CPU 某项任务已经完成。在硬件一致性系统中，这种同步通常只涉及缓存行状态更新，因此延迟较低；而在软件一致性系统中，则可能触发 page fault 和页面迁移，导致同步成本显著增加。</li>
+</ul>
+<h4>1.2.1.3 混合硬件与软件一致性</h4>
+<p>一些支持硬件一致性（hardware coherence）的系统（例如 NVIDIA DGX Station）还支持安装独立的、非一致性（non-coherent）的 GPU。<br>
+在这种情况下：</p>
+<ul>
+<li>硬件一致性 GPU仍然采用前文中介绍的硬件一致性机制进行内存访问。</li>
+<li>而<strong>独立 GPU（discrete GPU）</strong> 则仍采用软件一致性机制进行访问。</li>
+</ul>
+<p>这两类GPU允许共享同一个统一虚拟地址空间。但是，由于两类 GPU 采用不同的一致性机制，因此它们访问统一内存时，会表现出不同的性能特征和内存迁移行为。<br>
+具体来说：</p>
+<ul>
+<li>软件一致性 GPU访问统一内存时，会产生更多的页面错误以及内存迁移。</li>
+<li>硬件一致性 GPU访问统一内存时，则发生页面错误的次数更少；并且在可能的情况下，它会直接远程映射已有的数据，而不是将数据迁移到本地。</li>
+</ul>
+<blockquote>
+<p>远程映射（Remote Mapping）：数据仍然保留在原来的物理内存位置（例如 CPU 内存），GPU 通过一致性互连（如 NVLink-C2C）直接访问，而不是把整页数据复制到自己的本地内存。</p>
+</blockquote>
+<p>为了获得最佳性能，应尽量减少两类 GPU 之间共享同一份数据，或者通过显式的数据拷贝（explicit copies）来完成数据交换。<br>
+另一种优化方式是调用：<code class="notranslate">cudaMemAdviseSetPreferredLocation()</code>指定某块数据的首选驻留位置（preferred location），例如，可以让频繁共享的数据始终驻留在：</p>
+<ul>
+<li>CPU 内存，或者</li>
+<li>硬件一致性 GPU 可直接访问的内存。<br>
+这样做的原因是：默认情况下，当软件一致性 GPU访问一块共享数据时，通常需要先触发页面错误，随后再执行页面迁移，才能完成访问。而将数据放置在更合适位置，可以减少这种额外开销。</li>
+</ul>
+<p>在这种<strong>混合一致性系统（mixed coherency system）</strong> 中，<code class="notranslate">cudaHostRegister</code>以及其他<strong>主机内存访问 API（host memory access APIs）</strong> 对于软件一致性 GPU 的行为也会发生变化。<br>
+传统情况下：</p>
+<ul>
+<li><code class="notranslate">cudaHostRegister()</code> 会将一块 CPU 内存注册为<strong>Pinned Memory（页锁定内存）</strong>，</li>
+<li>GPU 可以直接通过固定映射（pinned mapping）访问这块内存，而无需发生页面迁移。<br>
+但是，在混合一致性系统中，对于软件一致性 GPU而言，情况有所不同：<br>
+它不再使用 Pinned Mapping，而是采用：CPU 页表的软件镜像（software mirroring of CPU page tables）也就是说，GPU 会维护一份 CPU 页表的软件副本，而不是建立固定映射。这意味着：软件一致性 GPU 的某些内存访问可能会发生页面错误（page fault），而这些访问在普通（非混合一致性）系统中本来是不需要发生页面错误的。不过，这种额外的页面错误通常比较少见，一般只有在系统内存压力较大时才会发生。</li>
+</ul>
+<h3>1.2.2 主机端直接统一内存访问</h3>
+<p>某些设备在硬件层面支持主机（Host，即 CPU）直接对驻留在 GPU 上的统一内存（GPU-resident unified memory）执行一致性的读取（read）、写入（store）以及原子操作（atomic access）。这类设备具有属性：<code class="notranslate">cudaDevAttrDirectManagedMemAccessFromHost=1</code></p>
+<p>需要注意的是：所有采用硬件一致性架构的系统，对于通过 NVLink 连接的设备，都会将该属性设置为 1。在这些系统上，CPU可以直接访问驻留在 GPU 内存中的数据，而无需发生页面错误或数据迁移。换句话说：GPU 上的数据无需迁移回 CPU 内存，CPU 就能够直接读取、写入甚至执行原子操作。不过需要注意的是，对于CUDA Managed Memory，若希望CPU能够实现这种无页面错误的直接访问，还必须使用：<code class="notranslate">cudaMemAdviseSetAccessedBy</code>，并将位置类型设置为<code class="notranslate">cudaMemLocationTypeHost</code>作为一个<strong>Hint（访问提示）</strong>，这样 CUDA 运行时会提前建立 CPU 对该统一内存的访问权限，使 CPU 后续访问该内存时无需再触发页面错误。</p>
+<p><strong>System Allocator</strong></p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__global__ <span class="pl-k">void</span> <span class="pl-en">write</span>(<span class="pl-k">int</span> *ret, <span class="pl-k">int</span> a, <span class="pl-k">int</span> b) {
+  ret[threadIdx.<span class="pl-smi">x</span>] = a + b + threadIdx.<span class="pl-smi">x</span>;
+}
+
+__global__ <span class="pl-k">void</span> <span class="pl-en">append</span>(<span class="pl-k">int</span> *ret, <span class="pl-k">int</span> a, <span class="pl-k">int</span> b) {
+  ret[threadIdx.<span class="pl-smi">x</span>] += a + b + threadIdx.<span class="pl-smi">x</span>;
+}
+
+<span class="pl-k">void</span> <span class="pl-en">test_malloc</span>() {
+  <span class="pl-k">int</span> *ret = (<span class="pl-k">int</span>*)<span class="pl-c1">malloc</span>(<span class="pl-c1">1000</span> * <span class="pl-k">sizeof</span>(<span class="pl-k">int</span>));
+  <span class="pl-c"><span class="pl-c">//</span> for shared page table systems, the following hint is not necesary</span>
+  cudaMemLocation location = {.<span class="pl-smi">type</span> = cudaMemLocationTypeHost};
+  <span class="pl-c1">cudaMemAdvise</span>(ret, <span class="pl-c1">1000</span> * <span class="pl-k">sizeof</span>(<span class="pl-k">int</span>), cudaMemAdviseSetAccessedBy, location);
+
+  write&lt;&lt;&lt; <span class="pl-c1">1</span>, <span class="pl-c1">1000</span> &gt;&gt;&gt;(ret, <span class="pl-c1">10</span>, <span class="pl-c1">100</span>);            <span class="pl-c"><span class="pl-c">//</span> pages populated in GPU memory()</span>
+  <span class="pl-c1">cudaDeviceSynchronize</span>();
+  <span class="pl-k">for</span>(<span class="pl-k">int</span> i = <span class="pl-c1">0</span>; i &lt; <span class="pl-c1">1000</span>; i++)
+      <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>%d: A+B = %d<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>, i, ret[i]);        <span class="pl-c"><span class="pl-c">//</span> directManagedMemAccessFromHost=1: CPU accesses GPU memory directly without migrations</span>
+                                                  <span class="pl-c"><span class="pl-c">//</span> directManagedMemAccessFromHost=0: CPU faults and triggers device-to-host migrations</span>
+  append&lt;&lt;&lt; <span class="pl-c1">1</span>, <span class="pl-c1">1000</span> &gt;&gt;&gt;(ret, <span class="pl-c1">10</span>, <span class="pl-c1">100</span>);            <span class="pl-c"><span class="pl-c">//</span> directManagedMemAccessFromHost=1: GPU accesses GPU memory without migrations</span>
+  <span class="pl-c1">cudaDeviceSynchronize</span>();                        <span class="pl-c"><span class="pl-c">//</span> directManagedMemAccessFromHost=0: GPU faults and triggers host-to-device migrations</span>
+  <span class="pl-c1">free</span>(ret);
+}</pre></div>
+<p><strong>Managed</strong></p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__global__ <span class="pl-k">void</span> <span class="pl-en">write</span>(<span class="pl-k">int</span> *ret, <span class="pl-k">int</span> a, <span class="pl-k">int</span> b) {
+  ret[threadIdx.<span class="pl-smi">x</span>] = a + b + threadIdx.<span class="pl-smi">x</span>;
+}
+
+__global__ <span class="pl-k">void</span> <span class="pl-en">append</span>(<span class="pl-k">int</span> *ret, <span class="pl-k">int</span> a, <span class="pl-k">int</span> b) {
+  ret[threadIdx.<span class="pl-smi">x</span>] += a + b + threadIdx.<span class="pl-smi">x</span>;
+}
+
+<span class="pl-k">void</span> <span class="pl-en">test_managed</span>() {
+  <span class="pl-k">int</span> *ret;
+  <span class="pl-c1">cudaMallocManaged</span>(&amp;ret, <span class="pl-c1">1000</span> * <span class="pl-k">sizeof</span>(<span class="pl-k">int</span>));
+  cudaMemLocation location = {.<span class="pl-smi">type</span> = cudaMemLocationTypeHost};
+  <span class="pl-c1">cudaMemAdvise</span>(ret, <span class="pl-c1">1000</span> * <span class="pl-k">sizeof</span>(<span class="pl-k">int</span>), cudaMemAdviseSetAccessedBy, location);  <span class="pl-c"><span class="pl-c">//</span> set direct access hint</span>
+
+  write&lt;&lt;&lt; <span class="pl-c1">1</span>, <span class="pl-c1">1000</span> &gt;&gt;&gt;(ret, <span class="pl-c1">10</span>, <span class="pl-c1">100</span>);            <span class="pl-c"><span class="pl-c">//</span> pages populated in GPU memory</span>
+  <span class="pl-c1">cudaDeviceSynchronize</span>();
+  <span class="pl-k">for</span>(<span class="pl-k">int</span> i = <span class="pl-c1">0</span>; i &lt; <span class="pl-c1">1000</span>; i++)
+      <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>%d: A+B = %d<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>, i, ret[i]);        <span class="pl-c"><span class="pl-c">//</span> directManagedMemAccessFromHost=1: CPU accesses GPU memory directly without migrations</span>
+                                                  <span class="pl-c"><span class="pl-c">//</span> directManagedMemAccessFromHost=0: CPU faults and triggers device-to-host migrations</span>
+  append&lt;&lt;&lt; <span class="pl-c1">1</span>, <span class="pl-c1">1000</span> &gt;&gt;&gt;(ret, <span class="pl-c1">10</span>, <span class="pl-c1">100</span>);            <span class="pl-c"><span class="pl-c">//</span> directManagedMemAccessFromHost=1: GPU accesses GPU memory without migrations</span>
+  <span class="pl-c1">cudaDeviceSynchronize</span>();                        <span class="pl-c"><span class="pl-c">//</span> directManagedMemAccessFromHost=0: GPU faults and triggers host-to-device migrations</span>
+  <span class="pl-c1">cudaFree</span>(ret); </pre></div>
+<p>在 <code class="notranslate">write</code> Kernel 执行完成之后，<code class="notranslate">ret</code> 将会在 GPU 内存中创建并初始化。随后，CPU 将访问 <code class="notranslate">ret</code>，接着 <code class="notranslate">append</code> Kernel 会再次使用同一块 <code class="notranslate">ret</code> 内存。<br>
+根据系统架构以及是否支持硬件一致性，这段代码将表现出不同的行为：</p>
+<ul>
+<li>对于 <code class="notranslate">directManagedMemAccessFromHost = 1</code> 的设备：<br>
+CPU 对这块 Managed Memory 缓冲区的访问不会触发任何内存迁移（migration）；数据将继续驻留在 GPU 内存中，之后任何再次访问该数据的 GPU Kernel 都可以直接访问它，而不会产生页面错误或内存迁移。</li>
+<li>对于 <code class="notranslate">directManagedMemAccessFromHost = 0</code> 的设备：<br>
+CPU 对这块 Managed Memory 缓冲区的访问将会触发页面错误（page fault），并启动数据迁移（data migration）；随后，任何第一次再次访问这块数据的 GPU Kernel 都会再次触发页面错误，并将这些页面迁移回GPU内存。</li>
+</ul>
+<h3>1.2.3 主机原生原子操作</h3>
+<p>部分设备（包括硬件一致性系统中通过 NVLink 连接的设备）支持对驻留在 CPU 上的内存进行硬件加速原子访问。这意味着对主机内存的原子访问无需通过页故障来模拟。对于这类设备，cudaDevAttrHostNativeAtomicSupported 属性会被设置为 1。</p>
+<h3>1.2.4 原子访问与同步原语</h3>
+<p>CUDA统一内存支持主机线程和设备线程所支持的所有原子操作（atomic operations），从而使所有线程能够通过并发访问同一共享内存位置进行协同工作。</p>
+<p>libcu++库提供了许多针对主机线程与设备线程之间并发使用而优化的<strong>异构同步原语（heterogeneous synchronization primitives）</strong>，其中包括 <code class="notranslate">cuda::atomic</code>、<code class="notranslate">cuda::atomic_ref</code>、<code class="notranslate">cuda::barrier</code>、<code class="notranslate">cuda::semaphore</code>等多种同步机制。</p>
+<p>在软件一致性系统中，设备（GPU）对文件后端（file-backed）的主机内存（host memory）执行原子访问（atomic accesses）是不受支持的。下面给出的示例代码在硬件一致性系统上是合法的，但在其他系统上则表现为未定义行为。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>cuda/atomic<span class="pl-pds">&gt;</span></span> <span class="pl-c"><span class="pl-c">//</span>引入CUDA C++原子操作库</span>
+
+#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>cstdio<span class="pl-pds">&gt;</span></span>
+#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>fcntl.h<span class="pl-pds">&gt;</span></span> <span class="pl-c"><span class="pl-c">//</span>引入文件控制相关接口</span>
+#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>sys/mman.h<span class="pl-pds">&gt;</span></span> <span class="pl-c"><span class="pl-c">//</span>引入内存映射相关接口</span>
+
+#<span class="pl-k">define</span> <span class="pl-en">ERR</span>(msg, ...) { <span class="pl-c1">fprintf</span>(stderr, msg, ##__VA_ARGS__); <span class="pl-k">return</span> <span class="pl-c1">EXIT_FAILURE</span>; }
+
+__global__ <span class="pl-k">void</span> <span class="pl-en">kernel</span>(<span class="pl-k">int</span>* ptr) {
+  cuda::atomic_ref{*ptr}.<span class="pl-c1">store</span>(<span class="pl-c1">2</span>);<span class="pl-c"><span class="pl-c">//</span>把2这个值原子写入ptr指向的内存</span>
+}
+
+<span class="pl-k">int</span> <span class="pl-en">main</span>() {
+  <span class="pl-c"><span class="pl-c">//</span> this will be closed/deleted by default on exit</span>
+  <span class="pl-c1">FILE</span>* tmp_file = <span class="pl-c1">tmpfile64</span>();
+  <span class="pl-c"><span class="pl-c">//</span> need to allocate space in the file, we do this with posix_fallocate here</span>
+  <span class="pl-k">int</span> status = <span class="pl-c1">posix_fallocate</span>(<span class="pl-c1">fileno</span>(tmp_file), <span class="pl-c1">0</span>, <span class="pl-c1">4096</span>);
+  <span class="pl-c"><span class="pl-c">//</span>fileno把FILE*转换成文件描述符的int</span>
+  <span class="pl-k">if</span> (status != <span class="pl-c1">0</span>) <span class="pl-c1">ERR</span>(<span class="pl-s"><span class="pl-pds">"</span>Failed to allocate space in temp file<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>);
+  <span class="pl-k">int</span>* ptr = (<span class="pl-k">int</span>*)<span class="pl-c1">mmap</span>(<span class="pl-c1">NULL</span>, <span class="pl-c1">4096</span>, <span class="pl-c1">PROT_READ</span> | <span class="pl-c1">PROT_WRITE</span>, <span class="pl-c1">MAP_PRIVATE</span>, <span class="pl-c1">fileno</span>(tmp_file), <span class="pl-c1">0</span>);
+  <span class="pl-k">if</span> (ptr == <span class="pl-c1">MAP_FAILED</span>) <span class="pl-c1">ERR</span>(<span class="pl-s"><span class="pl-pds">"</span>Failed to map temp file<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>);
+
+  <span class="pl-c"><span class="pl-c">//</span> initialize the value in our file-backed memory</span>
+  *ptr = <span class="pl-c1">1</span>;
+  <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Atom value: %d<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>, *ptr);
+
+  <span class="pl-c"><span class="pl-c">//</span> device and host thread access ptr concurrently, using cuda::atomic_ref</span>
+  kernel&lt;&lt;&lt;<span class="pl-c1">1</span>, <span class="pl-c1">1</span>&gt;&gt;&gt;(ptr);
+  <span class="pl-k">while</span> (cuda::atomic_ref{*ptr}.<span class="pl-c1">load</span>() != <span class="pl-c1">2</span>);
+  <span class="pl-c"><span class="pl-c">//</span> this will always be 2</span>
+  <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Atom value: %d<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>, *ptr);
+
+  <span class="pl-k">return</span> <span class="pl-c1">EXIT_SUCCESS</span>;
+}</pre></div>
+<p>在软件一致性系统上，对统一内存执行原子访问可能会触发页面错误，从而导致显著的访问延迟。需要注意的是，这并不意味着这类系统中所有由 GPU 对 CPU 内存执行的原子操作都会触发页面错误。通过以下命令列出的操作：</p>
+<pre class="notranslate"><code class="notranslate">nvidia-smi -q | grep "Atomic Caps Outbound"
+</code></pre>
+<p>可能能够避免页面错误。<br>
+在硬件一致性系统（hardware-coherent systems）上，主机与设备之间的原子操作不需要通过页面错误来实现；但由于其他原因，访问仍然可能发生页面错误，而这些原因同样可能导致任意内存访问触发页面错误。</p>
+<h3>1.2.5 统一内存中的Memcpy()/Memset()行为</h3>
+<p><code class="notranslate">cudaMemcpy*()</code> 和 <code class="notranslate">cudaMemset*()</code> 均可接受统一内存指针作为参数。</p>
+<p>对于 <code class="notranslate">cudaMemcpy*()</code>而言，参数 <code class="notranslate">cudaMemcpyKind</code>所指定的数据传输方向（direction）是一种性能提示（performance hint）。当 <code class="notranslate">cudaMemcpy*()</code> 的任一参数是统一内存指针时，这一提示可能会对性能产生较大的影响。</p>
+<p>因此，建议遵循以下性能优化建议：</p>
+<ul>
+<li>当已知统一内存的物理驻留位置（physical location）时，应准确指定 <code class="notranslate">cudaMemcpyKind</code>。</li>
+<li>如果无法准确确定统一内存的物理驻留位置，则优先使用 <code class="notranslate">cudaMemcpyDefault</code>，而不要使用错误的 <code class="notranslate">cudaMemcpyKind</code> 提示。</li>
+<li>始终使用已经完成物理页建立并初始化（populated / initialized）的缓冲区（buffers）；避免使用这些 API 来初始化内存。</li>
+<li>如果 <code class="notranslate">cudaMemcpy*()</code> 的源指针和目标指针都指向由系统分配（system-allocated）的内存，则应避免使用 <code class="notranslate">cudaMemcpy*()</code>。此时，更推荐启动一个 CUDA Kernel 完成数据拷贝，或者直接使用 CPU 内存拷贝算法（如 <code class="notranslate">std::memcpy</code>）进行复制。</li>
+</ul>
+<h3>1.2.6 统一内存分配器概述</h3>
+<p>对于具备完整 CUDA 统一内存支持的系统，可使用多种不同的分配器来分配统一内存。下表列出了部分分配器及其对应功能的概览。请注意，本节中的所有信息可能会在未来的 CUDA 版本中发生变更。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260717160603.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260717160603.png" alt="image.png" style="max-width: 100%;"></a><br>
+【1】对于 <code class="notranslate">mmap</code>，文件后端内存默认放置在 CPU 上，除非通过 <code class="notranslate">cudaMemAdviseSetPreferredLocation</code>（或 <code class="notranslate">mbind</code>，见后续内容）另行指定。<br>
+【2】该特性可以通过 <code class="notranslate">cudaMemAdvise</code> 进行覆盖。即使禁用了基于访问的迁移（access-based migrations），如果底层内存空间已满，内存仍然可能发生迁移。<br>
+【3】文件后端内存不会根据访问情况发生迁移。<br>
+【4】在大多数系统中，默认的系统页大小为4 KiB或64 KiB，除非显式指定了大页大小（huge page size）（例如，通过 <code class="notranslate">mmap</code> 的 <code class="notranslate">MAP_HUGETLB</code> / <code class="notranslate">MAP_HUGE_SHIFT</code>）。在这种情况下，系统所配置的任意大页大小均受支持。<br>
+【5】GPU 驻留内存的页大小在未来的 CUDA 版本中可能会发生变化。<br>
+【6】目前，当内存迁移到 GPU，或由于 GPU 首次访问（first-touch）而放置到 GPU 上时，大页大小（huge page size）可能无法得到保留。</p>
+<p>上表展示了几种可用于分配“可同时被多个处理器访问”的数据的内存分配器在语义上的差异。有关 <code class="notranslate">cudaMemPoolCreate</code> 的更多细节，参见<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#stream-ordered-memory-pools" rel="nofollow">4.3. Stream-Ordered Memory Allocator</a>中“Memory Pools”小节。有关 <code class="notranslate">cuMemCreate</code> 的更多细节，参加<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/virtual-memory-management.html#virtual-memory-management" rel="nofollow">4.16.Virtual Memory Management</a>的“Virtual Memory Management”小节</p>
+<p>在硬件一致性系统中，如果设备内存作为一个NUMA域（NUMA domain）暴露给系统，则可以使用诸如 <code class="notranslate">numa_alloc_on_node</code> 之类的特殊分配器，将内存固定（pin）到指定的 NUMA 节点（无论是主机还是设备）。这类内存可同时被主机和设备访问，并且不会发生迁移。类似地，也可以使用 <code class="notranslate">mbind</code> 将内存固定到指定的一个或多个 NUMA 节点，并且可以使文件后端内存在首次访问之前就放置到指定的一个或多个 NUMA 节点上。</p>
+<h3>1.2.7 访问计数器迁移</h3>
+<p>在硬件一致性系统中，<strong>访问计数器（access counters）</strong> 功能会跟踪 GPU 对位于其他处理器上的内存的访问频率。这样做的目的是确保内存页被迁移到访问该页面最频繁的处理器的物理内存中。访问计数器可以指导 CPU 与 GPU 之间，以及对等 GPU（peer GPUs）之间的内存迁移，这一过程称为访问计数器迁移（access counter migration）。</p>
+<p>从CUDA 12.4开始，访问计数器支持系统分配内存（system-allocated memory）。</p>
+<p>需要注意的是，文件后端内存不会根据访问情况发生迁移。<br>
+对于系统分配内存，可以通过使用 <code class="notranslate">cudaMemAdviseSetAccessedBy</code> 提示，并指定相应设备的设备 ID，来开启访问计数器迁移。如果启用了访问计数器，则可以使用 <code class="notranslate">cudaMemAdviseSetPreferredLocation</code>，并将其设置为 host，以阻止内存迁移。</p>
+<p>默认情况下，<code class="notranslate">cudaMallocManaged</code> 采用页面错误并迁移（fault-and-migrate）机制进行迁移。驱动程序还可能在<strong>更高效地缓解内存抖动（thrashing mitigation）</strong> 或<strong>内存超额订阅（memory oversubscription）</strong> 场景中使用访问计数器。</p>
+<h3>1.2.8 避免从CPU频繁写入驻留于GPU的内存</h3>
+<p>如果主机（Host，CPU）访问统一内存（Unified Memory），缓存未命中（cache misses）可能会在主机与设备之间引入比预期更多的数据传输。</p>
+<p>许多 CPU 架构要求所有内存操作（包括写操作）都必须经过缓存层次结构（cache hierarchy）。如果系统内存当前驻留（resident）在 GPU 上，这意味着 CPU 对这块内存进行频繁写入时，可能会导致缓存未命中（cache misses）。因此，在真正将新的值写入目标内存区域之前，必须先将相应的数据从 GPU 传输到 CPU。</p>
+<p>在软件一致性系统（software-coherent systems）中，这可能会引入额外的页面错误（page faults）；而在硬件一致性系统（hardware-coherent systems）中，则可能导致CPU 操作之间更高的访问延迟（higher latencies）。</p>
+<p>因此，为了与设备（Device，GPU）共享由主机产生的数据，建议将数据写入驻留在 CPU 上的内存（CPU-resident memory），并由设备直接读取这些数据。下面的代码展示了如何利用统一内存实现这一过程。</p>
+<p><strong>System Allocator</strong></p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">  <span class="pl-c1">size_t</span> data_size = <span class="pl-k">sizeof</span>(<span class="pl-k">int</span>);
+  <span class="pl-k">int</span>* data = (<span class="pl-k">int</span>*)malloc(data_size);
+  <span class="pl-c"><span class="pl-c">//</span> 设置数据优先驻留在CPU内存，避免迁移到GPU</span>
+  cudaMemLocation location = {.<span class="pl-smi">type</span> = cudaMemLocationTypeHost};
+  <span class="pl-en">cudaMemAdvise</span>(data, data_size, cudaMemAdviseSetPreferredLocation, location);
+  
+  <span class="pl-c"><span class="pl-c">//</span> 告诉CUDA：Host会访问这块内存，减少CPU访问时的Page Fault</span>
+  <span class="pl-en">cudaMemAdvise</span>(data, data_size, cudaMemAdviseSetAccessedBy, location);
+
+  <span class="pl-c"><span class="pl-c">//</span> frequent exchanges of small data: if the CPU writes to CPU-resident memory,</span>
+  <span class="pl-c"><span class="pl-c">//</span> and GPU directly accesses that data, we can avoid the CPU caches re-loading</span>
+  <span class="pl-c"><span class="pl-c">//</span> data if it was evicted in between writes</span>
+  <span class="pl-k">for</span> (<span class="pl-k">int</span> i = <span class="pl-c1">0</span>; i &lt; <span class="pl-c1">10</span>; ++i) {
+    *data = <span class="pl-c1">42</span> + i;
+    kernel&lt;&lt;&lt;<span class="pl-c1">1</span>, <span class="pl-c1">1</span>&gt;&gt;&gt;(data);
+    <span class="pl-c1">cudaDeviceSynchronize</span>();
+    <span class="pl-c"><span class="pl-c">//</span> CPU cache potentially evicted data here</span>
+  }
+  <span class="pl-en">free</span>(data);</pre></div>
+<p><strong>Managed</strong></p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">  <span class="pl-k">int</span>* data;
+  <span class="pl-c1">size_t</span> data_size = <span class="pl-k">sizeof</span>(<span class="pl-k">int</span>);
+  <span class="pl-en">cudaMallocManaged</span>(&amp;data, data_size);
+  <span class="pl-c"><span class="pl-c">//</span> ensure that data stays local to the host and avoid faults</span>
+  cudaMemLocation location = {.<span class="pl-smi">type</span> = cudaMemLocationTypeHost};
+  <span class="pl-en">cudaMemAdvise</span>(data, data_size, cudaMemAdviseSetPreferredLocation, location);
+  <span class="pl-en">cudaMemAdvise</span>(data, data_size, cudaMemAdviseSetAccessedBy, location);
+
+  <span class="pl-c"><span class="pl-c">//</span> frequent exchanges of small data: if the CPU writes to CPU-resident memory,</span>
+  <span class="pl-c"><span class="pl-c">//</span> and GPU directly accesses that data, we can avoid the CPU caches re-loading</span>
+  <span class="pl-c"><span class="pl-c">//</span> data if it was evicted in between writes</span>
+  <span class="pl-k">for</span> (<span class="pl-k">int</span> i = <span class="pl-c1">0</span>; i &lt; <span class="pl-c1">10</span>; ++i) {
+    *data = <span class="pl-c1">42</span> + i;
+    kernel&lt;&lt;&lt;<span class="pl-c1">1</span>, <span class="pl-c1">1</span>&gt;&gt;&gt;(data);
+    <span class="pl-c1">cudaDeviceSynchronize</span>();
+    <span class="pl-c"><span class="pl-c">//</span> CPU cache potentially evicted data here</span>
+  }
+  <span class="pl-en">cudaFree</span>(data);</pre></div>
+<h3>1.2.9 利用对系统内存的异步访问</h3>
+<p>如果应用程序需要将设备（Device，GPU）上的计算结果共享给主机（Host，CPU），可以采用以下几种方式：</p>
+<ol>
+<li>设备将计算结果写入驻留在 GPU 上的内存（GPU-resident memory），随后使用 <code class="notranslate">cudaMemcpy*</code> 将结果传输到主机，最后由主机读取传输后的数据。</li>
+<li>设备直接将计算结果写入驻留在 CPU 上的内存（CPU-resident memory），随后由主机直接读取该数据。</li>
+<li>设备将计算结果写入驻留在 GPU 上的内存（GPU-resident memory），随后由主机直接访问该数据。</li>
+</ol>
+<p>如果在<strong>主机传输或访问计算结果的同时，设备还可以继续执行其他独立的工作</strong>，则<strong>方案 1 或方案 3 更优</strong>。<br>
+如果<strong>设备必须等待主机访问完计算结果之后才能继续执行（即设备处于空闲等待状态）</strong>，则<strong>方案 2 可能更合适</strong>。<br>
+这是因为，<strong>设备（GPU）写入数据的带宽通常高于主机（CPU）读取数据的带宽</strong>，除非使用大量主机线程并行读取这些数据。</p>
+<p><strong>Explicit Copy</strong></p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">void</span> <span class="pl-en">exchange_explicit_copy</span>(cudaStream_t stream) {
+  <span class="pl-k">int</span>* data, *host_data;
+  <span class="pl-c1">size_t</span> n_bytes = <span class="pl-k">sizeof</span>(<span class="pl-k">int</span>) * <span class="pl-c1">16</span>;
+  <span class="pl-c"><span class="pl-c">//</span> allocate receiving buffer</span>
+  host_data = (<span class="pl-k">int</span>*)<span class="pl-c1">malloc</span>(n_bytes);
+  <span class="pl-c"><span class="pl-c">//</span> allocate, since we touch on the device first, will be GPU-resident</span>
+  <span class="pl-c1">cudaMallocManaged</span>(&amp;data, n_bytes);
+  kernel&lt;&lt;&lt;<span class="pl-c1">1</span>, <span class="pl-c1">16</span>, <span class="pl-c1">0</span>, stream&gt;&gt;&gt;(data);
+  <span class="pl-c"><span class="pl-c">//</span> launch independent work on the device</span>
+  <span class="pl-c"><span class="pl-c">//</span> other_kernel&lt;&lt;&lt;1024, 256, 0, stream&gt;&gt;&gt;(other_data, ...);</span>
+  <span class="pl-c"><span class="pl-c">//</span> transfer to host</span>
+  <span class="pl-c1">cudaMemcpyAsync</span>(host_data, data, n_bytes, cudaMemcpyDeviceToHost, stream);
+  <span class="pl-c"><span class="pl-c">//</span> sync stream to ensure data has been transferred</span>
+  <span class="pl-c1">cudaStreamSynchronize</span>(stream);
+  <span class="pl-c"><span class="pl-c">//</span> read transferred data</span>
+  <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Got values %d - %d from GPU<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>, host_data[<span class="pl-c1">0</span>], host_data[<span class="pl-c1">15</span>]);
+  <span class="pl-c1">cudaFree</span>(data);
+  <span class="pl-c1">free</span>(host_data);
+}</pre></div>
+<p><strong>Device Direct Write</strong></p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">void</span> <span class="pl-en">exchange_device_direct_write</span>(cudaStream_t stream) {
+  <span class="pl-k">int</span>* data;
+  <span class="pl-c1">size_t</span> n_bytes = <span class="pl-k">sizeof</span>(<span class="pl-k">int</span>) * <span class="pl-c1">16</span>;
+  <span class="pl-c"><span class="pl-c">//</span> allocate receiving buffer</span>
+  <span class="pl-c1">cudaMallocManaged</span>(&amp;data, n_bytes);
+  <span class="pl-c"><span class="pl-c">//</span> ensure that data is mapped and resident on the host</span>
+  cudaMemLocation location = {.<span class="pl-smi">type</span> = cudaMemLocationTypeHost};
+  <span class="pl-c1">cudaMemAdvise</span>(data, n_bytes, cudaMemAdviseSetPreferredLocation, location);
+  <span class="pl-c1">cudaMemAdvise</span>(data, n_bytes, cudaMemAdviseSetAccessedBy, location);
+  kernel&lt;&lt;&lt;<span class="pl-c1">1</span>, <span class="pl-c1">16</span>, <span class="pl-c1">0</span>, stream&gt;&gt;&gt;(data);
+  <span class="pl-c"><span class="pl-c">//</span> sync stream to ensure data has been transferred</span>
+  <span class="pl-c1">cudaStreamSynchronize</span>(stream);
+  <span class="pl-c"><span class="pl-c">//</span> read transferred data</span>
+  <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Got values %d - %d from GPU<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>, data[<span class="pl-c1">0</span>], data[<span class="pl-c1">15</span>]);
+  <span class="pl-c1">cudaFree</span>(data);
+}</pre></div>
+<p><strong>Host Direct Read</strong></p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">void</span> <span class="pl-en">exchange_host_direct_read</span>(cudaStream_t stream) {
+  <span class="pl-k">int</span>* data;
+  <span class="pl-c1">size_t</span> n_bytes = <span class="pl-k">sizeof</span>(<span class="pl-k">int</span>) * <span class="pl-c1">16</span>;
+  <span class="pl-c"><span class="pl-c">//</span> allocate receiving buffer</span>
+  <span class="pl-c1">cudaMallocManaged</span>(&amp;data, n_bytes);
+  <span class="pl-c"><span class="pl-c">//</span> ensure that data is mapped and resident on the device</span>
+  cudaMemLocation device_loc = {};
+  <span class="pl-c1">cudaGetDevice</span>(&amp;device_loc.<span class="pl-smi">id</span>);
+  device_loc.<span class="pl-smi">type</span> = cudaMemLocationTypeDevice;
+  <span class="pl-c1">cudaMemAdvise</span>(data, n_bytes, cudaMemAdviseSetPreferredLocation, device_loc);
+  <span class="pl-c1">cudaMemAdvise</span>(data, n_bytes, cudaMemAdviseSetAccessedBy, device_loc);
+  kernel&lt;&lt;&lt;<span class="pl-c1">1</span>, <span class="pl-c1">16</span>, <span class="pl-c1">0</span>, stream&gt;&gt;&gt;(data);
+  <span class="pl-c"><span class="pl-c">//</span> launch independent work on the GPU</span>
+  <span class="pl-c"><span class="pl-c">//</span> other_kernel&lt;&lt;&lt;1024, 256, 0, stream&gt;&gt;&gt;(other_data, ...);</span>
+  <span class="pl-c"><span class="pl-c">//</span> sync stream to ensure data may be accessed (has been written by device)</span>
+  <span class="pl-c1">cudaStreamSynchronize</span>(stream);
+  <span class="pl-c"><span class="pl-c">//</span> read data directly from host</span>
+  <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Got values %d - %d from GPU<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>, data[<span class="pl-c1">0</span>], data[<span class="pl-c1">15</span>]);
+  <span class="pl-c1">cudaFree</span>(data);</pre></div>
+<p>最后，在前面的显式拷贝示例中，除了使用<code class="notranslate">cudaMemcpy*</code>进行数据传输之外，还可以使用主机（Host）或设备（Device）上的 Kernel来显式执行数据拷贝。</p>
+<p>对于连续数据而言，优先使用 CUDA 的 Copy Engine（拷贝引擎），因为由 Copy Engine 执行的数据传输可以与主机和设备两侧的计算工作同时重叠执行（overlap）。</p>
+<p>Copy Engine 可能会被 <code class="notranslate">cudaMemcpy*</code> 和 <code class="notranslate">cudaMemPrefetchAsync</code>API 使用，但并不能保证 <code class="notranslate">cudaMemcpy*</code> API 调用一定会使用 Copy Engine。</p>
+<p>出于同样的原因，对于足够大的数据，显式拷贝优于主机直接读取（direct host read）。这是因为，如果主机和设备都在执行不会占满各自内存系统带宽的计算任务，那么数据传输可以由Copy Engine在后台完成，并与主机和设备的计算工作并发执行。</p>
+<p>通常情况下，Copy Engine不仅用于主机与设备之间的数据传输，还用于NVLink 互连系统中对等设备（peer devices）之间的数据传输。</p>
+<p>由于系统中 Copy Engine 的总数量通常是有限的，因此某些系统上 <code class="notranslate">cudaMemcpy*</code> 的带宽可能低于由设备（Device）显式执行数据拷贝所能达到的带宽。在这种情况下，如果数据传输位于应用程序的关键路径上，那么采用基于设备（Device）的显式数据拷贝可能是更优的选择。</p>
+<h1>2.仅支持CUDA托管内存的设备上的统一内存</h1>
+<p>对于计算能力（Compute Capability）6.x 及以上、但不支持可分页内存访问（pageable memory access）的设备，CUDA Managed Memory仍然得到完整支持，并且保持一致性（coherent）但 GPU 无法访问由系统分配器（system allocator）分配的内存。</p>
+<p>统一内存（Unified Memory）的编程模型和性能调优方法，与“具备完整CUDA统一内存支持的统一内存”一节中介绍的内容基本相同。唯一需要特别注意的区别是：不能使用系统分配器（system allocator）来分配统一内存。</p>
+<p>因此，下面这些小节不适用于这类设备：</p>
+<ul>
+<li><strong>Unified Memory: In-Depth Examples</strong>（本文1.1）</li>
+<li><strong>CPU and GPU Page Tables: Hardware Coherency vs. Software Coherency</strong>（本文1.2.1.2）</li>
+<li><strong>Atomic Accesses and Synchronization Primitives</strong>（本文1.2.4）</li>
+<li><strong>Access Counter Migration</strong>（本文1.2.7）</li>
+<li><strong>Avoid Frequent Writes to GPU-Resident Memory from the CPU</strong>（本文1.2.8）</li>
+<li><strong>Exploiting Asynchronous Access to System Memory</strong>（本文1.2.9）</li>
+</ul>
+<h1>3.Windows、WSL 与 Tegra 上的统一内存</h1>
+<p>暂略</p>
+<h1>4.性能提示</h1>
+<p><strong>性能提示（Performance Hints）</strong> 允许程序员向 CUDA 提供更多关于统一内存使用方式的信息。CUDA 会利用这些性能提示，以更高效地管理统一内存，从而提高应用程序的性能。性能提示不会影响应用程序的正确性，它们只会影响性能。</p>
+<blockquote>
+<p><strong>注意（Note）</strong><br>
+应用程序只有在统一内存性能提示能够提升性能的情况下，才应该使用这些性能提示。</p>
+</blockquote>
+<p>性能提示可以应用于任何统一内存分配，包括 CUDA Managed Memory。在支持完整 CUDA Unified Memory（Full CUDA Unified Memory Support）的系统上，性能提示还可以应用于所有由系统分配器（system allocator）分配的内存。</p>
+<h2>4.1 数据预取</h2>
+<p><code class="notranslate">cudaMemPrefetchAsync</code> API 是一种异步流排序 API，可将数据迁移至更靠近指定处理器的位置。数据在预取过程中仍可被访问。该迁移操作需等待流中所有先前操作完成后才会启动，并会在流中任何后续操作开始前完成。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">cudaError_t <span class="pl-en">cudaMemPrefetchAsync</span>(<span class="pl-k">const</span> <span class="pl-k">void</span> *devPtr,
+                                 <span class="pl-c1">size_t</span> count,
+                                 <span class="pl-k">struct</span> <span class="pl-en">cudaMemLocation</span> location,
+                                 <span class="pl-k">unsigned</span> <span class="pl-k">int</span> flags,
+                                 cudaStream_t stream=<span class="pl-c1">0</span>);</pre></div>
+<p>当预取任务在指定的Stream中执行时，包含 <code class="notranslate">[devPtr, devPtr + count)</code>范围内的内存区域，可以迁移到由 <code class="notranslate">location.id</code>指定的目标设备（当 <code class="notranslate">location.type</code>为 <code class="notranslate">cudaMemLocationTypeDevice</code>时），或者迁移到CPU（当 <code class="notranslate">location.type</code>为 <code class="notranslate">cudaMemLocationTypeHost</code>时）。关于<code class="notranslate">flags</code>参数的详细说明，请参考当前版本的<a href="https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__MEMORY.html" rel="nofollow">CUDA Runtime API</a>文档。</p>
+<p>下面给出一个简单的代码示例：<br>
+<strong>System Allocator</strong></p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">void</span> <span class="pl-en">test_prefetch_sam</span>(<span class="pl-k">const</span> cudaStream_t&amp; s) {
+  <span class="pl-c"><span class="pl-c">//</span> initialize data on CPU</span>
+  <span class="pl-k">char</span> *data = (<span class="pl-k">char</span>*)<span class="pl-c1">malloc</span>(dataSizeBytes);
+  <span class="pl-c1">init_data</span>(data, dataSizeBytes);                                     
+  cudaMemLocation location = {.<span class="pl-smi">type</span> = cudaMemLocationTypeDevice, .<span class="pl-smi">id</span> = myGpuId};
+
+  <span class="pl-c"><span class="pl-c">//</span> encourage data to move to GPU before use</span>
+  <span class="pl-k">const</span> <span class="pl-k">unsigned</span> <span class="pl-k">int</span> flags = <span class="pl-c1">0</span>;
+  <span class="pl-c1">cudaMemPrefetchAsync</span>(data, dataSizeBytes, location, flags, s);      
+
+  <span class="pl-c"><span class="pl-c">//</span> use data on GPU</span>
+  <span class="pl-k">const</span> <span class="pl-k">unsigned</span> num_blocks = (dataSizeBytes + threadsPerBlock - <span class="pl-c1">1</span>) / threadsPerBlock;
+  mykernel&lt;&lt;&lt;num_blocks, threadsPerBlock, <span class="pl-c1">0</span>, s&gt;&gt;&gt;(data, dataSizeBytes);  
+
+  <span class="pl-c"><span class="pl-c">//</span> encourage data to move back to CPU</span>
+  location = {.<span class="pl-smi">type</span> = cudaMemLocationTypeHost};
+  <span class="pl-c1">cudaMemPrefetchAsync</span>(data, dataSizeBytes, location, flags, s);      
+  
+  <span class="pl-c1">cudaStreamSynchronize</span>(s);
+
+  <span class="pl-c"><span class="pl-c">//</span> use data on CPU</span>
+  <span class="pl-c1">use_data</span>(data, dataSizeBytes);                                      
+  <span class="pl-c1">free</span>(data);
+}</pre></div>
+<p><strong>Managed</strong></p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">void</span> <span class="pl-en">test_prefetch_managed</span>(<span class="pl-k">const</span> cudaStream_t&amp; s) {
+  <span class="pl-c"><span class="pl-c">//</span> initialize data on CPU</span>
+  <span class="pl-k">char</span> *data;
+  <span class="pl-c1">cudaMallocManaged</span>(&amp;data, dataSizeBytes);
+  <span class="pl-c1">init_data</span>(data, dataSizeBytes);                                     
+  cudaMemLocation location = {.<span class="pl-smi">type</span> = cudaMemLocationTypeDevice, .<span class="pl-smi">id</span> = myGpuId};
+
+  <span class="pl-c"><span class="pl-c">//</span> encourage data to move to GPU before use</span>
+  <span class="pl-k">const</span> <span class="pl-k">unsigned</span> <span class="pl-k">int</span> flags = <span class="pl-c1">0</span>;
+  <span class="pl-c1">cudaMemPrefetchAsync</span>(data, dataSizeBytes, location, flags, s);
+
+  <span class="pl-c"><span class="pl-c">//</span> use data on GPU</span>
+  <span class="pl-k">const</span> uinsigned num_blocks = (dataSizeBytes + threadsPerBlock - <span class="pl-c1">1</span>) / threadsPerBlock;
+  mykernel&lt;&lt;&lt;num_blocks, threadsPerBlock, <span class="pl-c1">0</span>, s&gt;&gt;&gt;(data, dataSizeBytes); 
+
+  <span class="pl-c"><span class="pl-c">//</span> encourage data to move back to CPU</span>
+  location = {.<span class="pl-smi">type</span> = cudaMemLocationTypeHost};
+  <span class="pl-c1">cudaMemPrefetchAsync</span>(data, dataSizeBytes, location, flags, s); 
+
+  <span class="pl-c1">cudaStreamSynchronize</span>(s);
+
+  <span class="pl-c"><span class="pl-c">//</span> use data on CPU</span>
+  <span class="pl-c1">use_data</span>(data, dataSizeBytes);
+  <span class="pl-c1">cudaFree</span>(data);
+}</pre></div>
+<h2>4.2 数据使用提示</h2>
+<p>当多个处理器同时访问同一块数据时，可以使用 <code class="notranslate">cudaMemAdvise</code>向 CUDA 提供提示（hint），说明位于 <code class="notranslate">[devPtr, devPtr + count)</code>范围内的数据将会如何被访问。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">cudaError_t <span class="pl-en">cudaMemAdvise</span>(<span class="pl-k">const</span> <span class="pl-k">void</span> *devPtr,
+                          <span class="pl-c1">size_t</span> count,
+                          <span class="pl-k">enum</span> cudaMemoryAdvise advice,
+                          <span class="pl-k">struct</span> <span class="pl-en">cudaMemLocation</span> location);</pre></div>
+<p>advice可能采用以下的值：<br>
+<code class="notranslate">cudaMemAdviseSetReadMostly</code>：该提示表示这块数据主要用于读取，只有偶尔才会被写入。通常情况下，它允许在该内存区域上以写带宽为代价换取更高的读带宽。<br>
+<code class="notranslate">cudaMemAdviseSetPreferredLocation</code>：该提示将数据的首选位置设置为指定设备物理内存所在的位置。该提示会促使系统尽量将数据保留在首选位置，但并不保证数据一定驻留在那里。<br>
+当 <code class="notranslate">location.type</code>的值为 <code class="notranslate">cudaMemLocationTypeHost</code>时，表示将数据的首选位置设置为 CPU 内存。其他提示（例如 <strong><code class="notranslate">cudaMemPrefetchAsync</code></strong>）可能会覆盖这一提示，使内存迁移到首选位置之外。<br>
+<code class="notranslate">cudaMemAdviseSetAccessedBy</code>在某些系统上，在某个处理器访问数据之前，预先建立该处理器到这块内存的映射（mapping）可能有助于提高性能。<br>
+该提示告诉系统：当 <code class="notranslate">location.type</code>为 <code class="notranslate">cudaMemLocationTypeDevice</code>时，位于 <code class="notranslate">location.id</code>的设备将会频繁访问这块数据，因此系统可以认为提前创建这些映射是值得的。该提示并不表示数据应该驻留在哪里，但可以与 <code class="notranslate">cudaMemAdviseSetPreferredLocation</code> 结合使用，以同时指定数据的首选驻留位置。</p>
+<p>在硬件一致性系统中，该提示会启用访问计数器迁移机制<br>
+上述每一种建议（advice）都可以通过对应的 <strong>Unset</strong> 接口进行取消，分别为：</p>
+<ul>
+<li><code class="notranslate">cudaMemAdviseUnsetReadMostly</code></li>
+<li><code class="notranslate">cudaMemAdviseUnsetPreferredLocation</code></li>
+<li><code class="notranslate">cudaMemAdviseUnsetAccessedBy</code><br>
+<strong>System Allocator</strong></li>
+</ul>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">void</span> <span class="pl-en">test_advise_sam</span>(cudaStream_t stream) {
+  <span class="pl-k">char</span> *dataPtr;
+  <span class="pl-c1">size_t</span> dataSize = <span class="pl-c1">64</span> * threadsPerBlock;  <span class="pl-c"><span class="pl-c">//</span> 16 KiB</span>
+  
+  <span class="pl-c"><span class="pl-c">//</span> Allocate memory using malloc or cudaMallocManaged</span>
+  dataPtr = (<span class="pl-k">char</span>*)<span class="pl-c1">malloc</span>(dataSize);
+
+  <span class="pl-c"><span class="pl-c">//</span> Set the advice on the memory region</span>
+  cudaMemLocation loc = {.<span class="pl-smi">type</span> = cudaMemLocationTypeDevice, .<span class="pl-smi">id</span> = myGpuId};
+  <span class="pl-c1">cudaMemAdvise</span>(dataPtr, dataSize, cudaMemAdviseSetReadMostly, loc);
+
+  <span class="pl-k">int</span> outerLoopIter = <span class="pl-c1">0</span>;
+  <span class="pl-k">while</span> (outerLoopIter &lt; maxOuterLoopIter) {
+    <span class="pl-c"><span class="pl-c">//</span> The data is written by the CPU each outer loop iteration</span>
+    <span class="pl-c1">init_data</span>(dataPtr, dataSize);
+
+    <span class="pl-c"><span class="pl-c">//</span> The data is made available to all GPUs by prefetching.</span>
+    <span class="pl-c"><span class="pl-c">//</span> Prefetching here causes read duplication of data instead</span>
+    <span class="pl-c"><span class="pl-c">//</span> of data migration</span>
+    cudaMemLocation location;
+    location.<span class="pl-smi">type</span> = cudaMemLocationTypeDevice;
+    <span class="pl-k">for</span> (<span class="pl-k">int</span> device = <span class="pl-c1">0</span>; device &lt; maxDevices; device++) {
+      location.<span class="pl-smi">id</span> = device;
+      <span class="pl-k">const</span> <span class="pl-k">unsigned</span> <span class="pl-k">int</span> flags = <span class="pl-c1">0</span>;
+      <span class="pl-c1">cudaMemPrefetchAsync</span>(dataPtr, dataSize, location, flags, stream);
+    }
+
+    <span class="pl-c"><span class="pl-c">//</span> The kernel only reads this data in the inner loop</span>
+    <span class="pl-k">int</span> innerLoopIter = <span class="pl-c1">0</span>;
+    <span class="pl-k">while</span> (innerLoopIter &lt; maxInnerLoopIter) {
+      mykernel&lt;&lt;&lt;<span class="pl-c1">32</span>, threadsPerBlock, <span class="pl-c1">0</span>, stream&gt;&gt;&gt;((<span class="pl-k">const</span> <span class="pl-k">char</span> *)dataPtr, dataSize);
+      innerLoopIter++;
+    }
+    outerLoopIter++;
+  }
+
+  <span class="pl-c1">free</span>(dataPtr);
+}</pre></div>
+<p><strong>Managed</strong></p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">void</span> <span class="pl-en">test_advise_managed</span>(cudaStream_t stream) {
+  <span class="pl-k">char</span> *dataPtr;
+  <span class="pl-c1">size_t</span> dataSize = <span class="pl-c1">64</span> * threadsPerBlock;  <span class="pl-c"><span class="pl-c">//</span> 16 KiB</span>
+
+  <span class="pl-c"><span class="pl-c">//</span> Allocate memory using cudaMallocManaged</span>
+  <span class="pl-c"><span class="pl-c">//</span> (malloc may be used on systems with full CUDA Unified memory support)</span>
+  <span class="pl-c1">cudaMallocManaged</span>(&amp;dataPtr, dataSize);
+
+  <span class="pl-c"><span class="pl-c">//</span> Set the advice on the memory region</span>
+  cudaMemLocation loc = {.<span class="pl-smi">type</span> = cudaMemLocationTypeDevice, .<span class="pl-smi">id</span> = myGpuId};
+  <span class="pl-c1">cudaMemAdvise</span>(dataPtr, dataSize, cudaMemAdviseSetReadMostly, loc);
+
+  <span class="pl-k">int</span> outerLoopIter = <span class="pl-c1">0</span>;
+  <span class="pl-k">while</span> (outerLoopIter &lt; maxOuterLoopIter) {
+    <span class="pl-c"><span class="pl-c">//</span> The data is written by the CPU each outer loop iteration</span>
+    <span class="pl-c1">init_data</span>(dataPtr, dataSize);
+
+    <span class="pl-c"><span class="pl-c">//</span> The data is made available to all GPUs by prefetching.</span>
+    <span class="pl-c"><span class="pl-c">//</span> Prefetching here causes read duplication of data instead</span>
+    <span class="pl-c"><span class="pl-c">//</span> of data migration</span>
+    cudaMemLocation location;
+    location.<span class="pl-smi">type</span> = cudaMemLocationTypeDevice;
+    <span class="pl-k">for</span> (<span class="pl-k">int</span> device = <span class="pl-c1">0</span>; device &lt; maxDevices; device++) {
+      location.<span class="pl-smi">id</span> = device;
+      <span class="pl-k">const</span> <span class="pl-k">unsigned</span> <span class="pl-k">int</span> flags = <span class="pl-c1">0</span>;
+      <span class="pl-c1">cudaMemPrefetchAsync</span>(dataPtr, dataSize, location, flags, stream);
+    }
+
+    <span class="pl-c"><span class="pl-c">//</span> The kernel only reads this data in the inner loop</span>
+    <span class="pl-k">int</span> innerLoopIter = <span class="pl-c1">0</span>;
+    <span class="pl-k">while</span> (innerLoopIter &lt; maxInnerLoopIter) {
+      mykernel&lt;&lt;&lt;<span class="pl-c1">32</span>, threadsPerBlock, <span class="pl-c1">0</span>, stream&gt;&gt;&gt;((<span class="pl-k">const</span> <span class="pl-k">char</span> *)dataPtr, dataSize);
+      innerLoopIter++;
+    }
+    outerLoopIter++;
+  }
+  
+  <span class="pl-c1">cudaFree</span>(dataPtr);
+}</pre></div>
+<h2>4.3 内存丢弃</h2>
+<p><code class="notranslate">cudaMemDiscardBatchAsync</code>API 允许应用程序通知 CUDA Runtime：指定内存区域中的内容已经不再有用（no longer useful）。</p>
+<p>为了支持设备内存超额订阅（device memory oversubscription），Unified Memory 驱动程序会由于基于缺页的页面迁移或页面驱逐而自动执行内存传输。这些自动内存传输有时可能是冗余的，从而严重降低性能。</p>
+<p>将某个地址范围标记为 discard 后，Unified Memory 驱动程序会知道：应用程序已经消费了该范围内的数据内容，因此在后续执行预取或页面驱逐以腾出空间时，无需再迁移这些数据。如果在未进行后续写入或预取的情况下读取已被丢弃的页面，将得到不确定值。</p>
+<p>而在执行 discard 操作之后，任何新的写入都保证能够被后续读取正确看到。</p>
+<p>如果在执行 discard 操作的同时，对对应地址范围发生并发访问或预取，则会导致未定义行为。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">cudaError_t <span class="pl-en">cudaMemDiscardBatchAsync</span>(
+    <span class="pl-k">void</span> **dptrs,
+    <span class="pl-c1">size_t</span> *sizes,
+    <span class="pl-c1">size_t</span> count,
+    <span class="pl-k">unsigned</span> <span class="pl-k">long</span> <span class="pl-k">long</span> flags,
+    cudaStream_t stream);</pre></div>
+<p>该函数对 <code class="notranslate">dptrs</code> 和 <code class="notranslate">sizes</code>数组中指定的地址范围执行一批内存 discard 操作。这两个数组的长度必须与 <code class="notranslate">count</code>指定的数量一致。每一个内存区域都必须引用通过 <code class="notranslate">cudaMallocManaged</code>分配的 Managed Memory，或者引用通过 <code class="notranslate">__managed__</code>声明的变量。</p>
+<p><code class="notranslate">cudaMemDiscardAndPrefetchBatchAsync</code>API 将 discard和 prefetch两种操作组合在一起。调用 <code class="notranslate">cudaMemDiscardAndPrefetchBatchAsync</code>在语义上等价于：</p>
+<ol>
+<li>调用 <code class="notranslate">cudaMemDiscardBatchAsync</code></li>
+<li>然后调用 <code class="notranslate">cudaMemPrefetchBatchAsync</code><br>
+但其实现更加高效（more optimal）。<br>
+当应用程序希望内存迁移到目标位置，但并不需要保留原有内容时，该接口非常有用。</li>
+</ol>
+<div class="highlight highlight-source-c++"><pre class="notranslate">cudaError_t <span class="pl-en">cudaMemDiscardAndPrefetchBatchAsync</span>(
+    <span class="pl-k">void</span> **dptrs,
+    <span class="pl-c1">size_t</span> *sizes,
+    <span class="pl-c1">size_t</span> count,
+    <span class="pl-k">struct</span> <span class="pl-en">cudaMemLocation</span> *prefetchLocs,
+    <span class="pl-c1">size_t</span> *prefetchLocIdxs,
+    <span class="pl-c1">size_t</span> numPrefetchLocs,
+    <span class="pl-k">unsigned</span> <span class="pl-k">long</span> <span class="pl-k">long</span> flags,
+    cudaStream_t stream);</pre></div>
+<p>其中：</p>
+<ul>
+<li><strong><code class="notranslate">prefetchLocs</code></strong> 数组用于指定各次预取（prefetch）的目标位置（destination）。</li>
+<li><strong><code class="notranslate">prefetchLocIdxs</code></strong> 用于指出每个目标位置对应哪些 discard/prefetch 操作。<br>
+例如：如果一个 batch 中共有 <strong>10 个操作</strong>，其中：</li>
+<li>前 <strong>6 个</strong>需要预取到一个位置；</li>
+<li>后 <strong>4 个</strong>需要预取到另一个位置；<br>
+则：</li>
+<li><strong><code class="notranslate">numPrefetchLocs</code></strong> 的值应为 <strong>2</strong>；</li>
+<li><strong><code class="notranslate">prefetchLocIdxs</code></strong> 应为 <strong><code class="notranslate">{0, 6}</code></strong>；</li>
+<li><strong><code class="notranslate">prefetchLocs</code></strong> 中保存两个对应的目标位置。<br>
+需要注意的重要事项（Important considerations）</li>
+<li>如果在 discard 之后，没有执行新的写入（write）或预取（prefetch）便读取该内存区域，将返回不确定值（indeterminate value）。</li>
+<li>可以通过向该区域重新写入数据，或调用 <code class="notranslate">cudaMemPrefetchAsync</code> 对其进行预取，来撤销（undo）discard 操作。</li>
+<li>如果在 discard 操作执行期间，同时发生读（read）、写（write）或预取（prefetch），则会导致未定义行为（undefined behavior）。</li>
+<li>所有设备都必须满足属性 <code class="notranslate">cudaDevAttrConcurrentManagedAccess</code> 的值非零（non-zero）。</li>
+</ul>
+<h2>4.4 查询托管内存上的数据使用属性</h2>
+<p>程序可以使用下面的 API，查询通过 <code class="notranslate">cudaMemAdvise</code>或 <code class="notranslate">cudaMemPrefetchAsync</code> 为 CUDA Managed Memory设置的内存区域属性。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-en">cudaMemRangeGetAttribute</span>(<span class="pl-k">void</span> *data,
+                         <span class="pl-c1">size_t</span> dataSize,
+                         <span class="pl-k">enum</span> cudaMemRangeAttribute attribute,
+                         <span class="pl-k">const</span> <span class="pl-k">void</span> *devPtr,
+                         <span class="pl-c1">size_t</span> count);</pre></div>
+<p>该函数用于查询从 <code class="notranslate">devPtr</code>开始、大小为<code class="notranslate">count</code>字节的内存区域的某一项属性。该内存区域必须引用通过 <code class="notranslate">cudaMallocManaged</code>分配的 Managed Memory，或者引用通过 <code class="notranslate">__managed__</code>声明的变量，可以查询以下属性：</p>
+<p><code class="notranslate">cudaMemRangeAttributeReadMostly</code><br>
+如果整个内存区域都设置了 <code class="notranslate">cudaMemAdviseSetReadMostly</code>属性，则返回1；否则返回 0。</p>
+<p><code class="notranslate">cudaMemRangeAttributePreferredLocation</code><br>
+如果整个内存区域都将同一个处理器设置为了首选位置（preferred location），则返回对应 GPU 的设备 ID或 <code class="notranslate">cudaCpuDeviceId</code>。否则返回 <code class="notranslate">cudaInvalidDeviceId</code>。<br>
+应用程序可以根据 Managed Pointer 的 Preferred Location属性，决定是否通过 CPU或 GPU来进行数据中转（staging）。需要注意的是，查询时内存区域的实际驻留位置可能与首选位置不同。</p>
+<p><code class="notranslate">cudaMemRangeAttributeAccessedBy</code><br>
+返回对该内存区域设置了 <code class="notranslate">cudaMemAdviseSetAccessedBy</code> 建议的所有设备列表。</p>
+<p><code class="notranslate">cudaMemRangeAttributeLastPrefetchLocation</code><br>
+返回该内存区域最近一次通过 <code class="notranslate">cudaMemPrefetchAsync</code>显式预取的目标位置。需要注意的是，该属性仅返回应用程序最后一次请求预取到的位置。它并不能说明：</p>
+<ul>
+<li>该预取操作是否已经完成；</li>
+<li>甚至不能说明该预取操作是否已经开始执行。</li>
+</ul>
+<p><code class="notranslate">cudaMemRangeAttributePreferredLocationType</code>返回首选位置的类型，其返回值可能为：</p>
+<ul>
+<li><code class="notranslate">cudaMemLocationTypeDevice</code><br>
+如果内存区域中的所有页面（pages）都将同一块 GPU作为首选位置。</li>
+<li><code class="notranslate">cudaMemLocationTypeHost</code><br>
+如果内存区域中的所有页面都将 CPU作为首选位置。</li>
+<li><code class="notranslate">cudaMemLocationTypeHostNuma</code><br>
+如果内存区域中的所有页面都将同一个 Host NUMA 节点作为首选位置。</li>
+<li><code class="notranslate">cudaMemLocationTypeInvalid</code><br>
+如果：
+<ul>
+<li>所有页面没有相同的首选位置；或者</li>
+<li>某些页面根本没有设置首选位置。</li>
+</ul>
+</li>
+</ul>
+<p><code class="notranslate">cudaMemRangeAttributePreferredLocationId</code><br>
+如果同一地址范围查询 <code class="notranslate">cudaMemRangeAttributePreferredLocationType</code> 返回的是 <code class="notranslate">cudaMemLocationTypeDevice</code>，则返回对应 GPU 的设备编号。如果首选位置类型为Host NUMA，则返回对应的Host NUMA 节点 ID。否则，应忽略该返回值。</p>
+<p><code class="notranslate">cudaMemRangeAttributeLastPrefetchLocationType</code><br>
+返回整个内存区域最近一次通过 <code class="notranslate">cudaMemPrefetchAsync</code>显式预取到的位置类型。其返回值可能为：</p>
+<ul>
+<li><code class="notranslate">cudaMemLocationTypeDevice</code><br>
+如果内存区域中的所有页面都被预取到同一块 GPU。</li>
+<li><code class="notranslate">cudaMemLocationTypeHost</code><br>
+如果内存区域中的所有页面都被预取到CPU。</li>
+<li><code class="notranslate">cudaMemLocationTypeHostNuma</code><br>
+如果内存区域中的所有页面都被预取到同一个 Host NUMA 节点。</li>
+<li><code class="notranslate">cudaMemLocationTypeInvalid</code><br>
+如果：
+<ul>
+<li>所有页面并没有预取到同一个位置；或者</li>
+<li>某些页面从未进行过预取。</li>
+</ul>
+</li>
+</ul>
+<p><code class="notranslate">cudaMemRangeAttributeLastPrefetchLocationId</code><br>
+如果同一地址范围查询 <code class="notranslate">cudaMemRangeAttributeLastPrefetchLocationType</code>返回的是 <code class="notranslate">cudaMemLocationTypeDevice</code>，则该值为一个有效的 GPU 设备编号。如果返回的是 <code class="notranslate">cudaMemLocationTypeHostNuma</code>，则该值为一个有效的 Host NUMA 节点 ID。否则，应忽略该返回值。此外，还可以使用对应的 <code class="notranslate">cudaMemRangeGetAttributes</code> 函数，一次查询多个属性。</p>
+<h1>4.5 GPU超额分配</h1>
+<p>统一内存使应用程序能够超额使用任意单个处理器的内存。换句话说，应用程序可以分配并共享容量超过系统中任意单个处理器内存容量的数组。<br>
+这一特性使得应用程序能够在无需显著增加编程模型复杂性的情况下，实现包括对无法完全装入单块 GPU 内存的数据集进行外存（out-of-core）处理等功能。</p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
