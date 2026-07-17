@@ -3,7 +3,7 @@
 # 前言
 异构系统拥有多处可存储数据的物理内存：主机 CPU 外接有 DRAM 内存，系统内每一块 GPU 也都配备独立的专属 DRAM 显存。数据存放于访问端处理器的本地内存中时，程序性能最优。CUDA 提供可手动管控数据内存布局的应用程序接口（例如：cudaMalloc、cudaMallocHost等），但这类接口代码冗余度高，还会增加软件开发难度。为此 CUDA 推出多项功能特性，简化不同物理内存间的数据分配、布局调度与数据迁移工作。
 
-本章旨在讲解上述相关功能特性，阐明其在功能实现与性能优化层面对应用开发者的实际作用。统一内存存在多种实现形式，具体形态由操作系统、驱动版本以及所用 GPU 硬件共同决定。本章将说明如何判定设备所适配的统一内存运行模式，以及各类模式下统一内存的运行机制。在”==[CUDA官方文档学习6：统一内存（二）（暂未发布）]()==“中会对统一内存展开更为详尽的讲解。
+本章旨在讲解上述相关功能特性，阐明其在功能实现与性能优化层面对应用开发者的实际作用。统一内存存在多种实现形式，具体形态由操作系统、驱动版本以及所用 GPU 硬件共同决定。本章将说明如何判定设备所适配的统一内存运行模式，以及各类模式下统一内存的运行机制。在”[CUDA官方文档学习6：统一内存（二）](https://waibibab-cs.github.io/post/CUDA-guan-fang-wen-dang-xue-xi-6%EF%BC%9A-tong-yi-nei-cun-%EF%BC%88-er-%EF%BC%89.html)“中会对统一内存展开更为详尽的讲解。
 
 本章将定义并阐释以下核心概念：
 **统一虚拟地址空间（Unified Virtual Address Space，UVA）**：CPU内存与各GPU内存，在同一个虚拟地址空间内划分出相互独立的地址区间
@@ -79,7 +79,7 @@ Unified Memory（统一内存）的功能和行为会随着以下因素的不同
 - 允许**超额分配（Oversubscription）**：应用程序可以分配比 GPU 实际物理内存容量更多的 Managed Memory。
 
 内存分配和迁移行为可能与上述情况有所不同。程序员可以通过提示（hints）和预取（prefetches）来影响这些行为。（见2.4）
-关于完整 Unified Memory 支持的详细内容，可参见==[CUDA官方文档学习6：统一内存（二）（暂未发布）]()==中的**《Unified Memory on Devices with Full CUDA Unified Memory Support》**小节。
+关于完整 Unified Memory 支持的详细内容，可参见[CUDA官方文档学习6：统一内存（二）](https://waibibab-cs.github.io/post/CUDA-guan-fang-wen-dang-xue-xi-6%EF%BC%9A-tong-yi-nei-cun-%EF%BC%88-er-%EF%BC%89.html)中的**《Unified Memory on Devices with Full CUDA Unified Memory Support》**小节。
 ### 2.2.1 具有硬件一致性的完整统一内存
 在Grace Hopper和Grace Blackwell等硬件平台上，当使用NVIDIA CPU，且CPU与GPU之间通过 NVLink Chip-to-Chip（C2C）互连时，可提供Address Translation Services（ATS）。当 ATS 可用时，设备属性 `cudaDevAttrPageableMemoryAccessUsesHostPageTables`的值为1。
 
@@ -88,7 +88,7 @@ Unified Memory（统一内存）的功能和行为会随着以下因素的不同
 - CPU与GPU之间的互连支持原生原子操作（native atomics）（此时 `cudaDevAttrHostNativeAtomicSupported`的值为1）
 - 相比软件一致性（software coherence），硬件一致性（hardware coherence）能够提升性能。
 
-ATS提供了HMM的全部能力。当ATS可用时，HMM会被自动禁用。关于硬件一致性与软件一致性的进一步讨论，请参见==[CUDA官方文档学习6：统一内存（二）（暂未发布）]()==中的 **《CPU and GPU Page Tables: Hardware Coherency vs. Software Coherency》** 小节。
+ATS提供了HMM的全部能力。当ATS可用时，HMM会被自动禁用。关于硬件一致性与软件一致性的进一步讨论，请参见[CUDA官方文档学习6：统一内存（二）](https://waibibab-cs.github.io/post/CUDA-guan-fang-wen-dang-xue-xi-6%EF%BC%9A-tong-yi-nei-cun-%EF%BC%88-er-%EF%BC%89.html)中的 **《CPU and GPU Page Tables: Hardware Coherency vs. Software Coherency》** 小节。
 
 注意：硬件一致性并不能使主机访问仅分配给 GPU 的内存，例如使用 `cudaMalloc`分配的内存
 ### 2.2.2 HMM——具有软件一致性的完整统一内存
@@ -117,7 +117,7 @@ Addressing Mode : HMM
 - **不允许** GPU 内存超额分配（Oversubscription）。
 - **只有**通过 CUDA 显式分配为 **Managed Memory** 的内存才属于 Unified Memory。
 
-关于这一工作模式的完整说明，请参见==[CUDA官方文档学习6：统一内存（二）（暂未发布）]()==中的 **《Unified Memory on Windows, WSL, and Tegra》**。
+关于这一工作模式的完整说明，请参见[CUDA官方文档学习6：统一内存（二）](https://waibibab-cs.github.io/post/CUDA-guan-fang-wen-dang-xue-xi-6%EF%BC%9A-tong-yi-nei-cun-%EF%BC%88-er-%EF%BC%89.html)中的 **《Unified Memory on Windows, WSL, and Tegra》**。
 ## 2.4 内存建议与预取
 程序员可以向负责管理**Unified Memory**的**NVIDIA Driver**提供**提示（hints）**，帮助其尽可能提高应用程序的性能。
 
@@ -128,7 +128,7 @@ CUDA API `cudaMemPrefetchAsync`允许程序员建议（suggest）系统异步地
 
 一种常见的用法是在 **Kernel 启动之前**，提前开始传输该 Kernel 将要使用的数据。这样，数据拷贝可以在**其他 GPU Kernel 正在执行**时同时进行。
 
-==[CUDA官方文档学习6：统一内存（二）（暂未发布）]()==中的**《Performance Hints》** 一节介绍了可以传递给 `cudaMemAdvise`的各种提示（hints），并给出了使用`cudaMemPrefetchAsync`的示例。
+[CUDA官方文档学习6：统一内存（二）](https://waibibab-cs.github.io/post/CUDA-guan-fang-wen-dang-xue-xi-6%EF%BC%9A-tong-yi-nei-cun-%EF%BC%88-er-%EF%BC%89.html)中的**《Performance Hints》** 一节介绍了可以传递给 `cudaMemAdvise`的各种提示（hints），并给出了使用`cudaMemPrefetchAsync`的示例。
 # 3.页锁定主机内存
 在之前博客的入门代码示例中，我们使用 `cudaMallocHost`在CPU上分配内存。该函数在主机（Host）上分配页锁定内存（Page-locked Memory），也称为**固定内存（Pinned Memory）**。
 
