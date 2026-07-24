@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="# 前言
+Transformer模型在不同参数量规模下，计算量（FLOPs）在注意力与MLP模块的分配变化，说明了对于不同规模的模型，我们优化侧重点也应该有所不同。">
+<meta property="og:title" content="【CS336课程笔记（2026春季）】Lecture1&2：Tokenization与Pytorch">
+<meta property="og:description" content="# 前言
+Transformer模型在不同参数量规模下，计算量（FLOPs）在注意力与MLP模块的分配变化，说明了对于不同规模的模型，我们优化侧重点也应该有所不同。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/%E3%80%90CS336-ke-cheng-bi-ji-%EF%BC%882026-chun-ji-%EF%BC%89%E3%80%91Lecture1%262%EF%BC%9ATokenization-yu-Pytorch.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>【CS336课程笔记（2026春季）】Lecture1&2：Tokenization与Pytorch</title>
+<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">【CS336课程笔记（2026春季）】Lecture1&2：Tokenization与Pytorch</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/71" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><h1>前言</h1>
+<p>Transformer模型在不同参数量规模下，计算量（FLOPs）在注意力与MLP模块的分配变化，说明了对于不同规模的模型，我们优化侧重点也应该有所不同。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260722104520.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260722104520.png" alt="image.png" style="max-width: 100%;"></a></p>
+<p><strong>课程大纲</strong></p>
+<ul>
+<li>basics
+<ul>
+<li>目标：能够训练一个基础的语言模型</li>
+<li>内容：
+<ul>
+<li><strong>tokenization</strong>：是关于“模型操作的基本单元是什么？”；形式上来说，分词器（tokenizer）负责在原始输入与序列（token序列）之间进行转换；流行的分词器：BPE（2015）；作用包括缩短上下文长度（例如：1000字节-&gt;250个token）、自适应计算（对输入中关键部分分配更多建模能力）；终极愿景是无分词器的模型架构可以直接以字节作为输入，这类方案前景广阔但尚未在前沿模型中落地</li>
+<li><strong>模型架构</strong>：从最原始的Transformer开始介绍；然后介绍后续的优化与改进，例如激活函数的改进（ReLU、SwiGLU）、位置编码的改进（sinusoidal、RoPE）、归一化方法改进（LayerNorm、RMSNorm、QK norm）、注意力机制改进（full/sparse/local attention、GQA)、Recurrence/state-space models/linear attention（Mamba、Gated DeltaNet）、MLP改进（dense,MOE)、Shape（隐藏层维度、专家数）</li>
+<li><strong>训练</strong>：是关于“如何设置模型的参数？“；包含损失函数（比如multi-token prediction）、优化器（AdamW、SOAP、Muon）、initialization scale（Xavier init、muP）、学习率调度（cosine、WSD）、正则化（dropout、weight decay）、批次大小（critical batch size）、MoE specific：load balancing（aux-free）</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>systems
+<ul>
+<li>目标：最大化利用硬件（GPU or TPU）</li>
+<li>内容：
+<ul>
+<li><strong>基础</strong>：资源核算（分析一个模型方寸与计算的特征，例如在1T tokens训练一个70B的模型需要的计算量为6×70e9×1e12=4.2e23 FLOPS）；模型参数必须从HBM移动到SMs去计算；实例：B200能够使用8TB/sec的带宽执行2.25 PFLOPS/sec的计算；屋顶线分析：理解计算受限与访存受限；Benchmarking and profiling（nsight）</li>
+<li><strong>kernels</strong>：内核是运行在GPU上的一个函数；在使用 PyTorch 时，每个基础运算都会启动一个标准核函数；可以编写自定义核函数来让 GPU 跑得飞快；核心原则：组织计算流程，最小化数据搬运开销；朴素实现：读取高带宽显存（HBM）→ 计算 A → 写回 HBM → 读取 HBM → 计算 B → 写回 HBM；融合实现：读取 HBM → 同时计算 A 和 B → 一次写回 HBM；优化策略：算子融合（如矩阵乘法 + 激活函数）、分块计算（如 FlashAttention 中的 tiling 技术）；关键优化点：线程束分化（warp divergence）、内存合并访问（memory coalescing）、存储体冲突（bank conflicts）、占用率（occupancy）、批量异步内存传输；核函数编写工具：CUDA / Triton / CUTLASS / ThunderKittens</li>
+<li><strong>并行化</strong>：如果我们有 1024 张 GPU，该怎么办？GPU 之间的数据传输速度会更慢，但 “最小化数据移动” 的核心原则依然适用；使用经典的集合通信操作（例如：gather、reduce、all-reduce）；将内存数据（参数、激活值、梯度、优化器状态）分片存储在不同 GPU 上；计算拆分方式：{数据并行、张量并行、流水线并行、序列并行、专家并行}</li>
+<li><strong>推理</strong>：目标是根据提示词生成词元；推理同样是强化学习、测试时计算与模型评估等场景的必要环节；分为两个阶段预填充（prefill）和解码（decode）；prefill：所有词元已知，可一次性并行处理（计算密集型阶段）；decode：需要逐一生成词元（内存密集型阶段）；decode加速方法包含使用更轻量的模型（通过模型剪枝、量化、知识蒸馏实现）/投机解码（Speculative decoding）/系统级优化：算子融合核函数、连续批处理（continuous batching）</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>scaling_laws
+<ul>
+<li>目标：在给定计算量（FLOPs）预算下，通过小规模实验建立 “计算量→超参数→损失” 的预测关系，指导最优模型规模与训练策略，避免大规模调参的高昂成本</li>
+<li>内容：缩放定律的核心思想是从 “单一规模调优” 转向 “缩放配方（scaling recipe）”：先在不同小规模计算量（如最高 1e24 FLOPs）下进行实验，测量不同模型参数规模、训练数据量对应的损失，拟合出缩放规律；再用该规律外推到目标大规模计算量（如 1e25 FLOPs），预测最优超参数（模型大小 N / 训练 token 数 D）和最终损失，甚至在训练前就能评估方案效果。经典的计算最优缩放定律（Kaplan 2020、Hoffmann 2022）通过 ISOFLOP 曲线，确定不同计算量下的最优模型规模，而后续工作（如 Yang+2022 的超参数迁移、Delphi Scaling Suite）进一步验证了该方法的有效性，最终训练结果与缩放定律的预测高度吻合。</li>
+</ul>
+</li>
+<li>data
+<ul>
+<li>目标：通过高质量数据构建与全面评测体系，使大语言模型具备多语言理解、对话交互、代码生成及智能体任务执行等通用能力。</li>
+<li>内容：大语言模型的能力提升依赖于数据构建与评估体系的协同设计。在数据构建方面，需要从网页、书籍、论文、代码等多源数据中进行数据采集，并通过数据清洗、格式转换、质量筛选、去重、数据配比调整以及合成数据增强等流程构建高质量训练数据。根据训练阶段不同，数据可分为预训练数据（大规模、多样化语料）、中期训练数据（高质量长上下文数据）和后训练数据（对话数据、工具调用轨迹等）。在模型评估方面，需要针对模型目标能力设计多维度测试指标，包括困惑度评估基础语言建模能力，以及通过GPQA、HLE、SWE-Bench、Terminal-Bench等高级任务评测模型在推理、代码和智能体场景中的实际表现，从而指导模型优化并衡量其真实应用能力。</li>
+</ul>
+</li>
+<li>alignment
+<ul>
+<li>目标：通过对模型进行偏好对齐训练，使其生成更加符合人类意图、安全性要求和任务需求的高质量响应</li>
+<li>内容：在完成基础预训练（预测下一个token）后，需要进一步通过弱监督方法提升模型行为能力。其核心流程包括：首先利用模型生成多个候选回答；随后通过人工标注、验证器或语言模型评估器对回答质量进行评分；最后根据偏好数据更新模型，使其倾向于生成更优响应。常见方法包括基于强化学习的PPO（Proximal Policy Optimization）、直接偏好优化DPO（Direct Policy Optimization）以及去除价值函数的GRPO（Group Relative Preference Optimization）。相比直接生成高质量答案，对模型输出进行评价通常更容易，因此偏好学习能够有效利用弱监督信号。但强化学习方法仍面临训练不稳定、参数调节困难，以及大规模部署时需要额外推理基础设施和效率权衡等挑战</li>
+</ul>
+</li>
+</ul>
+<h1>Tokenization</h1>
+<p>tokens：通常用indices表示，比如<code class="notranslate">[15496,11,995,0]</code><br>
+encodes：将string转换为tokens的过程<br>
+decodes：将tokens转换为string的过程<br>
+Tokenizer（分词器）：可以执行encodes与decodes的类</p>
+<p>压缩率：每个tokens代表的字节数，一种提高压缩率的方法是增加vocabulary size，但是会陷入稀疏性。<br>
+vocabulary size与分词的关系：举一个例子，对于一个文本<code class="notranslate">"I love eating strawberries and kiwis."</code>，在小词表场景中，词表容量有限，无法收录长词和低频词，只能用基础子词拆分：<code class="notranslate">["I", " love", " eating", " straw", "berries", " and", " ki", "wis", "."]</code>；大词表场景下，词表进一步收录了更多变体词、多语言词，甚至完整短语：<code class="notranslate">["I", " love eating", " strawberries", " and", " kiwis", "."]</code></p>
+<p>character_tokenizer：直接把文本按单个字符拆分，然后分别按照unicode进行编码<br>
+vocabulary_size=max(indices)+1<br>
+问题：1.词表太大；2.压缩率极低</p>
+<p>byte_tokenizer：用字节作为最小分词单元，直接把文本转为UTF-8，压缩率为1<br>
+文本：你好<br>
+UTF-8 转字节拆分：<code class="notranslate">0xE4 0xBD 0xA0 0xE5 0xA5 0xBD</code></p>
+<p>word_tokenizer：先使用某种规则（例如空格或某种正则表达式）将字符串分成若干chunks，然后将每个chunk映射成一个整数<br>
+好处是：通常每个token是有意义的（比如映射前就是一个个单词）<br>
+压缩率一般较高但词表会很大<br>
+注意：1.通常词表大小不固定；2.对于一个在训练阶段没有见过的新word，将会映射成一个UNK token，这对后续计算会有一定影响</p>
+<p>bpe_tokenizer：Byte Pair Encoding，核心思想是通过不断合并训练语料中高频出现的字符/字节组合，构建适合数据分布的 token 词表。其核心思想是让常见序列使用少量 token 表示，而罕见序列通过多个 token 表示，从而在词表规模和序列长度之间取得平衡。</p>
+<h1>Pytorch</h1>
+<p>张量（tensor）：支持 GPU 加速、可自动求导的多维数组，是深度学习所有数据运算的基础载体。几乎所有内容（参数、梯度、激活值、优化器状态）可以作为浮点数存储至其中，</p>
+<p>通常浮点数指float32，为了进一步降低内存占用，可使用float16、bfloat16、float8、float4、。结论：1.精度越大通常效果越好，但时间/空间开销大；2.一种方法是采用混合训练，例如对参数/激活值/梯度采用bf16，对优化器状态采用fp32（pytorch有自动的混合精度库AMP）</p>
+<p>einops：PyTorch 简洁的维度重排库，包含einsum、reduce、rearrange<br>
+einsum：用下标表达式简洁实现张量任意线性运算</p>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-k">import</span> <span class="pl-s1">torch</span>
+<span class="pl-c"># 定义维度</span>
+<span class="pl-s1">b</span>, <span class="pl-s1">n</span>, <span class="pl-s1">h</span>, <span class="pl-s1">d</span>, <span class="pl-s1">k</span> <span class="pl-c1">=</span> <span class="pl-c1">2</span>, <span class="pl-c1">5</span>, <span class="pl-c1">2</span>, <span class="pl-c1">4</span>, <span class="pl-c1">3</span>
+<span class="pl-c"># 初始化张量</span>
+<span class="pl-s1">q</span> <span class="pl-c1">=</span> <span class="pl-s1">torch</span>.<span class="pl-c1">randn</span>(<span class="pl-s1">b</span>, <span class="pl-s1">n</span>, <span class="pl-s1">h</span>, <span class="pl-s1">d</span>)
+<span class="pl-s1">k</span> <span class="pl-c1">=</span> <span class="pl-s1">torch</span>.<span class="pl-c1">randn</span>(<span class="pl-s1">b</span>, <span class="pl-s1">n</span>, <span class="pl-s1">k</span>, <span class="pl-s1">d</span>)
+<span class="pl-s1">v</span> <span class="pl-c1">=</span> <span class="pl-s1">torch</span>.<span class="pl-c1">randn</span>(<span class="pl-s1">b</span>, <span class="pl-s1">n</span>, <span class="pl-s1">k</span>, <span class="pl-s1">d</span>)
+<span class="pl-c"># 1. 普通原生写法</span>
+<span class="pl-s1">attn1</span> <span class="pl-c1">=</span> <span class="pl-s1">q</span> @ <span class="pl-s1">k</span>.<span class="pl-c1">transpose</span>(<span class="pl-c1">-</span><span class="pl-c1">1</span>, <span class="pl-c1">-</span><span class="pl-c1">2</span>)
+<span class="pl-s1">out</span>\<span class="pl-s1">_normal</span> <span class="pl-c1">=</span> <span class="pl-s1">attn1</span> @ <span class="pl-s1">v</span>
+<span class="pl-c"># 2. 合并一行einsum写法</span>
+<span class="pl-s1">out</span>\<span class="pl-s1">_einsum</span> <span class="pl-c1">=</span> <span class="pl-s1">torch</span>.<span class="pl-c1">einsum</span>(<span class="pl-s">'bnhd,bnkd,bnkd-&gt;bnhd'</span>, <span class="pl-s1">q</span>, <span class="pl-s1">k</span>, <span class="pl-s1">v</span>)</pre></div>
+<p>reduce：对一个tensor使用某种规则（eg,sum,mean...）进行规约</p>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">x</span> <span class="pl-c1">=</span> <span class="pl-s1">torch</span>.<span class="pl-c1">ones</span>(<span class="pl-c1">2</span>, <span class="pl-c1">3</span>, <span class="pl-c1">4</span>)
+<span class="pl-c"># old way</span>
+<span class="pl-s1">y</span> <span class="pl-c1">=</span> <span class="pl-s1">x</span>.<span class="pl-c1">sum</span>(<span class="pl-s1">dim</span><span class="pl-c1">=</span><span class="pl-c1">-</span><span class="pl-c1">1</span>)<span class="pl-c">#(2,3,4)-&gt;(2,3)</span>
+<span class="pl-c"># new way</span>
+<span class="pl-s1">y</span> <span class="pl-c1">=</span> <span class="pl-en">reduce</span>(<span class="pl-s1">x</span>, <span class="pl-s">"... hidden -&gt; ..."</span>, <span class="pl-s">"sum"</span>)</pre></div>
+<p>rearrange：对一个 tensor 进行维度重排、拆分或合并</p>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">x</span> <span class="pl-c1">=</span> <span class="pl-s1">torch</span>.<span class="pl-c1">ones</span>(<span class="pl-c1">2</span>, <span class="pl-c1">3</span>, <span class="pl-c1">4</span>)  <span class="pl-c"># (batch, seq, hidden)</span>
+<span class="pl-c"># old way</span>
+<span class="pl-s1">y</span> <span class="pl-c1">=</span> <span class="pl-s1">x</span>.<span class="pl-c1">permute</span>(<span class="pl-c1">1</span>, <span class="pl-c1">0</span>, <span class="pl-c1">2</span>).<span class="pl-c1">reshape</span>(<span class="pl-c1">3</span>, <span class="pl-c1">-</span><span class="pl-c1">1</span>)  <span class="pl-c"># (2,3,4)-&gt;(3,2,4)-&gt;(3,8)</span>
+<span class="pl-c"># new way</span>
+<span class="pl-s1">y</span> <span class="pl-c1">=</span> <span class="pl-en">rearrange</span>(<span class="pl-s1">x</span>, <span class="pl-s">"b s h -&gt; s (b h)"</span>)</pre></div>
+<p>一个浮点数操作（FLOP）是一个基本的操作，例如加法或乘法，有两种表示方法：</p>
+<ul>
+<li>FLOPs：FLOP操作量</li>
+<li>FLOP/s（FLOPS）：每秒的FLOP操作量，衡量硬件性能<br>
+例子：</li>
+<li>训练GPT-4(2023)大概需要2e25 FLOPs</li>
+<li><code class="notranslate">H100 has a peak performance of 1979 teraFLOP/s with sparsity, 50% without</code>，H100支持结构化稀疏，让模型中的一般权重归零，因此不启用稀疏时，其性能只有一半：<code class="notranslate">h100_flop_per_sec = 1979e12 / 2</code></li>
+</ul>
+<p>每种GPU都有一个承诺（promised）的峰值性能（FLOP/s）的参数，该参数会随着不同数据类型而发生变化，然而实际（actual）的FLOP/s往往与承诺的不同，可以使用MFU（Model FLOPs utilization）来衡量（忽略通信及其他开销）：<br>
+<code class="notranslate">mfu = actual_flop_per_sec / promised_flop_per_sec</code></p>
+<p>以relu操作介绍算术强度(arithmetic_intensity)概念：</p>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">n</span> <span class="pl-c1">=</span> <span class="pl-c1">1024</span> <span class="pl-c1">*</span> <span class="pl-c1">1024</span>
+<span class="pl-s1">x</span> <span class="pl-c1">=</span> <span class="pl-s1">torch</span>.<span class="pl-c1">ones</span>(<span class="pl-s1">n</span>, <span class="pl-s1">dtype</span><span class="pl-c1">=</span><span class="pl-s1">torch</span>.<span class="pl-c1">bfloat16</span>, <span class="pl-s1">device</span><span class="pl-c1">=</span><span class="pl-en">cuda_if_available</span>())
+<span class="pl-s1">y</span> <span class="pl-c1">=</span> <span class="pl-s1">torch</span>.<span class="pl-c1">relu</span>(<span class="pl-s1">x</span>)
+<span class="pl-c"># 传输的字节数，包含read x和write y两个过程，其中每个bf16是2个字节</span>
+<span class="pl-s1">bytes</span> <span class="pl-c1">=</span> (<span class="pl-c1">2</span> <span class="pl-c1">*</span> <span class="pl-s1">n</span>) <span class="pl-c1">+</span> (<span class="pl-c1">2</span> <span class="pl-c1">*</span> <span class="pl-s1">n</span>) 
+<span class="pl-s1">flops</span> <span class="pl-c1">=</span> <span class="pl-s1">n</span>
+<span class="pl-s1">communication_time</span> <span class="pl-c1">=</span> <span class="pl-s1">bytes</span> <span class="pl-c1">/</span> <span class="pl-s1">h100_bytes_per_sec</span>
+<span class="pl-s1">computation_time</span> <span class="pl-c1">=</span> <span class="pl-s1">flops</span> <span class="pl-c1">/</span> <span class="pl-s1">h100_flop_per_sec</span>
+<span class="pl-s1">total_time</span> <span class="pl-c1">=</span> <span class="pl-en">max</span>(<span class="pl-s1">communication_time</span>, <span class="pl-s1">computation_time</span>)
+<span class="pl-c"># 若通信时间大于计算时间为memory-bound，反之为compute-bound</span></pre></div>
+<p>另一种判断memory-bound or compute-bound的方法：<br>
+硬件的算术强度a：<code class="notranslate">h100_accelerator_intensity = h100_flop_per_sec / h100_bytes_per_sec = 295.3731</code><br>
+负载的算术强度b：<code class="notranslate">arithmetic_intensity = flops / bytes</code><br>
+若a &gt; b为带宽受限，反之计算受限</p>
+<p>roofline model：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260724115045.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260724115045.png" alt="image.png" style="max-width: 100%;"></a><br>
+x轴是算术强度，y轴是硬件在一个负载在x轴对应的算术强度下的理论性能峰值</p>
+<h2>一些pytorch的例子展示</h2>
+<p><strong>1.deep_linear_network</strong><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260724152432.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260724152432.png" alt="image.png" style="max-width: 100%;"></a><br>
+现在有如图所示的一个网络，层数L=3，维度D=8，则其参数量为<code class="notranslate">(D * D) * L</code>，输入批次B=4，对于一个输入x，会依次进行以下运算：<br>
+第一层：<code class="notranslate">x = F.relu(x @ w1)</code><br>
+第二层：<code class="notranslate">x = F.relu(x @ w2)</code><br>
+第三层：<code class="notranslate">x = F.relu(x @ w3)</code></p>
+<p><strong>2.gradients_basics</strong><br>
+模型公式：<code class="notranslate">loss = 0.5 * (x·w - 5)²</code>，目标是让预测值 <code class="notranslate">x·w</code> 逼近目标值 5<br>
+其中：<br>
+<code class="notranslate">x = torch.tensor([1., 2, 3]) </code><br>
+<code class="notranslate">w = torch.tensor([1., 1, 1], required_grad = True) # 要求权重的梯度</code><br>
+前向传播：<br>
+<code class="notranslate">pred_y = x @ w </code><br>
+<code class="notranslate">loss = 0.5 * (pred_y - 5).pow(2)</code><br>
+反向传播：<br>
+<code class="notranslate">loss.backward() # 自动计算梯度</code><br>
+求导：<code class="notranslate">d(loss)/dw = (x·w - 5) * x</code>，代入后得:<br>
+<code class="notranslate">assert torch.equal(w.grad, torch.tensor([1, 2, 3]))</code></p>
+<p><strong>3.gradients_flops</strong><br>
+该例子用一个简单的模型展示计算梯度所需的计算量<br>
+我们定义一个简单的模型，类似上述“1.deep_linear_network”，只不过是两层的linear network，其中B=1024，D=256<br>
+输入与权重：</p>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">x</span> <span class="pl-c1">=</span> <span class="pl-s1">torch</span>.<span class="pl-c1">ones</span>(<span class="pl-c1">B</span>, <span class="pl-c1">D</span>, <span class="pl-s1">device</span><span class="pl-c1">=</span><span class="pl-en">cuda_if_available</span>())
+<span class="pl-s1">w1</span> <span class="pl-c1">=</span> <span class="pl-s1">torch</span>.<span class="pl-c1">randn</span>(<span class="pl-c1">D</span>, <span class="pl-c1">D</span>, <span class="pl-s1">device</span><span class="pl-c1">=</span><span class="pl-en">cuda_if_available</span>(), <span class="pl-s1">requires_grad</span><span class="pl-c1">=</span><span class="pl-c1">True</span>)
+<span class="pl-s1">w2</span> <span class="pl-c1">=</span> <span class="pl-s1">torch</span>.<span class="pl-c1">randn</span>(<span class="pl-c1">D</span>, <span class="pl-c1">D</span>, <span class="pl-s1">device</span><span class="pl-c1">=</span><span class="pl-en">cuda_if_available</span>(), <span class="pl-s1">requires_grad</span><span class="pl-c1">=</span><span class="pl-c1">True</span>)</pre></div>
+<p>前向传播：</p>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">h1</span> <span class="pl-c1">=</span> <span class="pl-en">einsum</span>(<span class="pl-s1">x</span>, <span class="pl-s1">w1</span>, <span class="pl-s">"batch in, in out -&gt; batch out"</span>) 
+<span class="pl-s1">h2</span> <span class="pl-c1">=</span> <span class="pl-en">einsum</span>(<span class="pl-s1">h1</span>, <span class="pl-s1">w2</span>, <span class="pl-s">"batch in, in out -&gt; batch out"</span>)
+<span class="pl-s1">loss</span> <span class="pl-c1">=</span> (<span class="pl-s1">h2</span>.<span class="pl-c1">mean</span>() <span class="pl-c1">-</span> <span class="pl-c1">0</span>)<span class="pl-c1">**</span><span class="pl-c1">2</span></pre></div>
+<p>反向传播：</p>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">h1</span>.<span class="pl-c1">retain_grad</span>()
+<span class="pl-s1">h2</span>.<span class="pl-c1">retain_grad</span>()
+<span class="pl-s1">loss</span>.<span class="pl-c1">backward</span>()</pre></div>
+<p>部分解释：</p>
+<ul>
+<li><code class="notranslate">retain_grad()</code>：默认情况下，PyTorch 只会保留叶子节点（如 <code class="notranslate">w1, w2</code>）的梯度，中间变量 <code class="notranslate">h1, h2</code> 的梯度会被释放。这里显式调用，是为了后续查看 / 验证它们的梯度。</li>
+<li><code class="notranslate">loss.backward()</code>：触发自动求导，PyTorch 会从 <code class="notranslate">loss</code> 开始，沿计算图反向计算所有 <code class="notranslate">requires_grad=True</code> 张量的梯度：
+<ol>
+<li>对 <code class="notranslate">w2</code> 的梯度：由 <code class="notranslate">loss</code> 对 <code class="notranslate">h2</code> 求导，再乘以 <code class="notranslate">h2</code> 对 <code class="notranslate">w2</code> 的导数得到</li>
+<li>对 <code class="notranslate">w1</code> 的梯度：由 <code class="notranslate">loss</code> 对 <code class="notranslate">h1</code> 求导，再乘以 <code class="notranslate">h1</code> 对 <code class="notranslate">w1</code> 的导数得到</li>
+<li>梯度会被自动存入 <code class="notranslate">w1.grad</code> 和 <code class="notranslate">w2.grad</code></li>
+</ol>
+</li>
+</ul>
+<p>接下来<strong>聚焦于网络的第二层</strong>，也就是h1--乘以w2--h2的一层：<br>
+前向传播过程，假设使用bf16量化：<br>
+<code class="notranslate">num_forward_flops = 2 * B * D * D</code><br>
+反向传播过程，我们需要计算：<br>
+1.h1.grad=dloss/dh1（为什么？h1是第一层的输出、第二层的输入，它不是参数，只是中间结果，但第一层参数w1的梯度需通过h1传递：<code class="notranslate">dloss/dw1 = dloss/dh1 * dh1/dw1</code>，所以h1.grad必须算出来，才能继续往前传播，计算第一层的梯度）<br>
+2.w2.grad=dloss/dw2（为什么？w2是模型的可训练参数，我们的目标就是用梯度下降来更新它，让loss变小，公式是<code class="notranslate">w2 = w2 - lr * w2.grad</code>）<br>
+其中计算过程为：</p>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-c"># 解释：dloss/dh1 = dloss/dh2 * dh2/dh1 = h2.grad @ w2</span>
+<span class="pl-s1">h1_grad</span> <span class="pl-c1">=</span> <span class="pl-en">einsum</span>(<span class="pl-s1">h2</span>.<span class="pl-c1">grad</span>, <span class="pl-s1">w2</span>, <span class="pl-s">"batch out, in out -&gt; batch in"</span>)
+<span class="pl-k">assert</span> <span class="pl-s1">torch</span>.<span class="pl-c1">allclose</span>(<span class="pl-s1">h1</span>.<span class="pl-c1">grad</span>, <span class="pl-s1">h1_grad</span>)
+<span class="pl-c"># 解释：dloss/dw2 = dloss/dh2 * dh2/dw2 = h2.grad @ h1</span>
+<span class="pl-s1">w2_grad</span> <span class="pl-c1">=</span> <span class="pl-en">einsum</span>(<span class="pl-s1">h2</span>.<span class="pl-c1">grad</span>, <span class="pl-s1">h1</span>, <span class="pl-s">"batch out, batch in -&gt; in out"</span>)
+<span class="pl-k">assert</span> <span class="pl-s1">torch</span>.<span class="pl-c1">allclose</span>(<span class="pl-s1">w2</span>.<span class="pl-c1">grad</span>, <span class="pl-s1">w2_grad</span>)</pre></div>
+<p>总计算量：<br>
+<code class="notranslate">num_backward_flops = (2 * B * D * D) + (2 * B * D * D)</code></p>
+<p><strong>4.optimizer</strong><br>
+使用之前的网络，其中：B=2,D=4,L=3</p>
+<blockquote>
+<p>优化器介绍：<br>
+1.基础：SGD（随机梯度下降）<br>
+所有优化器的起点，更新公式是：w = w - lr×g<br>
+优点：简单直接；缺点：学习率固定，对稀疏梯度、不同参数更新效率差，易震荡<br>
+2.Momentum（带动量的SGD）<br>
+给梯度加了指数移动平均（EMA），模拟物理中的 “惯性”<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260724162548.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260724162548.png" alt="image.png" style="max-width: 100%;"></a><br>
+加快收敛速度，减少震荡，更容易跳出局部鞍点<br>
+3.AdaGrad<br>
+用<strong>梯度平方的累积和</strong>来调整每个参数的学习率<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260724162647.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260724162647.png" alt="image.png" style="max-width: 100%;"></a><br>
+给高频更新的参数降低学习率，给低频更新的参数提高学习率，解决稀疏梯度问题，缺点是：梯度平方会一直累积，后期学习率会越来越小，容易提前 “僵住”<br>
+4.RMSProp<br>
+把 AdaGrad 的 “累积和” 改成了<strong>指数移动平均</strong>，解决梯度平方一直累积的问题<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260724162746.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260724162746.png" alt="image.png" style="max-width: 100%;"></a><br>
+学习率自适应调整，不会提前衰减，训练更稳定<br>
+5.Adam<br>
+同时结合了<strong>Momentum 的梯度平滑</strong>和<strong>RMSProp 的学习率自适应</strong><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260724162826.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260724162826.png" alt="image.png" style="max-width: 100%;"></a><br>
+优点：收敛快、训练稳定、参数更新更合理，是现在深度学习中最常用的优化器</p>
+</blockquote>
+<p>这里使用AdaGrad：</p>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">optimizer</span> <span class="pl-c1">=</span> <span class="pl-en">AdaGrad</span>(<span class="pl-s1">model</span>.<span class="pl-c1">parameters</span>(). <span class="pl-c1">lr</span><span class="pl-c1">=</span><span class="pl-c1">0.01</span>)
+<span class="pl-s1">state</span> <span class="pl-c1">=</span> <span class="pl-s1">model</span>.<span class="pl-c1">state_dict</span>()
+<span class="pl-c"># 计算梯度</span>
+<span class="pl-s1">x</span> <span class="pl-c1">=</span> <span class="pl-s1">torch</span>.<span class="pl-c1">randn</span>(<span class="pl-c1">B</span>, <span class="pl-c1">D</span>, <span class="pl-s1">device</span><span class="pl-c1">=</span><span class="pl-en">cuda_if_available</span>())
+<span class="pl-s1">y</span> <span class="pl-c1">=</span> <span class="pl-s1">torch</span>.<span class="pl-c1">tensor</span>([<span class="pl-c1">4.</span>, <span class="pl-c1">5.</span>], <span class="pl-s1">device</span><span class="pl-c1">=</span><span class="pl-en">cuda_if_available</span>())
+<span class="pl-s1">pred_y</span> <span class="pl-c1">=</span> <span class="pl-en">model</span>(<span class="pl-s1">x</span>).<span class="pl-c1">mean</span>()
+<span class="pl-s1">loss</span> <span class="pl-c1">=</span> <span class="pl-c1">F</span>.<span class="pl-c1">mse_loss</span>(<span class="pl-s1">input_pred_y</span>, <span class="pl-s1">target</span><span class="pl-c1">=</span><span class="pl-s1">y</span>)
+<span class="pl-s1">loss</span>.<span class="pl-c1">backward</span>()
+<span class="pl-c"># 进行一步优化,具体过程忽略</span>
+<span class="pl-s1">optimizer</span>.<span class="pl-c1">step</span>()
+<span class="pl-c"># 释放内存</span>
+<span class="pl-s1">optimizer</span>.<span class="pl-c1">zero_grad</span>(<span class="pl-s1">set_to_none</span><span class="pl-c1">=</span><span class="pl-c1">True</span>)</pre></div>
+<p><strong>5.上述例子的内存占用</strong><br>
+参数（2 bytes for bf16）<br>
+<code class="notranslate">parameter_memory = 2 * (D * D * L)</code><br>
+激活（bf16）<br>
+<code class="notranslate">activation_memory = 2 * B * D * L</code><br>
+梯度（bf16）<br>
+<code class="notranslate">gradient_memory = 2 * number_parameter</code><br>
+优化器状态（fp32）<br>
+<code class="notranslate">optimizer_state_memory = 4 * number_parameter</code><br>
+优化器上为了稳定通常用fp32，对于adagrad，通常用4 bytes/parameter存二阶矩，对于adam需要用8bytes/parameter存储一阶矩与二阶矩</p>
+<h2>梯度累积与激活检查点</h2>
+<p>为了降低内存占用，通常用这两个方法<br>
+梯度累积（Gradient Accumulation）是一种在显存有限时模拟大批次训练的技术：比如你想用 batch size=1024 训练模型，但显存只能装下 256，就可以设置 micro_batch_size=256、累积步数 = 4，依次处理 4 个微批次并累加梯度，直到完成 1024 个样本的梯度计算后再更新参数，这样既能获得大批次训练的稳定性，又能把单步显存占用控制在小批次水平。</p>
+<p>激活检查点（Activation Checkpointing）核心思路是：在前向传播时，不保存所有层的激活值，只选择性保存部分关键层的激活；在反向传播时，再重新执行一次部分前向传播，计算出缺失的中间激活值来完成梯度计算。举个例子：若全保留激活（例如bf16），显存占用约为 <code class="notranslate">2×B×L×D</code>；使用激活检查点后，我们只保存每 4 层的激活值，反向传播时按需重新计算中间层的激活，显存峰值占用能大幅降低，代价只是多了少量重复的前向计算步骤</p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
