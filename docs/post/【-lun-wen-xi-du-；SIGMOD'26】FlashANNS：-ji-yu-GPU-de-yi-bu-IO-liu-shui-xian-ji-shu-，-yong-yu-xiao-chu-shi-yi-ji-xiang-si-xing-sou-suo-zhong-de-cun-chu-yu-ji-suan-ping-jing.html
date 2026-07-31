@@ -264,7 +264,8 @@ CAM 能缓解系统调用开销、支持异步提交，但<strong>无法解决�
 Storage Performance Development Kit（SPDK，存储性能开发工具包）由 Intel 发起并开源，遵循 BSD 许可证，是一套基于 C 语言、用于编写高性能、高扩展性用户态存储应用程序的底层库和工具集。传统 Linux 系统的 I/O 栈存在上下文切换、中断处理、内存拷贝、多线程锁争用等开销，在 NVMe 等极速 SSD 普及、存储介质延迟降至微秒级后，内核软件开销成为 I/O 性能瓶颈，SPDK 的出现正是为了解决这一问题。</p>
 <p>SPDK 通过三大核心技术重构底层 I/O 架构：内核旁路将 NVMe 驱动移至用户态，减少内核协议栈开销；轮询模式用专属 CPU 核心主动检查任务，消除中断开销与长尾延迟；无锁与零拷贝设计通过 Thread-per-core 架构避免锁争用，借助 DMA 直接传输数据省去冗余拷贝。在 FlashANNS 架构中，SPDK 彻底绕过内核协议栈，消除底层文件系统开销，支撑其应对数十亿规模向量检索的高并发 I/O 压力。</p>
 </blockquote>
-<p>我们将 GDS、BaM、CAM 三种主流 I/O 栈分别集成到 FlashANNS 架构中进行对比评测。如图 15 所示，在 4 块 SSD、SIFT1B 数据集的测试环境下，本文自研 I/O 栈性能表现最优，QPS 分别达到 GDS 的 14.5 倍、BaM 的 3.9 倍、CAM 的 1.5 倍。实验结果充分表明，相较于现有方案，FlashANNS 的 I/O 栈具备更优异的性能，且针对 ANNS 工作负载的访问模式做了更深度的专属优化。</p>
+<p>我们将 GDS、BaM、CAM 三种主流 I/O 栈分别集成到 FlashANNS 架构中进行对比评测。如图 15 所示，在 4 块 SSD、SIFT1B 数据集的测试环境下，本文自研 I/O 栈性能表现最优，QPS 分别达到 GDS 的 14.5 倍、BaM 的 3.9 倍、CAM 的 1.5 倍。实验结果充分表明，相较于现有方案，FlashANNS 的 I/O 栈具备更优异的性能，且针对 ANNS 工作负载的访问模式做了更深度的专属优化。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260731112920.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260731112920.png" alt="image.png" style="max-width: 100%;"></a></p>
 <h2>4.3 基于采样的图度数选择器</h2>
 <p>为解决<strong>约束 C3</strong>，本文提出一种基于采样的图度数选择器。该机制属于<strong>索引构建前预处理流程</strong>：通过在不同度数的采样索引上分析流水线运行特征，估算 I/O 与计算的相对延迟；再利用 I/O 放大带来的带宽冗余，选取能<strong>最大化流水线重叠度</strong>的度数配置。</p>
 <h3>4.3.1 图度数对计算/IO瓶颈的影响</h3>
