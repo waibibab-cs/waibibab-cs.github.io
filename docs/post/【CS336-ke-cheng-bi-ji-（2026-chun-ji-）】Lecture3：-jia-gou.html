@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="# post-norm与pre-norm
+![image.png](https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824094001.png)
+假设当前隐藏状态为 xl​，Transformer 子层为 F(⋅)，它可以是 Attention，也可以是 MLP。">
+<meta property="og:title" content="【CS336课程笔记（2026春季）】Lecture3：架构">
+<meta property="og:description" content="# post-norm与pre-norm
+![image.png](https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824094001.png)
+假设当前隐藏状态为 xl​，Transformer 子层为 F(⋅)，它可以是 Attention，也可以是 MLP。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/%E3%80%90CS336-ke-cheng-bi-ji-%EF%BC%882026-chun-ji-%EF%BC%89%E3%80%91Lecture3%EF%BC%9A-jia-gou.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>【CS336课程笔记（2026春季）】Lecture3：架构</title>
+
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">【CS336课程笔记（2026春季）】Lecture3：架构</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/73" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><h1>post-norm与pre-norm</h1>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824094001.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824094001.png" alt="image.png" style="max-width: 100%;"></a><br>
+假设当前隐藏状态为 xl​，Transformer 子层为 F(⋅)，它可以是 Attention，也可以是 MLP。<br>
+原始Transformer用的是post-norm，表达式为：<br>
+$x_{l+1}=LN(x_l+F(x_l))$<br>
+Pre-Norm 则把 LayerNorm 放到子层之前：<br>
+$x_{l+1}=x_l+F(LN(x_l))$</p>
+<p>二者最核心的区别是残差路径不一样，post-norm虽然存在xl到xl+1的残差，但中间必经过LayerNorm和子层结构，并不是一条真正的“原样直通”的路径；而pre-norm存在一条真正的恒等残差路径，无论F这一支多么复杂，xl仍然可以直接传给下一层，多层以后，x0到xl始终存在直接的信息通路，这就是pre-norm对深层Transformer很重要的原因。</p>
+<p>梯度传播时，pre-norm一般更加稳定，$x_{l+1} = x_l + F\left(\mathrm{LN}(x_l)\right)$求导之后是：<br>
+$$ \frac{\partial x_{l+1}}{\partial x_l} = I + \frac{\partial F\left(\mathrm{LN}(x_l)\right)} {\partial x_l} $$<br>
+其中I是单位矩阵，因此即使F分支梯度很小，仍然存在一条恒等路径直接向前传播<br>
+而对于post-norm，也就是$x_{l+1} = \mathrm{LN}\left(x_l + F(x_l)\right)$而言，求导大致是：<br>
+$$ \frac{\partial x_{l+1}}{\partial x_l} = J_{\mathrm{LN}} \left( I + J_F \right) $$<br>
+其中$J_{\mathrm{LN}}$表示子层F的雅可比矩阵，如果堆很多层：$J_{\mathrm{LN},L} \cdots J_{\mathrm{LN},2} J_{\mathrm{LN},1}$梯度就会不断受影响<br>
+总之，post-norm可以理解成，如果想把layern的梯度传回layer1，就必须经过一长串变换，pre-norm相当于存在一条稳定的残差流，每层只需不断添加一点信息</p>
+<p>pre-norm最大问题是：随着层数越来越深，后面的某些层可能只是在残差流上做非常小的修正，从$x_L = x_0 + \sum_{l=0}^{L-1} F_l\left(\mathrm{LN}(x_l)\right)$可以看出，每层只是在原始残差流上添加增量，于是对于非常深的pre-norm网络，趋势往往是</p>
+<pre lang="text" class="notranslate"><code class="notranslate">Layer 1 + 大量更新 
+Layer 2 + 更新 
+...
+Layer 60 + 小更新 
+Layer 61 + 小更新 
+... 
+Layer 100 + 很小更新
+</code></pre>
+<p>名义上有100层，但有效深度可能没有达到真正的100层</p>
+<p>总结：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824101056.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824101056.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h1>LayerNorm与RMSNorm</h1>
+<p><strong>LayerNorm定义</strong>：<br>
+设一个token的隐藏向量为：$x = [x_1, x_2, \dots, x_d]$，Layernorm先计算均值：$\mu=\frac{1}{d}\sum_{i=1}^{d} x_i$，再计算方差：$\sigma^2 = \frac{1}{d} \sum_{i=1}^{d} (x_i-\mu)^2$，然后归一化：$\hat{x}_i = \frac{x_i-\mu} {\sqrt{\sigma^2+\epsilon}}$，最后进行可学习的仿射变换：$y_i = \gamma_i \hat{x}_i + \beta_i$，总之Layernorm的完整作用就是：先中心化到均值 0，再缩放到方差约为 1，最后通过 γ,β 恢复可学习的尺度和平移。</p>
+<p><strong>RMSNorm定义</strong>：<br>
+RMSNorm不计算均值，它只计算平方根：$\mathrm{RMS}(x) = \sqrt{ \frac{1}{d} \sum_{i=1}^{d} x_i^2 + \epsilon }$，然后：$\hat{x}<em>i = \frac{x_i} {\mathrm{RMS}(x)}$，最后乘一个可学习的缩放参数：$y_i = \gamma_i \frac{x_i} { \sqrt{ \frac{1}{d} \sum</em>{j=1}^{d}x_j^2 + \epsilon } }$，总之，RMSNorm只控制向量整体尺度，不强制均值变成0</p>
+<p>RMSNorm相对于LayerNorm少了一次均值相关的计算和数据操作，理论上总体少了一半操作，但计算快了不止一倍，因为这部分计算时memory-bound的，就比如归一化这个操作虽然操作量远低于其他，但却占了25.5%的时间<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824103851.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824103851.png" alt="image.png" style="max-width: 100%;"></a></p>
+<p>此外，RMSNorm可学习参数只有一个，相较于LayerNorm来说，少了一半，这是另一个优势</p>
+<h1>GLU</h1>
+<p><strong>GLU（Gated Linear Unit，门控线性单元）</strong> 是现代 Transformer，尤其是大语言模型 MLP/FFN 中非常重要的一类结构。可以把它理解成：不是直接对线性变换结果做激活，而是让一条分支产生“内容”，另一条分支产生“门”，再逐元素相乘，由门决定哪些特征通过、通过多少，这也是理解SwiGLU、GEGLU、ReGLU的基础</p>
+<p>标准的Transformer的前馈网络通常是：$\mathrm{FFN}(x) = W_2,\phi(W_1x)$，其中W1将输入维度扩展（一般是扩展为原来的4倍），经过激活函数（如ReLU、GeLU）之后再映射回原来的维度</p>
+<p>原始 GLU 的核心形式是：$\mathrm{GLU}(x) = (xW_a+b_a) \odot \sigma(xW_b+b_b)$，其中：$\sigma(x)=\frac{1}{1+e^{-x}}$，第一条分支产生真正内容，第二条分支产生门，例如：内容分支产生<code class="notranslate">a=[2, -1, 5]</code>，门控分支经过Sigmoid得到<code class="notranslate">g=[0.9, 0.1, 0.6]</code>，那么输出得到<code class="notranslate">y=[1.8, -0.1, 3]</code>，因此GLU是在学习根据当前输入，这个特征到底应该通过多少？当把sigmoid换成其他激活函数的时候，就产生了：ReGLU、GEGLU、SwiGLU</p>
+<p>此外由于多了一个新矩阵，GLU 类 FFN（SwiGLU/GeGLU/ReGLU）一共包含 <strong>3 个权重矩阵</strong>，而标准 FFN 仅 2 个权重矩阵。为保证替换前后<strong>总参数量、计算量保持一致</strong>，需要将 GLU 的中间隐层维度缩放为原标准 FFN 的 $\boldsymbol{\dfrac{2}{3}}$。注意：该缩放只是<strong>等参数对比的工程约定</strong>，并非数学强制约束；若不做缩放，GLU 的参数量与 FLOPs 会上涨 50%，训练推理成本随之增加。</p>
+<h1>Positional Encoding与RoPE</h1>
+<p>self-attention的公式为：<br>
+$$Q = XW_Q,\quad K = XW_K,\quad V = XW_V$$<br>
+$$\text{Attention}(Q,K,V) = \text{softmax}\left(\frac{QK^\top}{\sqrt{d_k}}\right)V$$<br>
+公式本身只关心token之间的内容关系，并不知道谁在前、谁在后。如果没有位置编码，self-attention看到的只是同一组token，只是排列顺序不同，所以必须额外告诉模型某个token在第几个位置，这就是位置编码的作用</p>
+<p>一种最简单的方法是$h_i=x_i+p_i$，例如：</p>
+<pre lang="text" class="notranslate"><code class="notranslate">我      = token_embedding(我)   + position_embedding(0)
+喜欢    = token_embedding(喜欢) + position_embedding(1)
+AI      = token_embedding(AI)   + position_embedding(2)
+</code></pre>
+<p>这样同一个 token 放在不同位置时，最终表示就不同。</p>
+<p>Sinusoidal Position Encoding 是原始 Transformer 使用的位置编码，其特点是位置编码不是训练出来的，而是通过固定的 sin/cos 函数计算出来。<br>
+$$PE(pos, 2i) = \sin\left(\frac{pos}{10000^{2i/d}}\right)$$<br>
+$$PE(pos, 2i + 1) = \cos\left(\frac{pos}{10000^{2i/d}}\right)$$<br>
+最终：$h_{pos} = x_{pos} + PE(pos)$<br>
+也就是直接把位置编码加到输入embedding上，然后再计算QK矩阵，Attention最终还是要自己从QK计算中把相对位置关系学出来，也就是说Sinusoidal 提供了位置，但没有直接把“相对距离”嵌入Attention 的内积结构中。</p>
+<p>RoPE 则更进一步，它在探究如何用嵌入向量qkv向量的同时加入位置信息，函数表达如下：$q_m=f_q(x_m,m); k_n=f_k(x_n,n); v_n=f_v(x_n,n)$，其中$q_m$表示第m个token对应的词向量$x_m$集成位置信息m之后的query向量。而$k_n$和$v_n$则表示第n个token对应的词向量$x_n$集成位置信息n之后的key和value向量。</p>
+<p>Sinusoidal函数的做法是在计算QKV之前，用Sinusoidal公式计算一个位置编码向量$p_i$加到词嵌入$x_i$上，$p_i$同样是d维向量，然而再乘以对应的变换矩阵W：<br>
+$$f_{t:t\in{q,k,v}}(x_i, i) := W_{t:t\in{q,k,v}}(x_i + p_i)$$</p>
+<p>为了能利用token之间的相对信息，假定query向量$q_m$和key向量$k_n$之间的内积操作可以被一个函数g表示，该函数g的输入是词嵌入向量$x_m$，$x_n$和它们之间的相对位置m-n：<br>
+$$\big\langle f_q(x_m, m), f_k(x_n, n) \big\rangle = g(x_m, x_n, m-n)$$<br>
+接下来的目标就是找到一个等价的位置编码方式，从而使得上述关系成立。假设词嵌入向量的维度d=2，这样就可以利用二维平面上向量的性质推出（证明过程此处忽略）:<br>
+$$\begin{align*} f_q(x_m, m) &amp;= (W_q x_m) e^{i m \theta} \ f_k(x_n, n) &amp;= (W_k x_n) e^{i n \theta} \ g(x_m, x_n, m-n) &amp;= \mathrm{Re}\left[ (W_q x_m) (W_k x_n)^* e^{i(m-n)\theta} \right] \end{align*}$$<br>
+进一步可以表示为：<br>
+$$\begin{equation} \begin{aligned} g(x_m, x_n, m-n) &amp;= \begin{pmatrix} q_m^{(1)} &amp; q_m^{(2)} \end{pmatrix} \begin{pmatrix} \cos((m-n)\theta) &amp; -\sin((m-n)\theta) \ \sin((m-n)\theta) &amp; \cos((m-n)\theta) \end{pmatrix} \begin{pmatrix} k_n^{(1)} \ k_n^{(2)} \end{pmatrix} \end{aligned} \end{equation}$$<br>
+将2维进行扩展，可以表示为：$f_{{q,k}}(x_m, m) = R_{\Theta,m}^d W_{{q,k}} x_m$<br>
+其中：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824155755.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824155755.png" alt="image.png" style="max-width: 100%;"></a><br>
+总结来说，RoPE 的 self-attention 操作的流程是：对于 token 序列中的每个词嵌入向量，首先计算其对应的 query 和 key 向量，然后对每个 token 位置都计算对应的旋转位置编码，接着对每个 token 位置的 query 和 key 向量的元素按照 <strong>两两一组</strong> 应用旋转变换，最后再计算 query 和 key 之间的内积得到 self-attention 的计算结果，可以表示为下图：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824155913.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824155913.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h1>hyperparameter</h1>
+<p><strong>1.前馈比（model dimension ratio）</strong>：在FFN结构当中，输入的维度一般会从$d_{model}$膨胀到$d_{ff}$，经过激活函数之后再恢复到$d_{model}$，那么其中前馈比就是：<br>
+$$r_{ff} = d_{ff} / d_{model}$$<br>
+一般来说门控FFN的前馈比设置在4×2/3=8/3≈2.67可以保证计算量与普通FFN设置在常用值（4）一致<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824200428.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824200428.png" alt="image.png" style="max-width: 100%;"></a><br>
+一个反常的例子是T5模型，它将前馈比设置为高达64的值，目的是提高硬件的利用率，然而这不一定能够带来较好的效果，如图所示，一般来说这个值设置在1-10效果较优：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824200605.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824200605.png" alt="image.png" style="max-width: 100%;"></a></p>
+<p><strong>2.(单头维度×头数量）/总维度</strong><br>
+一般来说这个值为1，不会增加总计算量，当然也有一些例外<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824200903.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824200903.png" alt="image.png" style="max-width: 100%;"></a></p>
+<p><strong>3.aspect ratio（模型长宽比）</strong><br>
+是指：大模型宽度（维度）与深度与深度的比值<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824201036.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824201036.png" alt="image.png" style="max-width: 100%;"></a><br>
+一般来说对于这个参数的设置比较宽松</p>
+<p><strong>4.词表尺寸</strong><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824201209.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824201209.png" alt="image.png" style="max-width: 100%;"></a></p>
+<p><strong>5.dropout与weight decay</strong><br>
+dropout：训练时，以设定概率随机把一部分神经元输出置 0，阻断部分前向传播通路；推理阶段不做随机屏蔽。每次训练相当于训练多个子网络，避免神经元过度互相依赖，<strong>抑制过拟合</strong>。weight decay：属于优化器层面的正则手段，等价于 L2 权重惩罚。每一步更新时，让权重向 0 做小幅收缩</p>
+<p>大模型预训练数据集规模极大，数据量远大于模型参数量，理论上看大预训练模型好像不需要正则来抑制过拟合。在实践中：老一代模型预训练开启Dropout=0.1，搭配weight deca，新一代主流大模型，关闭dropout，仅靠weight decay做正则，Qwen是少数例外依然保留dropout。一个很重要反直觉结论：LLM 里 weight decay 主要目的<strong>不是防止过拟合</strong>，它和 cosine 学习率调度相互作用，起到约束权重范数、稳定优化的效果。dropout 更多保留在微调阶段使用。</p>
+<p>总之，目前的趋势是预训练过程（开weight-decay、关dropout）、训练一般可以都开，推理都关</p>
+<h1>Stability trick</h1>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824202343.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824202343.png" alt="image.png" style="max-width: 100%;"></a><br>
+通常什么会导致不稳定（loss尖峰）？softmaxes！主要的原因是其中包含的指数运算与除法运算<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824202456.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824202456.png" alt="image.png" style="max-width: 100%;"></a><br>
+softmax通常存在于两个地方：1.输出端（概率分布）；2.注意力运算内部<br>
+对于输出端，一种解决方法是采用z-loss：<br>
+常规softmax计算见左图（主loss），主loss的一个问题是，如果将输出的所有logits增加一个相同的值C，最终输出结果不会变化，这也导致主loss无法反映Z值的膨胀问题，会导致loss尖峰、训练崩溃<br>
+而右图是z-loss，增加了一个惩罚项，Z过大会使这个惩罚项变得很大，从而在后续训练中修正，使Z值平稳下来，避免了Z的过大或过小<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824202802.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824202802.png" alt="image.png" style="max-width: 100%;"></a></p>
+<p>解决注意力内的softmax问题是QK norm，输入经过层 LN → QKV 投影 → Split 拆分出 Q、K、V；在 Q、K 送入 BMM（QK 矩阵相乘）之前，分别对 Q、K 各自再做一次 RMS‑Norm（LayerNorm），V 不做归一化，这就是 QK‑Norm。<br>
+主要目的是防止QK的点积数值过大，送入softmax后同样出现梯度消失或者数值溢出<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824203802.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824203802.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h1>attention heads</h1>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824204329.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824204329.png" alt="image.png" style="max-width: 100%;"></a><br>
+首先分析常规多头注意力机制下的操作数与访存数：<br>
+首先，矩阵乘法FLOPs的估算规则为：对于$A_{M×K}×B_{K×N}$，FLOPs=2MKN（乘加）<br>
+<strong>一、算术操作数</strong><br>
+输入：$X∈R^{b×n×d}$<br>
+QKV投影：$X_{b,n,d}@W_{d,3d}$，总FLOPs为$6bnd^2$<br>
+注意力运算：第一个矩阵乘：$QK^T$：$(b,n,k) @ (b,k,n) \rightarrow (b,n,n)$ 单头 FLOPs：$2 \cdot n \cdot k \cdot n = 2n^2k$ 2. 第二个矩阵乘：$\mathit{Score} \cdot V$：$(b,n,n) @ (b,n,k) \rightarrow (b,n,k)$ 单头 FLOPs：$2 \cdot n \cdot n \cdot k = 2n^2k$ ，单头合计：$2n^2k + 2n^2k = 4n^2k$ ；$h$个头：$4 \cdot b  n^2 d$。<br>
+由于此处n&lt;d，总体计算量应该由$bnd^2$主导<br>
+输出投影：$(b,n,d) @ (d,d)$，FLOPs为$2bnd^2$<br>
+综上，FLOPs为($bnd^2$)</p>
+<p><strong>二、内存访问量</strong><br>
+1.$bnd$输入/输出张量访存<br>
+2.$bhn^2$：注意力分数矩阵访存（主要部分）：多头注意力的每个头都会生成一份n×n的注意力分数矩阵，每个头分数矩阵大小都是n×n，共h个头，batch为b，总大小为$bhn^2$<br>
+3.权重矩阵访存，QKV权重形状均为$d^2$</p>
+<p>KV Cache示意图<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824210859.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824210859.png" alt="image.png" style="max-width: 100%;"></a><br>
+带来的问题：极大降低了算术强度，总体的FLOPs不变，但访存量变化为：$(bn^2d+nd^2)$<br>
+分析：（decode阶段）<br>
+1.$bn^2d$：读取KV-Cache的访存开销，其中K,V∈$R^{b×n×d}$<br>
+每解码一步，必须把全部历史的K、V从HBM读出来，用于和新的单步Q做矩阵乘<br>
+2.$nd^2$：K、V投影权重的访存<br>
+每次step都需要读取K、V投影的矩阵$W_K$,$W_V$∈$R^{d×d}$</p>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824213231.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824213231.png" alt="image.png" style="max-width: 100%;"></a><br>
+如上图所示，想要提升算术强度就需要降低n/提高b</p>
+<p>对于上述问题，引出MQA：KV的单头维度保留d/h，但头的数量降低为原来的1/h，计算的时候将这一个头通过广播分别做矩阵乘以满足Q计算的维度需求（但没有显式拷贝数据）<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824213427.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824213427.png" alt="image.png" style="max-width: 100%;"></a><br>
+但这种方法会明显降低系统表达能力，为了进行这个权衡，进一步提出GQA<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824213821.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824213821.png" alt="image.png" style="max-width: 100%;"></a></p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script><script>MathJax = {tex: {inlineMath: [["$", "$"]]}};</script><script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</html>
