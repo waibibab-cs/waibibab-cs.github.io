@@ -2,9 +2,9 @@
 ![image.png](https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824094001.png)
 假设当前隐藏状态为 xl​，Transformer 子层为 F(⋅)，它可以是 Attention，也可以是 MLP。
 原始Transformer用的是post-norm，表达式为：
-$x_{l+1}=LN(x_l+F(x_l))$
+$·x_{l+1}=LN(x_l+F(x_l))·$
 Pre-Norm 则把 LayerNorm 放到子层之前：
-$x_{l+1}=x_l+F(LN(x_l))$
+$·x_{l+1}=x_l+F(LN(x_l))·$
 
 二者最核心的区别是残差路径不一样，post-norm虽然存在xl到xl+1的残差，但中间必经过LayerNorm和子层结构，并不是一条真正的“原样直通”的路径；而pre-norm存在一条真正的恒等残差路径，无论F这一支多么复杂，xl仍然可以直接传给下一层，多层以后，x0到xl始终存在直接的信息通路，这就是pre-norm对深层Transformer很重要的原因。
 
@@ -35,7 +35,7 @@ Layer 100 + 很小更新
 设一个token的隐藏向量为：$x = [x_1, x_2, \dots, x_d]$，Layernorm先计算均值：$\mu=\frac{1}{d}\sum_{i=1}^{d} x_i$，再计算方差：$\sigma^2 = \frac{1}{d} \sum_{i=1}^{d} (x_i-\mu)^2$，然后归一化：$\hat{x}_i = \frac{x_i-\mu} {\sqrt{\sigma^2+\epsilon}}$，最后进行可学习的仿射变换：$y_i = \gamma_i \hat{x}_i + \beta_i$，总之Layernorm的完整作用就是：先中心化到均值 0，再缩放到方差约为 1，最后通过 γ,β 恢复可学习的尺度和平移。
 
 **RMSNorm定义**：
-RMSNorm不计算均值，它只计算平方根：$\mathrm{RMS}(x) = \sqrt{ \frac{1}{d} \sum_{i=1}^{d} x_i^2 + \epsilon }$，然后：$\hat{x}_i = \frac{x_i} {\mathrm{RMS}(x)}$，最后乘一个可学习的缩放参数：$y_i = \gamma_i \frac{x_i} { \sqrt{ \frac{1}{d} \sum_{j=1}^{d}x_j^2 + \epsilon } }$，总之，RMSNorm只控制向量整体尺度，不强制均值变成0
+RMSNorm不计算均值，它只计算平方根：$`\mathrm{RMS}(x) = \sqrt{ \frac{1}{d} \sum_{i=1}^{d} x_i^2 + \epsilon }`$，然后：$`\hat{x}_i = \frac{x_i} {\mathrm{RMS}(x)}`$，最后乘一个可学习的缩放参数：$`y_i = \gamma_i \frac{x_i} { \sqrt{ \frac{1}{d} \sum_{j=1}^{d}x_j^2 + \epsilon } }`$，总之，RMSNorm只控制向量整体尺度，不强制均值变成0
 
 RMSNorm相对于LayerNorm少了一次均值相关的计算和数据操作，理论上总体少了一半操作，但计算快了不止一倍，因为这部分计算时memory-bound的，就比如归一化这个操作虽然操作量远低于其他，但却占了25.5%的时间
 ![image.png](https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260824103851.png)
