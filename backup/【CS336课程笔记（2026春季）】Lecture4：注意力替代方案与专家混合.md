@@ -1,5 +1,5 @@
 # 朴素LinearAttention
-上一节我们分析过，注意力运算基础的形式是：$`(b,n,k)@(b,k,n)->(b,n,n)`$与$`(b,n,n)@(b,n,k)->(b,n,k)`$，操作数的规模是$`bn^2d`$，而FFN层的基础计算形式是$`(b,n,d)@(d,d)`$，操作数规模是$`bnd^2`$，因此随着上下文长度n的增长，注意力运算量呈现二次增长，FFN运算量线性增长
+上一节我们分析过，注意力运算基础的形式是：$`(b,n,k)×(b,k,n)->(b,n,n)`$与$`(b,n,n)×(b,n,k)->(b,n,k)`$，操作数的规模是$`bn^2d`$，而FFN层的基础计算形式是$`(b,n,d)@(d,d)`$，操作数规模是$`bnd^2`$，因此随着上下文长度n的增长，注意力运算量呈现二次增长，FFN运算量线性增长
 
 有两个基础方法缓解上述问题，第一个是算法层面的（Sparse Attention），这种方法通常将多头划分为Local Attention（局部注意力）与Global Attention（全局注意力），前者每个token仅关注附近一小段窗口内的 token，后者指定部分 token 为全局 token，能够访问全部历史 token；第二个是系统层面的（FlashAttention）不改变注意力数学公式，依靠显存读写优化、分块重计算（tiling+recompute），降低 GPU 显存开销，提升计算吞吐速度，在长序列下显著加速前向 / 反向传播，但这两个方法并未从根本上改变注意力运算虽上下文长度呈平方增长的情况。
 ![image.png](https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260825103853.png)
