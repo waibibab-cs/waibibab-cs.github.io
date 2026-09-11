@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="# 1.PCIe BDF
+**BDF = Bus‑Device‑Function**，PCI/PCIe 设备的**全局唯一标识符**，Linux 内核、lspci、sysfs、VFIO、GDS/SPDK 全部依赖 BDF 定位 PCIe 设备。">
+<meta property="og:title" content="PCIe基础知识">
+<meta property="og:description" content="# 1.PCIe BDF
+**BDF = Bus‑Device‑Function**，PCI/PCIe 设备的**全局唯一标识符**，Linux 内核、lspci、sysfs、VFIO、GDS/SPDK 全部依赖 BDF 定位 PCIe 设备。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/PCIe-ji-chu-zhi-shi.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>PCIe基础知识</title>
+
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">PCIe基础知识</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/76" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><h1>1.PCIe BDF</h1>
+<p><strong>BDF = Bus‑Device‑Function</strong>，PCI/PCIe 设备的<strong>全局唯一标识符</strong>，Linux 内核、lspci、sysfs、VFIO、GDS/SPDK 全部依赖 BDF 定位 PCIe 设备。<br>
+PCIe的四个坐标是：</p>
+<pre lang="text" class="notranslate"><code class="notranslate">Domain : Bus : Device . Function
+0000   : 21  : 00     . 0
+</code></pre>
+<p>Domain：一个 PCIe 配置空间的编号，用于区分不同 PCIe 域<br>
+Bus：某一级 Root Complex 或 PCIe Bridge（Root Port）下游的逻辑总线编号，例如：</p>
+<pre lang="text" class="notranslate"><code class="notranslate">Root Complex 20:00.0
+  └─ 下游 Bus 21
+       └─ GPU 21:00.0
+Root Complex 00:00.0
+  └─ 下游 Bus 01、02、03、04……
+       └─ 多块 NVMe
+</code></pre>
+<p>Device：同一 bus 上的设备槽位，范围通常 0–31<br>
+Function：一个 PCIe 设备中的功能单元，范围通常 0–7<br>
+使用命令<code class="notranslate">lspci -Dtv</code>可以查看本机的树形拓扑</p>
+<h1>2.PCIe Domain与segment</h1>
+<p>·PCIe Segment：是硬件概念。它代表一个完全独立的PCIe总线树，由独立的Root Complex（根复合体）管理。不同Segment之间的地址空间和配置空间是互相隔离的。多Segment常见于大型服务器，用于突破单个总线域只能有256个总线的限制。<br>
+·PCIe Domain：是Linux内核中的软件表示。内核使用域号来区分不同的硬件Segment。因此，可以在Linux的lspci -t命令的输出中看到“Domain: Bus: Device. Function”的格式，这个Domain号实际上对应的就是硬件Segment。</p>
+<p>老的 Intel 平台，不同 Socket 的 RC 会作为独立 Segment，所以会看到 domain:0000、domain:0001；<br>
+新型平台如Genoa 单颗 CPU IOD 内的多 RC，共享同一个 PCI Segment（domain=0000），靠不同 root bus 区分，因此同一个domain中可以有不同的RC</p>
+<h1>3.Host Bridge/Root Complex/Root Port</h1>
+<p><strong>Host Bridge</strong>：源自传统 PCI 的术语，指连接 CPU/内存子系统与 PCI 总线层级的主机侧桥接逻辑；在 Linux/<code class="notranslate">lspci</code> 的实际语境中，常被用来描述或近似指代Root Complex</p>
+<p><strong>Root Complex</strong>：在 PCI‑Express（PCIe）系统中，<strong>根复合体（Root Complex）</strong> 设备将 CPU 与内存子系统，连接到由一个或多个 PCIe/PCI 设备构成的 PCIe 交换架构。根复合体有时也被称作<strong>PCI 根桥（PCI root bridge）</strong>。一个根复合体可以具备多个 PCIe 端口；多个交换设备可以连接到根复合体的端口上，也可以进行级联。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260910100923.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260910100923.png" alt="image.png" style="max-width: 100%;"></a></p>
+<p><strong>Root Port（根端口）</strong>：RC 内的一个 PCIe 下行端口，本质上是 RC 内实现的 PCIe Bridge。它所在的上游 Bus 是 Root Bus；它向下游分配 <strong>secondary bus</strong>，并由此启动一棵独立的 PCIe 子树。层级关系可理解为：</p>
+<pre lang="text" class="notranslate"><code class="notranslate">CPU / 内存
+  └─ Root Complex
+       └─ Root Bus 00
+            ├─ Root Port A（位于 Bus 00）
+            │    └─ Secondary Bus 01 → NVMe
+            └─ Root Port B（位于 Bus 00）
+                 └─ Secondary Bus 02 → GPU
+</code></pre>
+<p>下图当中Host Bridge可以近似理解成Root Complex，对应的上游总线为Bus0，PCI-PCI Bridge可以近似理解成Root Port，分别开出一条下游Secondary Bus<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260910154906.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260910154906.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h1>4.PCIe Switch</h1>
+<p>PCIe Switch是一种硬件设备，提供扩展或聚合能力，并允许更多的设备连接到一个PCle端口，它包含以下功能：</p>
+<ol>
+<li>连接多个设备：PCIe switch允许多个设备通过单个PCIe总线连接到主机系统，从而扩展系统的连接性。</li>
+<li>数据交换：PCIe switch可以在多个设备之间传输数据，允许设备之间直接通信而无需通过主机处理器。</li>
+<li>动态分配：支持动态分配带宽和资源，根据需要调整设备之间的通信速率和优先级。</li>
+<li>NTB（Non-Transparent Bridge）：支持NTB技术，允许两个或多个系统之间直接通信，提高数据传输效率。</li>
+<li>Peer to Peer：支持点对点通信，设备之间可以直接进行数据交换而无需通过主机。</li>
+<li>MRIOV（Multi-Root I/O Virtualization）：一种PCIe技术，支持多根系统共享同一个PCIe设备。普通 PCIe 设备只能被单根系统独占，而 MR-IOV 可为每个根端系统暴露设备的多个虚拟功能，分配给虚拟机或容器使用，实现多系统共享协作，提升硬件利用率、降低成本，简化云环境设备管理。如下图所示<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260910160326.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260910160326.png" alt="image.png" style="max-width: 100%;"></a></li>
+</ol>
+<h1>5.PCIe Hierarchy</h1>
+<p>这个概念实际上是对上面的总结。<br>
+PCIe 层级采用<strong>树形点对点网络拓扑</strong>，将计算机中央处理器与系统内存连接到外围硬件。<br>
+核心层级组件</p>
+<ul>
+<li><strong>Root Complex (RC，根复合体)</strong>：这棵树的锚点，位于拓扑顶端。它把 CPU、系统内存接入 PCIe 子系统，并负责配置、路由与电源管理。</li>
+<li><strong>Switches（PCIe 交换芯片）</strong>：透明桥接器件，用于扩展网络。它拥有 1 个上游端口，并分出多个下游端口，可接入更多设备，且不会改变软件的设备可见性。</li>
+<li><strong>Bridges（桥）</strong>：转换器，用来把 PCIe 树形结构连接至传统或其他总线架构（例如老式 PCI、PCI-X 插槽）。</li>
+<li><strong>Endpoints (EP，端点设备)</strong>：树形结构边缘的叶子节点，即实际的外设硬件，如 GPU 显卡、NVMe 固态硬盘、网卡。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260910160503.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260910160503.png" alt="image.png" style="max-width: 100%;"></a></li>
+</ul>
+<h1>6.PCIe TLP路由</h1>
+<p>下图是一个PCIe总线系统示意图。此时RC发出一个TLP，经过Switch访问EP，TLP的路径为红色箭头所示。首先TLP从RC的下游OUT端口发出，Switch的上游IN端口接收到该TLP后，根据其路由信息，将其转发到Switch的下游OUT端口，随后TLP达到EP的IN端口，最后TLP到达EP设备。TLP从RC到EP的转发过程被称为TLP的路由过程。PCIe总线总共定义了三种路由方式，分别是基于地址（Address）路由、基于ID（BDF）路由和隐式（Implicit）路由。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260910161526.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260910161526.png" alt="image.png" style="max-width: 100%;"></a><br>
+TLP使用的路由方式和TLP的类型有关，具体如下表所示：</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>TLP 类型</th>
+<th>使用的路由方式</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>内存读 [锁定]、内存写、原子操作</td>
+<td>地址路由（Address Routing）</td>
+</tr>
+<tr>
+<td>IO 读写</td>
+<td>地址路由（Address Routing）</td>
+</tr>
+<tr>
+<td>配置读写</td>
+<td>ID 路由（ID Routing）</td>
+</tr>
+<tr>
+<td>消息、带数据消息</td>
+<td>地址路由、ID 路由 或 隐式路由（Implicit routing）</td>
+</tr>
+<tr>
+<td>完成包、带数据完成包</td>
+<td>ID 路由（ID Routing）</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h1>7.PCIe BAR0</h1>
+<p>BAR空间是指PCI设备中的基地址寄存器（Base Address Register）所映射的地址空间。每个PCI设备都有多个BAR，用于指示设备在系统地址空间中的位置。<br>
+PCIe BAR0 是 PCIe 设备配置空间中的第一个基地址寄存器，用来决定设备在系统内存或I/O空间中的映射起始地址。</p>
+<ul>
+<li><strong>位置</strong>：位于设备中的PCIe 配置空间（Configuration Space）的头部。Type 0 设备（如普通Endpoint端点设备；Type1设备一般指PCIe桥，Root Port等设备）一共有 6 个 BAR（BAR0 到 BAR5）。</li>
+<li><strong>作用</strong>：CPU通过访问BAR0指向的物理地址，来直接读写PCIe设备的内部寄存器或内存。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260910170702.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260910170702.png" alt="image.png" style="max-width: 100%;"></a></li>
+<li>Bit0: 用于指示设备寄存器是映射到内存空间0还是IO空间（1）。</li>
+<li>Bit1: 保留位，值为0。</li>
+<li>Bit2: 在Memory BAR中，0表示32位地址空间，1表示64位地址空间。</li>
+<li>Bit3: 在Memory BAR中用于表示设备是否允许预取数据，1表示可以预取，0表示不可以预取。</li>
+<li>Bit4~31: 用来表示设备需要占用的地址空间大小。其中，某些位为只读，且0表示需要的地址空间大小。</li>
+</ul>
+<p>PCIe 设备上电复位后，BIOS / 操作系统 PCI 子系统对 BAR0 的完整处理流程：</p>
+<ol>
+<li><strong>BAR 探测（扫盲）</strong>：向 BAR 寄存器写入全 1（<code class="notranslate">0xFFFFFFFF</code>），再回读寄存器值；硬件通过 Bit4<del>31 中的只读 0 比特，上报该 BAR 所需地址空间大小与地址对齐约束，Bit0</del>Bit3 固定为硬件预定义的空间类型、寻址位数、预取等属性。若读到 BAR 全部为 0，则代表该 BAR 未启用。</li>
+<li><strong>地址分配</strong>：操作系统在全局 PCIe 内存 / I/O 地址空间中，寻找一块大小、对齐要求均匹配的空闲地址区间，取出这段区间的<strong>全局起始基地址</strong>。</li>
+<li><strong>写入 BAR 寄存器</strong>：将分配好的全局基地址写入 BAR 寄存器的 Bit4<del>31 高位区域，**保留 Bit0</del>Bit3 不变**，维持设备的地址空间属性标记。若是 64 位 Memory BAR，则占用 BARn 与 BARn+1 两个连续寄存器，分别存放基地址低 32 位与高 32 位。</li>
+<li><strong>正常访问与路由</strong>：CPU/GPU 发起访问请求，<strong>全局 PCIe 地址 = BAR 内保存的基地址 + 设备内部偏移 offset</strong>。PCIe 根复合体与交换机根据全局地址区间路由 TLP 报文；端点设备收到报文后，用全局地址减去 BAR 基地址，得到设备内部偏移，读写内部寄存器或片上资源。</li>
+</ol>
+<h1>8.PCIe Gen</h1>
+<p><strong>PCIe各代带宽</strong><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911090902.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911090902.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>NVLink各代带宽</strong><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911090938.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911090938.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>主流GPU互连与显存规格</strong><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911091002.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911091002.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>NVMe SSD典型速度</strong><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911091036.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911091036.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>典型场景带宽</strong><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911091055.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911091055.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h1>9.ACS</h1>
+<p>PCIe ACS（Access Control Services，访问控制服务）是 PCIe 提供的一项扩展功能，用于增强 PCIe 总线拓扑中的访问控制和安全性。它主要用来管理和控制设备之间的点对点（P2P, Peer-to-Peer）通信<br>
+基础功能：默认情况下，PCIe 设备间的 P2P 流量可以直接在 Switch 之间转发，不经过 CPU 或 Root Complex。开启 ACS 后，可以将 P2P 请求重定向到 Root Complex，由上游的 IOMMU/SMMU 验证逻辑决定是否允许该访问。是P2P通信最常见的“拦路虎”</p>
+<h1>参考资料</h1>
+<p>1.<a href="https://blog.csdn.net/qq_37344125/article/details/136903500" rel="nofollow">https://blog.csdn.net/qq_37344125/article/details/136903500</a><br>
+2.<a href="https://zhuanlan.zhihu.com/p/693852582" rel="nofollow">https://zhuanlan.zhihu.com/p/693852582</a><br>
+3.<a href="https://blog.csdn.net/u011037593/article/details/139398579" rel="nofollow">https://blog.csdn.net/u011037593/article/details/139398579</a><br>
+4.<a href="https://zhuanlan.zhihu.com/p/683933089" rel="nofollow">https://zhuanlan.zhihu.com/p/683933089</a><br>
+5.<a href="https://github.com/ForceInjection/AI-fundamentals/blob/main/01_hardware_architecture/performance/05_pcie_nvlink_speed_reference.md">https://github.com/ForceInjection/AI-fundamentals/blob/main/01_hardware_architecture/performance/05_pcie_nvlink_speed_reference.md</a></p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
