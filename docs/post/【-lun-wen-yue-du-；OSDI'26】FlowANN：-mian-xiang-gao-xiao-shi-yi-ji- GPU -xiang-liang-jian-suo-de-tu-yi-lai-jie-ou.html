@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="Disentangling Graph Dependencies for Efficient Billion-Scale GPU Vector Search
+# 摘要
+基于图的近似最近邻检索（ANNS）是 AI 系统高性能向量检索的核心技术。">
+<meta property="og:title" content="【论文阅读；OSDI'26】FlowANN：面向高效十亿级 GPU 向量检索的图依赖解耦">
+<meta property="og:description" content="Disentangling Graph Dependencies for Efficient Billion-Scale GPU Vector Search
+# 摘要
+基于图的近似最近邻检索（ANNS）是 AI 系统高性能向量检索的核心技术。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/%E3%80%90-lun-wen-yue-du-%EF%BC%9BOSDI%2726%E3%80%91FlowANN%EF%BC%9A-mian-xiang-gao-xiao-shi-yi-ji-%20GPU%20-xiang-liang-jian-suo-de-tu-yi-lai-jie-ou.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>【论文阅读；OSDI'26】FlowANN：面向高效十亿级 GPU 向量检索的图依赖解耦</title>
+
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">【论文阅读；OSDI'26】FlowANN：面向高效十亿级 GPU 向量检索的图依赖解耦</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/77" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>Disentangling Graph Dependencies for Efficient Billion-Scale GPU Vector Search</p>
+<h1>摘要</h1>
+<p>基于图的近似最近邻检索（ANNS）是 AI 系统高性能向量检索的核心技术。如今，凭借高性能与成本优势，GPU 正成为新兴的 ANNS 运行平台。但图结构本身内存开销巨大（239–334GB），GPU 有限的内存容量，制约了图 ANNS 系统扩展至十亿规模。现有方案将图数据卸载至 CPU 内存以缓解该问题，然而数据传输开销与 GPU 等待阻塞会带来严重的性能损失。</p>
+<p>本文定位到该低效问题的根本原因：<strong>图检索中存在严格的步级依赖</strong>，每一步的执行都依赖上一步所有节点的遍历与计算。我们的核心洞见是：这种整体性的步级依赖，可以被解耦为更灵活、细粒度的<strong>节点级依赖</strong>。具体而言，每个节点首先会通过边作为邻居被访问（即<strong>发现阶段</strong>），之后才会被选为父节点，进而遍历它的邻居（即<strong>扩展阶段</strong>）。这两个阶段通常间隔多个检索步，形成一段充足的<strong>发现 - 扩展时间窗口</strong>。利用该时间窗口，部分邻居的边数据读取操作可以被延迟，并与计算过程重叠执行。</p>
+<p>基于上述洞见，本文提出 FlowANN—— 一套基于图结构的 ANNS 系统，可在单 GPU 上高效支持十亿规模检索。FlowANN 采用分层图结构：将具备充足时间窗口的邻居所关联的边数据卸载到 CPU 端。该系统通过优化的异步传输与动态调度，实现 GPU 计算和边数据读取的有效流水线并行。实验结果表明：在不损失检索精度的前提下，FlowANN 相比现有前沿系统平均提速 4.08–45.7 倍，最高可达 172.6 倍。</p>
+<h1>一、引言</h1>
+<p>近似最近邻检索（ANNS）是现代 AI 系统的基础组件，广泛应用于检索增强生成（RAG）[1,2]、推荐系统 [3,4]、图像检索 [5] 与大模型服务 [6,7] 等场景。这类系统将数据编码为高维向量，并利用 ANNS 找出与查询向量最邻近的向量，实现相关信息的高效检索。在所有 ANNS 索引方案中，<strong>基于图的检索方法</strong>[8–18] 凭借更优异的检索效率受到青睐。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911214916.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911214916.png" alt="image.png" style="max-width: 100%;"></a><br>
+数据规模快速增长，叠加 ANNS 爆炸式的计算需求，推动 GPU 成为 ANNS 的主流硬件平台 [19–23]，充分发挥其高计算效率与成本优势。GPU 的并行计算能力天然适配 ANNS 的向量计算需求：单台中档 GPU 的吞吐量可达到高端 CPU 服务器的 200 倍以上 ¹（见图 2）。因此 GPU 上的 ANNS 方案已被学术界 [24,25] 与工业界（Meta [26]、NVIDIA [27] 等 [28–30]）广泛采用。</p>
+<p>然而，GPU 内存容量有限，给在 GPU 上部署大规模基于图的 ANNS 带来巨大挑战。举例来说，即便经过量化压缩 [31,32]，十亿规模的图 ANNS 索引 [33–36]（数据集见表 1）仍需要 258–350GB 内存，仅图结构本身就占用 239–334GB，远超主流 GPU 80–96GB 的内存上限。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911215055.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911215055.png" alt="image.png" style="max-width: 100%;"></a><br>
+一种备选方案是：将图卸载至主机内存，按需拉取数据。但检索流程中存在强依赖关系，导致该方案的数据传输开销极高。具体来说，图 ANNS 采用<strong>最优优先搜索（best-first search）</strong> 算法，迭代执行。每一步中，算法从候选池选出距离查询向量最近的节点作为父节点，从图中读取父节点的边信息，获取其邻居；计算所有邻居到查询向量的距离，再将邻居加入候选池，供后续迭代使用。由于父节点的选择，要求上一步所有邻居必须完成计算并进入候选池。这种僵化的<strong>步级依赖</strong>会造成 GPU 阻塞等待边数据读取，如图 1 所示。</p>
+<p>但传统视角下这种步级依赖的约束过于严苛，对应的等待开销本可以避免。本文将步级依赖解耦为更细粒度的<strong>节点级依赖</strong>。从单个节点的视角看，在检索过程中，节点首先作为邻居被发现（即<strong>发现阶段</strong>），之后才用来查找它自身的邻居（即<strong>扩展阶段</strong>）。最优优先搜索算法保证：每一轮迭代会发现多个节点，但仅扩展一个节点。因此，绝大多数节点，在<strong>发现</strong>与<strong>扩展</strong>之间存在一段时间窗口（跨越多个迭代步）（核心洞察1）。例如，约 95.6% 被扩展的节点，其平均窗口长度大于 5 步（§3）。</p>
+<p>这类<strong>发现 - 扩展时间窗口</strong>意味着可以把部分边卸载到 CPU，且几乎无性能损耗：当扩展某个节点时，可以异步读取该节点已卸载的边，完成邻居发现。只要这些邻居具备充足的发现 - 扩展窗口，延迟的邻居发现就不会打乱检索流程里节点的扩展顺序（即保留最优优先搜索的检索路径）。并且，这种延迟发现可以将数据传输与计算重叠执行，有效掩盖传输开销。</p>
+<p>尽管发现 - 扩展窗口提供了近乎零开销卸载的机会，但挑选适合卸载的边仍是难题，因为该窗口难以预测。本文发现：被扩展节点的近邻节点（即由短边相连的邻居）会被更快扩展，没有充足的时间窗口用于延迟发现。原因是该节点与其近邻在向量空间上距离很近，一旦其中一个节点被扩展（代表离查询向量很近），另一个大概率也靠近查询向量，很快就会被扩展。因此总体而言：<strong>长边更适合卸载，短边应保存在 GPU 上，保障及时发现</strong>（核心洞察2）。</p>
+<p>基于以上两点洞察，本文提出 FlowANN：一套面向 GPU 的图 ANNS 系统，能够在单 GPU 上高效支持十亿规模检索。如图 1 所示，每一步检索时，FlowANN 会处理驻留在 GPU 上的父节点邻居，以及上一步延迟处理的节点；同时从 CPU 异步拉取其余邻居节点。我们从数学上证明：即便 FlowANN 生成的检索路径，与同步边读取方案有所不同，延迟发现也不会损害检索精度。</p>
+<p>FlowANN 进一步解决了以下三项挑战。<br>
+<strong>挑战1：图分层不均衡问题</strong> 虽然边的长度可以作为图分层的宏观判定标准，但基于固定的边长度阈值选择驻留 GPU 的边，会引发严重的负载不均衡。由于高维空间中数据点分布不均匀：稠密区域内的边通常较短，而稀疏区域中的节点仅含有少量短边。若简单采用固定长度阈值，当查询向量落在稀疏区域时，会产生大量未缓存的边，带来严重开销。</p>
+<p><strong>挑战2：边读取延迟问题</strong> FlowANN 需要向 GPU 异步拉取边数据。尽管已有多种 CPU-GPU 间数据拷贝方案（例如<code class="notranslate">cudaMemcpy</code>、统一内存）[37]，当前 GPU 生态并不支持<strong>由 GPU 发起的异步传输</strong>。现有方案要么需要将控制权交还给 CPU 才能启动异步拷贝，要么只能实现 GPU 发起的同步拷贝。此外，现有的 CPU-GPU 数据传输大多基于 DMA；但 DMA 的初始化开销很高，而边数据的单次传输体量较小，会严重拖累边读取的性能。</p>
+<p><strong>挑战3：流水线协同缺失问题</strong> 尽管发现 - 扩展时间窗口支持延迟发现，但过度延迟会让检索走入次优的搜索路径，从而损失检索效率。因此，若延迟步数超出对应的发现 - 扩展窗口，FlowANN 必须等待部分节点的发现操作完成。然而，该时间窗口会随检索动态变化，难以预估。另一方面，GPU 计算资源（CUDA 核心、共享内存等）是为 GPU 核函数静态分配的，但延迟发现会造成每一步的负载动态波动，引发资源利用率不足。</p>
+<p>为应对上述挑战，本文设计了如下机制： 第一，提出<strong>基于分组的图分层策略</strong>：将空间邻近节点划分为同一分组，同一分组内部节点之间的边放置在 GPU 上。依托近年相关理论进展 [38]，本文采用多级标签传播算法完成节点分组，该算法同时兼顾边长度与节点的空间分布。同时，本文设计紧凑矩阵布局来存储分层图，消除内存填充带来的空间浪费，从而让更多边能够驻留在 GPU 显存中。</p>
+<p>第二，设计<strong>xCopier 组件</strong>，实现由 GPU 发起的异步数据传输。xCopier 维护 GPU 侧环形队列与 CPU 侧数据搬运线程，为 GPU 核函数提供面向 GPU 优化的编程原语。为适配边读取这类小体量拷贝场景，xCopier 采用基于 MMIO 的数据传输，规避传统 DMA 方案带来的初始化开销。xCopier 让 FlowANN 的边读取实现无陷阱、全异步，使得数据传输与计算能够有效重叠执行。</p>
+<p>最后，设计<strong>协同流水线</strong>实现高效执行。FlowANN 采用<strong>自适应同步机制</strong>防止发现操作过度延迟，该机制综合考虑全局检索收敛性与局部负载波动。为高效利用 GPU 硬件资源，FlowANN 引入<strong>跨步负载均衡</strong>，在不同迭代步之间自适应均衡负载，让计算需求匹配硬件资源。</p>
+<p>本文在十亿级数据集 [39–41] 上对 FlowANN 开展评测，并与学术界、工业界前沿 GPU ANNS 系统对比。在保持检索精度不变的前提下，FlowANN 相比 cuVS [27]、Faiss [24]、Rummy [19]、FusionANNS [22] 这类基于聚类的 ANNS 系统，平均提速 4.08–8.41 倍；相比 BANG [20]、FlashANNS [42] 这类基于图的检索系统，平均提速 45.7 倍、14.3 倍。单 GPU 部署的 FlowANN，其吞吐量可与使用 8 卡 GPU 的多 GPU 图检索系统 GGNN [43] 持平。在不同检索精度、不同 GPU 硬件、不同算法配置下，FlowANN 均能稳定取得性能提升。</p>
+<p>FlowANN 已全部开源，项目地址： <a href="https://github.com/SJTU-IPADS/GPU-Graph-ANN">https://github.com/SJTU-IPADS/GPU-Graph-ANN</a></p>
+<h1>二、基于GPU的图结构近似最近邻检索：速度快但受限于内存</h1>
+<h2>2.1 GPU 图结构近似最近邻检索基础</h2>
+<p>向量检索是现代人工智能系统的底层支撑技术，例如检索增强生成（RAG）[1,2]、推荐系统 [3,4,30]、图像检索 [5] 以及大语言模型推理 [6]。这类系统将数据（如文本、图像）编码为向量，并借助向量检索，取出与查询向量相关的数据。向量检索的核心操作是<strong>k 近邻搜索</strong>，目标是找出距离查询向量最近的 k 个向量（Top-k 结果）。 在海量数据场景（如十亿级向量 [33–35,41]）下，暴力精确最近邻搜索不具备可行性。因此现代向量检索采用<strong>近似最近邻检索（ANNS）</strong>：依托预先构建的索引，实现高效的近似检索。</p>
+<p><strong>基于图的近似最近邻检索</strong>。主流的 ANNS 索引大体分为两大类：基于划分的索引 [44–49] 与基于图的索引 [8–12]。 基于划分的索引将数据集切分为多个分区，例如由空间邻近点构成的簇，或是通过哈希映射得到的离散桶 ²。后续检索过程会在与查询向量邻近的分区内，暴力扫描分区内全部向量。 与之不同，基于图的方法会构建一张邻近图，刻画向量之间的邻近关系；检索过程通过遍历该图完成。</p>
+<p>基于图的 ANNS 系统相比基于聚类的方案，检索效率更高。如图 2 所示，其性能高出 1.6–10.5 倍，可扩展性更优。 该优势来源于图结构：检索可通过图遍历直接向近邻方向导航，相比基于聚类方案的暴力扫描，大幅减少距离计算量。</p>
+<p><strong>KNN 图与最佳优先搜索</strong>：ANNS 所用的图结构为<strong>K 近邻图（KNN 图）</strong>：图中每个节点（向量），都与数据集中由欧氏距离等距离度量判定的约 K 个最近邻相连。整张图以二维矩阵存储，矩阵每一行存放一个节点对应的 K 个邻居 ID。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911221205.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911221205.png" alt="image.png" style="max-width: 100%;"></a><br>
+图检索算法采用<strong>最佳优先搜索</strong>策略。如图 3 所示，算法维护一个候选池，保存目前找到的若干距离最近节点，并按到查询向量的距离排序。算法从一个入口节点（例如节点 3）开始迭代执行。 每一轮迭代，从候选池中选出距离最近、尚未扩展的节点作为<strong>父节点</strong>，遍历它的边，获取邻居节点（①）³。随后计算这些邻居与查询向量之间的距离，将邻居加入候选池（②）。 循环执行直到候选池内所有节点均完成扩展，最后将候选池中 Top-k 最近向量作为检索结果返回。 检索时每个节点经历两个核心阶段：① 通过边被访问，完成距离计算后加入候选池（称为<strong>发现</strong>）；② 被选为父节点，进一步发掘其邻居节点（称为<strong>扩展</strong>）。</p>
+<p><strong>基于 GPU 的 ANNS</strong>。面对大规模向量处理（数十亿向量）的需求增长，GPU 上的 ANNS 凭借并行能力与成本优势愈发受到青睐 [22]。目前 Meta [26,50]、NVIDIA [27,51] 等行业头部企业已广泛采用 GPU 版 ANNS [28–30]。 当数据与索引（如图结构）全部存放于 GPU 显存中时，当前最优（SOTA）系统通过并行执行，加速 ANNS 核心操作（距离计算、排序等）[27,51,52]，显著提升检索速度与吞吐。 如图 2 所示，在不同数据集规模下，GPU 版 ANNS 相比 CPU 方案提速 9.0–222.0 倍。值得注意：GPU 上基于图的 ANNS，性能比基于聚类的 GPU ANNS 高出 5.2–15.1 倍，证明 GPU 环境下图结构 ANNS 的优越性。</p>
+<h2>2.2 GPU 图结构近似最近邻检索的内存压力</h2>
+<p>尽管具备很高的计算效率，但图索引巨大的内存开销，限制了 GPU 图 ANNS 在十亿级规模场景下的落地。 举例而言：即便经过量化⁴，向量内存占用压缩至原始大小的 12.5%，SIFT1B 数据集 [39] 上的图 ANNS 仍需要约 258GB 内存。该数值远超主流 GPU 80–96GB 的显存容量，导致无法直接部署在单块 GPU 上（见图 2）。 尤为关键的是：仅图索引本身就占用总内存的约 93%，是最主要瓶颈。为维持图足够连通性、保障检索质量，这类内存开销无法省略。 因此，将 GPU 图 ANNS 扩展至十亿级规模的核心难点是：<strong>突破内存瓶颈，同时维持高性能</strong>。</p>
+<h2>2.3 现有方案与可行解决思路</h2>
+<p><strong>多 GPU 方案</strong>。采用多 GPU（例如对图做分片 [23,43]）在理论上可行，但存在不小挑战。 第一，ANNS 场景下难以实现高效图划分：检索算法是逐步发现节点的特性，使得单次查询的遍历路径本身不可预测。 第二，该方案会产生频繁的 GPU 间通信，消耗计算资源，增加检索延迟（可达数毫秒），降低吞吐，详见 7.1 节。</p>
+<p><strong>统一内存（UM）</strong>。统一内存通过在 CPU 与 GPU 之间构建统一地址空间，扩大可用内存容量。 但它并不适合图遍历：图访问几乎没有局部性。遍历过程会频繁触发缺页与数据迁移（开销 62 微秒），代价极高。</p>
+<p><strong>CPU-GPU 分层存储</strong>。另一种思路是将图主要存放在主机内存，按需把父节点的边传输至 GPU（例如 BANG [20]）。 但最佳优先搜索存在严格的<strong>步间依赖</strong>，严重限制计算与数据传输的重叠：每一步选择新父节点，都依赖上一步已经获取并发现该父节点的全部邻居。 因此几乎无法通过传输与计算重叠来掩盖传输延迟（重叠占比 &lt; 10%）。除此之外，该方案会造成 GPU 显存严重利用率不足：在 80GB HBM 显存 GPU 上，使用量化后的 SIFT1B 数据集时约有 50GB 显存闲置，因为该方案仅把 GPU 显存当作临时中转缓存。</p>
+<h1>三、图搜索中的依赖解耦</h1>
+<p>传统方案存在严格的<strong>步级依赖</strong>，在此前提下，图近似最近邻搜索（graph ANNS）的 CPU-GPU 分级存储方案因巨大的数据传输开销看似不可行。但本文发现，这种步级依赖过于严苛，可以被解耦为<strong>节点级依赖</strong>。具体来说，在最佳优先搜索路径的每一步，仅要求待扩展节点必须已经完成发现。基于这种细粒度依赖关系，我们在 30 亿规模的三个数据集上，对数万条查询的图搜索轨迹开展分析（见 §7）。通过分析，我们找到了延迟执行部分节点发现操作的机会，从而在不损失检索精度的前提下，让数据传输与计算过程重叠执行。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911222159.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911222159.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>观察 1：发现 - 扩展窗口（Discovery-Expansion window）</strong> 我们发现在搜索过程中，一个节点从被发现到被扩展之间存在一段时间窗口，即<strong>发现 - 扩展窗口</strong>。如图 4 所示，95.6% 的搜索步骤中，平均发现 - 扩展窗口超过 5 个步骤（每步 6–14 微秒，取决于批大小）。并且，随着搜索推进，窗口大小持续增大。</p>
+<p><strong>洞察 1：可延迟发现（Deferrable discovery）</strong> 发现 - 扩展窗口提供了一个机会：可以延迟部分节点的发现，且不会损害检索精度。具体而言，该窗口时长通常能够覆盖边数据从主机内存向 GPU 传输的延迟（约 8 微秒，见图 17b）。据此，我们可以将那些拥有充足窗口时长的邻接边留在 CPU 内存中，延迟这些邻接节点的发现，直到边数据被取送到 GPU。在拉取边数据的同时，GPU 可持续执行后续步骤的计算，不会发生阻塞。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911222807.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911222807.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>观察 2：短边对应不可延迟的发现</strong> 尽管发现 - 扩展窗口为延迟发现提供了通用机会，但并非所有节点都适合延迟处理。如图 5 (a) 所示，在(t_2)时刻扩展节点 F 时，其邻点 I 比邻点 G 更不适合延迟，因为 I 很快就会被扩展。为系统性识别不可延迟的发现操作，我们分析了边长度与窗口大小之间的相关性。具体做法：对每一个被扩展的节点，记录用于发现该节点的边的长度；分析那些对应发现操作的窗口不足的边（保守设定：≤5 步）。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911223039.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911223039.png" alt="image.png" style="max-width: 100%;"></a><br>
+实验结果表明：通过短边完成的节点发现，更难被延迟。如图 6，短边对应的发现操作，出现窗口不足的概率更高。在最短边分组中，窗口不足的边占比（17.7%）远高于最长边分组（0.63%）。我们同时发现，短边的访问频率更高。即便如此，绝大多数发现操作（约 90.6%）都拥有充足窗口（&gt;5 步）支持延迟，证明可延迟发现具备广泛适用性。</p>
+<p><strong>洞察 2：基于边长度的图分级存储（Length-based graph tiering）</strong> 在图结构中，由于短边对应的节点发现难以延迟、且访问更频繁，因此短边应当保存在 GPU 显存内。这可以充分利用量化向量存储后 GPU 的剩余显存。与之相反，长边可以安全地存放在主机内存，按需拉取至 GPU，以此最大化内存利用效率。</p>
+<p><strong>根源与普适性</strong><br>
+以上观察源于最佳优先搜索本身的特性：该算法目标是找到查询向量的 top-k 最近节点，本质是在查询点的周边区域内检索（例如图 5 的阴影区域）。整个搜索过程自然分为两个阶段：逼近阶段（approach）与收敛阶段（converge）[11,53]。</p>
+<p>在<strong>逼近阶段</strong>，搜索从入口节点快速向查询点附近推进（例如图 5 (a) 中节点 A→F）。每一次节点发现，通常都会找到距离查询更近的节点，而这类节点会被很快扩展，因此对应的窗口很小。如图 4 所示，在前约 22% 的搜索步骤中，窗口大小的下四分位数 (P25) 一直接近 0。</p>
+<p>而进入<strong>收敛阶段</strong>后，搜索已经抵达查询点附近的节点（例如图 5 (b) 中的节点 F）。在该阶段，搜索整体呈现以查询为中心、向外拓展的趋势 [53]，用于收集真正的 top-k 近邻。随着搜索不断进行，发现距离查询更近节点的概率不断下降（例如(t_3)时刻扩展节点 I 时，无法找到比 I 更近的节点）。于是，待扩展节点（即距离最近且尚未扩展的节点）往往是在多个步骤之前就已经被发现的节点（例如(t_4)时刻的节点 H），由此形成发现 - 扩展窗口。</p>
+<p>与此同时，该阶段被扩展的节点本身已离查询很近，它们由短边相连的邻点大概率也靠近查询，因此会很快被扩展，对应窗口更小。收敛阶段在整个搜索流程中占主导地位，因此该特征体现在全局搜索行为上（图 6）。</p>
+<p><strong>正确性与检索精度</strong><br>
+有人可能会担心：很难精确预测发现 - 扩展窗口，有可能造成部分节点扩展被过度延迟，进而损害检索精度。我们通过数学证明：图搜索本身具有贪心特性，在最坏情况下（即所有发现操作都被过度延迟），FlowANN 依然可以在有界且确定的步数内取得完全一致的检索精度，相关证明见附录 A。我们还设计了同步机制，主动防止节点发现被过度延迟（§6.2）。</p>
+<h1>四、FlowANN系统概述</h1>
+<p>本文设计了 FlowANN：一套基于图结构的近似最近邻检索（ANNS）系统，能够在单块 GPU 上高效处理十亿规模的向量检索任务。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911230340.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911230340.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>工作流</strong>。如图 7 所示，FlowANN 对图数据做分级存储：将访问频率低、发现 - 扩展窗口大的边卸载至 CPU 内存。系统把 GPU 上完整的搜索流程（多步迭代）融合进单个 GPU 核函数（kernel）。每一轮搜索步骤可分为四个阶段。 ① 首先，从候选池中选取距离查询向量最近、尚未扩展的节点，作为父节点。 ② 随后，借助 xCopier 组件，异步地从 CPU 侧分级存储的图中，将该父节点已卸载的边（即未缓存的邻节点）拉取至 GPU。 ③ 与此同时，针对父节点中已缓存的邻节点、以及已经拉取到 GPU 的邻节点，FlowANN 利用存储在 GPU 上对应的向量数据，计算它们与查询向量之间的距离。与主流系统一致 [24,27]，为提升计算效率，GPU 中存储的向量采用量化压缩。 ④ 最后，利用这些新发现的邻节点更新候选池，并重新排序。 ⑤ 当 GPU 端完整搜索阶段执行完毕后，候选池内的节点（即 GPU 初步结果）会在 CPU 上使用原始全精度向量做重排序，保障最终检索结果精度。跨批次场景下，CPU 重排序与 GPU 搜索还会采用流水线并行。算法 1 给出检索流程的完整伪代码。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911230357.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260911230357.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>GPU-CPU 图分级存储</strong>。FlowANN 优先将短边保存在 GPU 显存中。为避免静态长度阈值造成缓存边的分布不均衡，该方案采用分组策略选择驻留 GPU 的边，同时兼顾边长度与图的空间分布。 具体来说，我们使用<strong>多级标签传播算法</strong>（§5.1）将图划分成多个均衡分组，尽可能把短边保留在组内，再将组内边放置于 GPU 显存。此外，在 GPU 侧，FlowANN 将十亿级命名空间下节点的全局 ID 替换为分组内更短的局部 ID；并设计紧凑的矩阵图存储布局（§5.2），以此让更多边能够驻留在 GPU 显存。</p>
+<p><strong>无陷阱异步数据传输</strong>。我们设计了 xCopier 这一系统服务，支持由 GPU 发起异步数据传输（§6.1）。xCopier 依托硬件能力进一步提升传输性能：它采用基于 BAR 映射的内存映射 I/O（MMIO）替代基于 DMA 的<code class="notranslate">cudaMemcpy</code>，将传输延迟降低 40 倍，保证数据搬移与计算能够重叠执行。</p>
+<p><strong>协同流水线</strong>。FlowANN 对 GPU 计算、CPU-GPU 之间的数据传输做流水线调度。为维持检索效率，系统通过<strong>自适应同步机制</strong>防止扩展操作被过度延迟；该机制同时考虑全局搜索收敛进度与局部波动。FlowANN 采用<strong>跨步负载均衡</strong>，将每一步动态变化的计算负载与硬件资源匹配；同时选取合适的入口节点，缩短逼近阶段的耗时（§6.2）。</p>
+<p><strong>讨论</strong>。本节讨论 FlowANN 的适用范围与普适性。</p>
+<ul>
+<li><strong>图结构的普适性</strong>：FlowANN 基于广泛使用的 CAGRA [51]（即 NN-Descent [54]）图构建。其设计动机与方案具备通用性，可适配多种 K 近邻图（KNN graphs）[9,10]。</li>
+<li><strong>图更新</strong>。与前人工作一致 [19,20,22,55]，FlowANN 的核心聚焦于检索过程。它可接入现有的在线 / 离线图更新方法 [56–59]，以极小开销更新分级存储的图；例如，只需一轮标签传播（§5.1），即可把新增节点分配至对应分组。</li>
+<li><strong>集群部署与多 GPU 场景</strong>。FlowANN 的目标是最大化单 GPU 处理十亿规模 ANNS 的能力。该系统可在集群内部署多副本实例，也可集成进多 GPU 系统，用于支撑未来更大规模数据集。</li>
+<li><strong>硬件普适性</strong>。虽然 FlowANN 在代表前沿架构的 NVIDIA GPU 上实现，但它可迁移至其他基于 SIMT 架构的 GPU（例如 AMD GPU）。</li>
+</ul>
+<h1>五、基于图分层的可延迟检索发现</h1>
+<p>在<strong>洞察 2</strong>（第 3 节）的指导下，图分层机制应当优先将短边放置在 GPU 上。然而，采用固定长度阈值选取 GPU 侧边，会因为高维空间内数据点分布不均匀而引发负载不均衡问题。具体而言：在稠密区域，大量短边会被存入 GPU；而稀疏区域内节点可缓存的边很少。这就导致落在稀疏区域的查询，几乎无法从分层机制中获益。因此，图分层必须同时兼顾边长度与节点的空间分布。</p>
+<p>我们发现：将空间邻近的节点划分至同一分组（即分组操作）后，组内边适合放置在 GPU 中。理由有两点：(1) 由短边相连的节点在空间上通常互相靠近，自然会聚到同一分组，满足优先放置短边的目标；(2) 分组会从全局角度统一考虑所有节点的空间分布，避免稀疏区域节点被单一的边长阈值排除在外。</p>
+<p><strong>挑战</strong>。但是，设计高质量的图分组与分层方案仍存在两大难点。第一，在十亿规模图上做划分，最大化组内短边保留率，属于 NP 完全问题 [60,61]。直接使用常规分组方法（例如 K-means）通常分组质量较差：这类方法仅考虑全局节点分布，忽略图的结构信息（如边连接关系）。举例来说，使用 K-means 分组时，仅有约 60% 窗口不足的边能够保留在组内（图 17a）。这就需要一种专门面向 KNN 图的分组策略，在保证计算复杂度可控的前提下，最大化组内短边留存。第二，分组完成后，每个节点的组内邻居数量会各不相同。若继续采用二维矩阵存储各节点邻居，填充操作会带来显著的内存浪费。</p>
+<h2>5.1 感知空间局部性的图分组</h2>
+<p>为实现较高的组内短边留存率，FlowANN 中的图分组策略需要同时考虑边连接关系与节点分布。为此，本文采用<strong>多层标签传播（Multi-level LPA）</strong> 完成图分组，该方法借鉴了一套理论图分组方案 [38]。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912092330.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912092330.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>执行流程</strong>。多层 LPA 基于带尺寸约束的加权标签传播，执行步骤如下：首先，为每条边赋予权重，越短的边权重越高。随后，为每个节点初始化唯一的分组标签。在后续每一轮迭代中，每个节点统计来自邻居、按不同标签分类的权重总和，并将自身标签更新为总权重最高的标签 [62]（图 8）。⁶为保证分组大小均衡，我们引入尺寸约束，在标签传播过程中限制分组的最大规模。⁷值得注意：边权重天然纳入了边长信息，保证短边有更高概率保留在分组内部。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912092424.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912092424.png" alt="image.png" style="max-width: 100%;"></a><br>
+如图 8 所示，多层 LPA 包含<strong>粗化 - 反粗化</strong>流程：① 通过 LPA 递归将节点合并为超节点，对图进行粗化，直到图规模足够小；② 在粗化后的图上通过递归二分划分生成初始分组 [63]；③ 将分组映射回原始图，在反粗化阶段再次使用 LPA 优化分组边界。完整流程见算法 2。</p>
+<p><strong>优势</strong>。多层 LPA 能够高效将短边保留在组内，并从全局视角得到均衡、高质量的分组。核心原因有二：(1) <strong>感知局部结构</strong>：基于边连接与边长做标签传播，捕获图局部结构，保证由短边相连的节点分到同一组；(2) <strong>兼顾全局分布</strong>：在粗化图上全局生成分组，并在反粗化时做局部优化，整体性地考虑节点分布。此外，LPA 主要依靠局部标签传播，时间复杂度接近线性，非常适合十亿规模大图。</p>
+<h2>5.2 带互补机制的紧凑图存储布局</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912094622.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912094622.png" alt="image.png" style="max-width: 100%;"></a><br>
+为支持对节点邻居的快速随机访问，现有基于图的近似最近邻（ANNS）系统在 GPU 上采用<strong>定长行二维矩阵</strong>存储图结构，每行对应一个节点的邻居列表，如图 9 (a)。但分组之后，每个节点的组内邻居数量变为可变长度。继续使用该二维矩阵会因填充操作产生大量内存浪费（图 9 (a)）。</p>
+<p>通过分析组内邻居数的分布特征，我们发现内存优化机会：该分布近似对称。也就是说，一半节点邻居较少节省出的空间，刚好可以弥补另一半邻居更多节点带来的额外空间开销。因此，如图 9 (b) 所示，我们为 GPU 与 CPU 上的子图设计全新图存储布局。</p>
+<p>对于 GPU 侧子图：首先按节点的组内邻居数量排序；然后迭代配对节点：邻居最多的节点与邻居最少的节点成对，每一对存储在同一行。CPU 侧子图采用类似思路。该方案既减少填充带来的空间开销（7.3 节），同时保留高效随机访问能力 —— 图仍然存储在二维矩阵中，每行存放固定数量的邻居列表。</p>
+<p>除此之外，利用 GPU 分层图内节点仅在同分组内相连这一特性，我们使用更短的<strong>分组局部 ID</strong>（例如 20–24 比特）替代全局图 ID（例如 32 比特）来表示节点。这可以使更多边驻留在 GPU 显存中（图 17a），从而让更多计算可以与数据传输流水线重叠执行。</p>
+<h1>六、协同流水线下的执行</h1>
+<p>分层图支持延迟发现机制。然而，构建高效的传输 - 计算流水线仍存在挑战。本文设计 xCopier 以实现高效的无trap异步传输（§6.1），并进一步开发协同流水线，保障检索效率与硬件利用率（§6.2）。</p>
+<h2>6.1 基于 xCopier 的流式数据搬运</h2>
+<p>检索过程中，FlowANN 采用异步数据流水线，将未缓存的边数据从 CPU 拉取至 GPU，<strong>将数据传输开销与 GPU 上的计算重叠执行</strong>。</p>
+<p><strong>难点</strong><br>
+但该设计受限于 GPU 架构的两个核心约束： (1) 为最小化核启动开销，FlowANN 将全部检索步骤融合为单个整体内核。但现有机制<strong>不支持 GPU 内核主动发起设备与主机间的异步拷贝</strong>。 (2) 标准 CUDA 拷贝操作（例如<code class="notranslate">cudaMemcpy</code>）对小块数据（单个节点对应的边数据通常为 64–256 字节）性能很差，其瓶颈来自 DMA 引擎固有的启动开销。</p>
+<p><strong>CPU-GPU 间的数据搬运</strong><br>
+首先回顾 CPU 与 GPU 间已有的数据搬运机制。 在 CPU 侧，可调用<code class="notranslate">cudaMemcpy</code>发起传输，它能够与 GPU 计算异步执行。 在 GPU 侧，GPU 访问 CPU 内存依靠两种机制：统一内存（Unified Memory, UM）与零拷贝（固定页内存，Zero-copy Pinned Memory）。统一内存提供统一地址空间，访问触发 GPU 页故障时执行页面迁移；零拷贝内存允许 GPU 直接访问 CPU 内存。<strong>关键问题：二者均为同步操作，会阻塞 GPU 内核执行。</strong></p>
+<p>对 FlowANN 而言，上述每种传输机制都存在关键缺陷： 由 CPU 发起传输，意味着每一步检索流程都需要切回 CPU（trap），带来高昂的内核终止与重启开销。 与之相对，统一内存与零拷贝内存<strong>无法构建异步拷贝流水线</strong>。</p>
+<p><strong>xCopier：无trap异步拷贝</strong><br>
+本文提出 xCopier，一套可由 GPU 线程直接发起异步数据搬运的系统级服务，填补 GPU 生态中的这一架构缺口。 xCopier 由 GPU 侧环形队列（xQueue）与 CPU 侧数据搬运线程（xThread）构成。xQueue 拥有一个队头、两个队尾，对外暴露三个原语：<code class="notranslate">xCopy</code>、<code class="notranslate">xCheck</code>、<code class="notranslate">xRelease</code>。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912100256.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912100256.png" alt="image.png" style="max-width: 100%;"></a><br>
+具体如图 10 所示：GPU 线程通过<code class="notranslate">xCopy</code>发起一次异步传输，将传输命令入队至 xQueue，并返回队列索引作为令牌（ticket）。 xThread 轮询 xQueue 队头，检测新命令、执行数据传输，最后推进 CPU 侧队尾 cTail。 GPU 线程使用<code class="notranslate">xCheck</code>校验异步传输状态：比对令牌与当前 cTail。一旦确认传输完成，线程可调用<code class="notranslate">xRelease</code>回收命令槽位。 释放操作分为两步，支持乱序释放：首先标记该命令无效；若队尾存在无效命令，则尝试推进 GPU 侧队尾 gTail。</p>
+<p>这些原语针对 GPU 并行度深度优化。我们采用批量调用与 warp 级聚合：同一个 warp 内所有<code class="notranslate">xCopy/xRelease</code>仅需一次原子操作完成队头 /gTail 的更新。xCopier 通过支持多 xQueue 进一步缓解原子操作竞争。高负载场景下 xThread 可扩展为多线程。</p>
+<p><strong>基于 BAR 映射的高效数据传输</strong><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912101950.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912101950.png" alt="image.png" style="max-width: 100%;"></a><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912102006.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912102006.png" alt="image.png" style="max-width: 100%;"></a><br>
+在 FlowANN 中，每条传输命令负责拷贝父节点未缓存的边（64–256 字节）。即使做批处理，单次传输的数据量仍然很小。但传统基于 DMA 的机制（如<code class="notranslate">cudaMemcpy</code>）在这类细粒度传输上性能差。 如图 11 (a) 所示，低效根源来自 DMA 开销：包含 4 次 PCIe 事务、两次进出 GPU 驱动的上下文切换以及运行时开销。基于<code class="notranslate">cudaMemcpy</code>的 xCopier 传输 64B–1KB 数据的延迟高达 21–22μs（图 12），无法与 GPU 计算重叠。</p>
+<blockquote>
+<p>图11解释：<br>
+<strong>常规cudaMemcpy</strong>：<br>
+1.cudaRuntime：CUDA运行时库，高层API层。这一步主要做参数的合法性检查，然后把请求转发到底层CUDA Driver；<br>
+2.cudaDriver：NVIDIA底层GPU驱动。这一步主要做地址转换，把CPU虚拟地址翻译成系统物理地址，准备DMA描述符（源地址、目的地址、长度）<br>
+3.submit DMA cmd：向GPU提交DMA命令描述符，通过PCIe写GPU门铃寄存器，通知GPU启动DMA引擎（第一次PCIe事务）<br>
+4.issue DMA：GPU的DMA engine收到命令后，需要获得CPU DRAM里的源数据，GPU会通过PCIe发起读请求（第二次PCIe事务：Memory Read Request）<br>
+5.move data：主机一侧收到读请求后，从DRAM取出数据，通过PCIe返回给GPU（第三次PCIe事务：Completion with Data）<br>
+6.interrupt：DMA完成，GPU告诉CPU这次传输完成了，这通常会采用MSI/MSI-X一类的中断通知机制，从 PCIe 视角看，是设备发往 CPU/Root Complex 的消息写或中断事件（这是第四类 PCIe 交互）<br>
+<strong>BAR映射</strong>：<br>
+MMIO（Memory-Mapped I/O）将设备 BAR 暴露的资源映射到 CPU 虚拟地址空间；CPU 对该映射地址执行的仍是普通 <code class="notranslate">store</code>/SIMD store 指令，但 MMU 发现其目标页属于 GPU BAR 的 MMIO 区而非本地 DRAM，因而不会按普通缓存写入 L1/DRAM，而会经 store buffer 或 write-combining buffer 转化为携带“BAR 地址＋数据”的 PCIe Memory Write，最终由 GPU 将数据写入对应的 HBM buffer。<br>
+CPU store 是指令层行为，PCIe MMIO Memory Write 是该指令在总线层产生的结果；后者通常为 posted write，CPU 不必等待 GPU 确认，但仍需通过 fence、队列尾指针或完成标志保证数据先于“就绪”通知对 GPU 可见（这也是本文设计xQueue的原因）。与普通内存写相比，MMIO 写的目标是设备而非 DRAM、通常不使用普通 CPU cache、CPU 直接读取该区域需经历 PCIe 往返且较慢；因此 MMIO 适合 doorbell、状态寄存器及 xCopier 中 64–256 B 的细粒度数据推送，而大块连续传输更适合由 DMA/copy engine 完成，以避免 CPU 持续承担数据搬运。</p>
+</blockquote>
+<p>为解决该问题，本文采用一种全新硬件策略：<strong>GPU 基地址寄存器（BAR）映射</strong>。依托开源驱动，xCopier 将 GPU 内存区域直接映射至 CPU 物理地址空间。后续对该区域的访问通过内存映射 I/O（MMIO）完成。借助硬件写合并，连续写操作会被透明合并为更少、更大粒度的 MMIO 访问。如图 11 (b) 所示，该方式将 CPU 到 GPU 拷贝压缩至单次 PCIe 事务，由 CPU SIMD 指令执行，消除上下文切换与运行时开销，<strong>小块传输最高可提速 40 倍（图 12）</strong>。</p>
+<p>在 FlowANN 中，每个 xQueue 关联一块预分配、并完成 BAR 映射的 GPU 缓冲区池，用于存放取回的边数据。作为通用系统服务，xCopier 可直接迁移至其他 GPU 负载。</p>
+<h2>6.2 自适应协同流水线</h2>
+<p>依托 xCopier，FlowANN 将 GPU 计算与 CPU-GPU 边拉取构建流水线。每一步中，检索内核首先从候选池中选出距离查询向量最近、尚未扩展的节点作为父节点，随后异步拉取其未缓存的邻居至 GPU（<code class="notranslate">xCopy</code>）。紧接着，内核检查此前下发传输命令的完成状态（<code class="notranslate">xCheck</code>），处理父节点已在 GPU 缓存内的邻居、以及已经传输完成的邻居。</p>
+<p><strong>难点</strong><br>
+构建高效流水线面临多项难题： ① 尽管发现 - 扩展窗口支持延迟发现，但过度延迟会使检索走入次优路径，损害检索效率（§6.2.1）。 ② 由于延迟发现，每一步的发现计算负载动态变化，与预先分配的硬件资源不匹配（§6.2.2）。 ③ 在逼近阶段（§3），窗口尺寸过小，无法掩盖边传输的开销（§6.2.3）。</p>
+<h3>6.2.1 基于自适应同步的近最优检索</h3>
+<p>发现操作过度延迟，会使检索走入次优路径，降低检索效率。为避免不必要的计算与传输，当部分节点的延迟步数超出其发现 - 扩展窗口时，FlowANN 会同步等待，直至该部分发现操作完成。但窗口估值并不简单：它随检索过程动态变化。</p>
+<p><strong>窗口大小估计</strong><br>
+我们发现，<strong>被扩展节点在候选池中的位置$P_e$</strong> 是估计窗口尺寸的有效指标。 具体而言，在逼近阶段，检索快速向查询向量收敛，窗口尺寸与$P_e$通常为 0。随着检索收敛，窗口尺寸增大（图 4）；同时，被扩展节点的位置向右偏移（即$P_e$增大）：靠近查询的节点逐步累积至候选池头部并依次被扩展。 我们对数万条查询轨迹的分析证实：$P_e$与被扩展节点邻居的窗口尺寸存在强相关性，皮尔逊相关系数 = 0.77。</p>
+<p>因此 FlowANN 在每一步利用$P_e$估计被扩展节点邻居的窗口W：</p>
+<p>$W=\alpha \cdot P_e$ ，其中$\alpha$由离线分析 + 线性回归得到。此处采用离线分析是足够可行的，因为$\alpha$主要取决于数据集底层的数据分布。 此外该公式可自适应应对逼近阶段长度的动态变化：逼近阶段$P_e$基本保持为 0，估算窗口W同样为 0，保证精准同步，不依赖离线统计。</p>
+<p>除常规场景外，检索收敛过程中的波动会导致窗口意外变小，表现为$P_e$骤降。该现象发生在收敛阶段检索意外发现距离查询近得多的节点时（即$P_e$骤降）。一旦找到这类节点，其邻居将成为后续扩展的首要目标，因此它们对应的窗口很小。FlowANN 需要特殊处理该场景。</p>
+<p><strong>基于窗口尺寸的自适应同步</strong><br>
+为处理波动场景：当 FlowANN 检测到$P_e$骤降，会等待父节点全部邻居拉取完成。尽管该操作带来性能开销，但此类波动发生概率极低（&lt;3%）。本文评估中，将$P_e$骤降阈值设为候选池大小的 10%。 同时，每一步中，若前序步骤中部分节点的延迟时长超出估算窗口，FlowANN 同样等待其发现操作完成。</p>
+<p><strong>无阻塞同步</strong><br>
+为避免浪费计算资源，等待期间 FlowANN 将硬件线程出让，调度其他查询的计算任务。该调度开销极低，由硬件调度器完成。</p>
+<h3>6.2.2 跨步负载均衡，规整计算负载</h3>
+<p>在传统同步执行中，每一步发现的节点数量（即父节点的邻居数目）是确定值。但 FlowANN 对部分节点采用延迟发现后，该数目变为动态值。GPU 资源（CUDA 核心、共享内存等）为静态预分配，动态负载会造成严重的 GPU 利用率不足。</p>
+<p>FlowANN 引入跨步负载均衡机制，使发现计算负载与硬件资源匹配。 具体：每一步开始时，FlowANN 识别三类待发现节点： ① 驻留在 GPU 上的父节点邻居； ② 受同步约束、必须执行发现的延迟节点； ③ 已经传输至 GPU、仍可继续延迟的延迟节点。</p>
+<p>若这三类节点总数无法匹配硬件资源，FlowANN 会将第③类中的部分节点延迟至下一步处理。例如：为每个查询分配 32 个线程组（每组协同完成节点发现），FlowANN 会尽量让每一步待发现节点总数为 32 的整数倍。多出的节点通过共享内存传递至下一步。</p>
+<h3>6.2.3 利用入口点缩短逼近阶段</h3>
+<p>在逼近阶段（§3），较小的发现 - 扩展窗口要求频繁同步，带来不可忽略的开销。为降低该阶段占比，FlowANN 为每个查询选取合适入口点，而非从随机节点启动检索。 受基于聚类的近似最近邻检索思路启发：从数据集中选出一组代表节点（例如 K-means 质心）作为候选入口点，通过并行计算选出距离查询最近的候选。该方法借助 GPU 并行能力快速选出合适入口点。得益于代表节点的代表性，仅需极少量候选（百万选一），即可将逼近阶段压缩至总检索步数的约 5%。</p>
+<h1>七、实验评估</h1>
+<p><strong>实现</strong>：FlowANN 基于 CAGRA [51]（即 NVIDIA 开源 cuVS [27] 中基于图的近似最近邻检索系统）开发，由 14700 行 CUDA/C++ 代码实现。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912163943.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912163943.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>硬件环境与数据集</strong>：全部实验在一台服务器上执行，配置为 2 颗英特尔至强铂金 8457C CPU（2.60 GHz，160 核）、2TB 内存以及多块 NVIDIA H20 GPU。本文还在其他型号 GPU 上对 FlowANN 做了评估（§7.4.2）。实验主要采用 3 个广泛使用的十亿规模数据集 [39–41]。GPU 与数据集参数汇总于表 1。</p>
+<p><strong>基线系统</strong>：与 8 套 GPU 近似最近邻检索（ANNS）系统对比。</p>
+<ul>
+<li><strong>基于量化聚类的 ANNS</strong>：当前 SOTA 的聚类型 ANNS 系统先在 GPU 上使用量化向量检索（例如乘积量化 PQ [32]），再在 CPU 上用全精度向量对结果重排序。本文评估 cuVS-cluster [27]（NVIDIA）与 faiss-cluster [24]（Meta）。FusionANNS [22] 未开源，本文基于 cuVS 精心实现其内存版。</li>
+<li><strong>全精度聚类型 ANNS</strong>：Rummy [19] 将全部全精度向量存放于 CPU，按需传输至 GPU，通过流水线将数据传输与计算重叠执行。</li>
+<li><strong>基于图的 ANNS</strong>：BANG [20] 支持单 GPU 上内存内十亿规模图 ANNS。它在 GPU 存放 PQ 量化向量，图结构与全精度向量存于 CPU 内存，按需传输至 GPU。</li>
+<li><strong>带步骤依赖的图 ANNS</strong>：最新工作 FlashANNS [42] 放宽步骤间依赖，以优化流水线。其第n步依赖第(n-2)步。本文基于其公开制品实现内存版本。</li>
+<li><strong>统一内存（UM）</strong>：统一内存将 CPU 与 GPU 内存地址空间合一。本文在 CAGRA [51] 基础上扩展 UM 支持，得到 CAGRA-UM。</li>
+<li><strong>多 GPU 方案</strong>：GGNN [43] 是本文所知唯一面向十亿规模的多 GPU 图 ANNS 系统。它将数据分片至多块 GPU，每块 GPU 在对应的子图上执行检索，最后合并结果。</li>
+</ul>
+<p><strong>实验配置</strong>：结合数据集特性与 CAGRA 约束，本文将向量量化至表 1 指定维度（PQ dim）用于 GPU 检索；对 cuVS-cluster、faiss-cluster 采用相同量化参数。但 BANG 在该量化参数下无法达到高召回率，因此采用 BANG 默认量化设置（PQ dim = 74），保证其可对比的检索精度。 对于 FlowANN 及所有图类基线系统，遵循 CAGRA [51] 官方配置，图的度设为 32。本文在 §7.2 中还测试了 FlowANN 在不同量化参数与图度下的性能。</p>
+<p><strong>评价指标</strong>：采用 recall@k [32] 衡量检索精度：返回结果中包含真实 top-k 近邻的比例。若无特殊说明，吞吐量（每秒查询数 QPS）与延迟均在<strong>召回率 0.9</strong>下测试，这是 ANNS 领域常用精度指标 [11,36,73]。§7.1 中评估了 FlowANN 在不同精度目标下的表现。</p>
+<h2>7.1 整体性能</h2>
+<p>本文在多组批大小（16 至 2048）下评估 FlowANN 与基线系统，覆盖不同应用场景：在线服务（小批）、离线处理（大批），实验设置与前人工作 [19] 保持一致。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912164333.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912164333.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>吞吐量</strong>：如图 13 所示，在全部批大小与数据集上，FlowANN 性能均优于所有基线。 相比聚类类基线，批大小 2048 时平均吞吐量提升 8.67 倍；批大小 16 时平均提升 8.15 倍。批越大，性能增益越明显：单步计算时间变长，可更好掩盖数据传输开销。 聚类类方法性能弱于 FlowANN，且随批大小扩容能力差：其簇内暴力搜索会比图遍历更早打满 GPU 资源。FusionANNS 依靠启发式重排序，性能优于 cuVS-cluster。</p>
+<p>相比 BANG，FlowANN 在批大小 2048、16 下吞吐量平均分别高出 9.52 倍、78.8 倍。原因是 BANG 仅能将边拉取与少量计算（候选池更新）做重叠，且依赖开销高昂的<code class="notranslate">cudaMemcpy</code>，造成 GPU 停顿；小批场景会进一步恶化 BANG 的重叠效率。与之相对，FlowANN 利用发现 - 扩展窗口，并依托 xCopier 实现高效数据传输，有效掩盖传输开销。</p>
+<p>相比 FlashANNS，FlowANN 在批大小 2048、16 下吞吐量平均高出 3.71 倍、21.8 倍。FlashANNS 对步骤依赖的放宽程度有限且缺乏灵活性，小批量场景无法有效重叠 I/O；在逼近阶段容易走入次优检索路径，收敛阶段存在大量等待。</p>
+<p>相比 CAGRA-UM，FlowANN 吞吐量提升 110.8–1888.8 倍。统一内存无法感知图遍历的随机访问特征，会触发大量缺页与页面迁移，严重损害性能。</p>
+<p><strong>延迟</strong>：FlowANN 延迟低于全部基线。批大小 2048、16 时，相比基线平均延迟分别降低 83.8%、81.6%。值得注意：批大小 16 时，单次查询仅需 0.962 ms。该高效性来自精准的图遍历与协同流水线，在保证高召回的同时掩盖传输开销。批大小 2048、16 下，P99 长尾延迟平均分别降低 75.4%、86.1%。</p>
+<p>聚类类基线延迟高于 FlowANN，尤其在大批次场景。其中 Rummy 延迟最高，因其全精度 GPU 计算带来更高处理开销。BANG 与 FlashANNS 在小批量下延迟高：查询数量变少后，无法重叠的数据传输带来的开销更加突出。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912171218.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912171218.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>与多 GPU 系统对比</strong>：将单 GPU FlowANN 与 GGNN [43] 对比。如图 14 所示，批大小 8–1024 范围内，即便 GGNN 使用 8 块 GPU，单 GPU FlowANN 吞吐量仍是 GGNN 的 2.22–15.3 倍。仅当批大小 2048 时，FlowANN 吞吐量略低于 8 卡 GGNN（为其 92.2%）。GGNN 需要 8 块 GPU 与大批次才能追上 FlowANN，根源在于通信开销高，且小批场景 GPU 利用率低。</p>
+<p><strong>不同精度目标</strong>：如图 15，在小批量（64）、大批量（2048）两种设置下，测试 recall@10 从 0.8 至 0.995 区间内 FlowANN 的吞吐量。选取 cuVS-cluster 作为聚类类方法代表：它与 FlowANN 共享基础算子（例如距离计算），便于直接对比。 在全部精度等级下 FlowANN 均优于基线；精度越高，性能差距越大。 召回率 0.8 时，FlowANN 相比 cuVS-cluster、BANG 平均提速 5.4 倍、28.9 倍；召回率 0.995 时，增益大幅扩大至 29.1 倍、111.8 倍。</p>
+<p><strong>延迟发现对检索步数的影响</strong>：对比开启 / 关闭延迟发现（使用 CAGRA-UM）达到相同召回所需检索步数。 在 3 个十亿规模数据集、召回 0.8~0.995 区间内：约 96% 场景下 FlowANN 不会引入额外步数；仅少数场景步数小幅增加 0.7–2.1%。这说明延迟发现机制能够保留检索正确性，实际对收敛速度影响极小。</p>
+<h1>7.2 敏感性分析</h1>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912171303.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912171303.png" alt="image.png" style="max-width: 100%;"></a><br>
+本文在不同配置下评估 FlowANN，即不同量化设置与图度。</p>
+<p><strong>量化配置</strong>：采用批大小 64 与 2048，在不同量化向量长度下评估 FlowANN（图 16 (a)）。在各类量化配置下，FlowANN 相比 cuVS-cluster 平均吞吐量提升 8.47 倍（小批量）与 5.12 倍（大批量），证明其对不同量化参数具备良好适应性。更长的量化向量能够提升遍历精度，减少达到目标召回所需的检索步数。</p>
+<p><strong>图度</strong>：在不同图度（即邻居数量）下评估 FlowANN。所有测试场景中 FlowANN 性能均优于 BANG，平均吞吐量分别高出 136.37 倍（小批量）与 14.72 倍（大批量）（图 16 (b)）。更高的图度可以发现更多边，提升精度并减少检索步数，但会增加数据传输与计算开销。 在小批量场景，该开销会降低 FlowANN 吞吐量；而大批量场景下，计算可以掩盖传输开销，带来性能收益。</p>
+<h1>7.3 拆解分析</h1>
+<p><strong>图分层（Graph tiering）</strong>：为评估多层 LPA，本文统计全部查询在不同发现 - 扩展窗口大小下的 GPU 边缓存命中率（图 17a）。对于窗口不足的边（窗口≤5，见 §3），约 87.9% 的边可驻留在 GPU 上（窗口 = 0 时为 89.1%），相比 K-means 提升 29.6%。 此外，图 17a 表明 FlowANN 借助分组局部节点 ID 提升内存效率：GPU 上可存放的边数量相比 K-means、原始无分组方案分别多出 18.2%、30.2%。原因是多层 LPA 能够生成比 K-means 更小、更均衡的分组。 基于补码的图布局减少空间浪费，对于十亿规模数据集仅产生约 0.506% 的填充冗余；相比原始布局，内存浪费减少约 98.5%。</p>
+<p><strong>xCopier</strong>：在不同数据尺寸与并发度下评估 xCopier。如图 17b 所示，对比<code class="notranslate">cudaMemcpy</code>，采用 BAR 映射的 xCopier 对 32–8192 字节的数据可将端到端取数延迟降低 78%~80%。得益于无锁设计与线程块级聚合，在检索过程中，xCopier 可支持 2048 个并发线程块（每块 1024 线程）与 64 条 x 队列，具备高可扩展性。</p>
+<p><strong>自适应同步</strong>：固定检索步数，对比开启 / 关闭自适应同步的检索精度。如图 17c 所示，批大小 64、2048 场景下，自适应同步可使精度平均提升 21.7% 与 6.2%，能够实现 recall@10&gt;0.9 的高精度检索。小批量下每步计算时间更短，对同步策略的合理性要求更高。</p>
+<h1>7.4 扩展实验</h1>
+<h2>7.4.1 性能上界与下界</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912171800.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912171800.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>与理想上界的差距</strong>：在小规模数据集上将 FlowANN 与 CAGRA 对比。FlowANN 仅缓存 50% 的边，而 CAGRA 将整张图存放于 GPU。如图 18 所示，批大小 64、2048 时，FlowANN 的平均吞吐量达到 CAGRA 的 67.9% 与 85.4%。这验证了其分层图与边获取流水线的高效性。大批量场景下，FlowANN 性能接近 CAGRA：大批量提升 GPU 利用率，拉长单步执行时间，为异步传输提供更充裕的窗口。</p>
+<p><strong>无 GPU 边缓存时的性能</strong>：测试所有边存放于 CPU（不启用分层机制）时 FlowANN 的吞吐量。如图 19，不启用分层的 FlowANN 吞吐量为标准 FlowANN 的 58.4%（批大小 64）与 78.1%（批大小 2048）。更大的批可以缩小该差距，因为大批量能更好掩盖传输开销。即便如此，它仍优于基线（图 13）：批 64 时提速 1.5–50.6 倍，批 2048 时提速 4.5–12.6 倍。这说明即使不使用 GPU 边缓存，FlowANN 的各项优化（如 xCopier、自适应同步）依然能带来可观的性能提升。</p>
+<h2>7.4.2 算法与硬件通用性</h2>
+<p><strong>对最佳优先搜索变体的适用性</strong>：最佳优先搜索的一种常见变体是每轮扩展多个节点 [8]（即搜索宽度 &gt; 1）以提升效率。本文在 1~8 的不同搜索宽度下测试 FlowANN 吞吐量。如图 20，在所有搜索宽度下 FlowANN 均优于基线。更大的搜索宽度可使 FlowANN 更快找到高质量近邻，减少总检索步数；搜索宽度到 4 之前吞吐量持续提升。超过 4 后，单步计算开销上升，同时结果质量的边际收益递减，吞吐量开始下降。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912172015.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912172015.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>对其他 GPU 架构的适用性</strong>：除 NVIDIA H20 之外，本文还在 V100、A800、L20 等主流 GPU 上评估 FlowANN，详细配置见表 1。如图 21 所示，在不同架构与显存规格下，FlowANN 始终优于基线（提速 4.97–29.4 倍），证明方案具备通用性。 小批量场景下，FlowANN 相对基线的性能增益随显存容量增大而提高；大批量场景下，增益随 GPU 算力提升而增大 —— 因为更长的单步计算时间已经掩盖数据传输，算力的影响被放大。</p>
+<h2>7.4.3 预处理开销</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912172112.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260912172112.png" alt="image.png" style="max-width: 100%;"></a><br>
+除离线建图之外，FlowANN 额外的预处理步骤包括图分层、入口点选取以及窗口估计的参数获取。图 22 展示各步骤在总预处理耗时中的占比。结果表明，这些新增步骤引入的额外开销相对较小：在三个数据集上分别仅占 4.9%、5.1%、8.4%。</p>
+<h1>八、讨论</h1>
+<p><strong>卸载策略与未来可适配性</strong>。FlowANN 主要对图连通关系进行卸载，因为在当前十亿级负载（例如 SIFT1B）中，图连通关系是最主要的内存瓶颈。该思路与主流分层 ANNS 设计 [8,11] 保持一致。为适配大模型负载中典型的海量高维向量场景，FlowANN 的分层设计天然支持同时对图边与数据向量进行卸载。在该模式下，异步邻居拉取阶段可同步获取邻居节点的数据向量。</p>
+<p><strong>动态更新兼容性</strong>。虽然 FlowANN 主要聚焦检索流程优化，但其预处理机制本身并不会阻碍图的动态更新。FlowANN 可以方便地对接现有的在线或离线图更新算法。向图中插入新节点时，系统无需执行全局完整重分组。例如，新插入节点只需计算其邻居权重，加入总权重最高的合法分组即可完成分组。仅当分组数量超过阈值时，才需要执行全局重分组。</p>
+<p><strong>对多种图结构的兼容性</strong>。FlowANN 兼容所有支持最佳优先搜索的变体图结构。FlowANN 的核心优化是解除步级依赖，利用节点发现与扩展之间的时间窗口。该机制根植于最佳优先搜索的迭代特性。因此 FlowANN 不要求严格的精确 K 近邻图结构，能够无缝适配各类邻近图。</p>
+<p><strong>GPU 用于 ANNS 的成本效益</strong>。GPU 具备大规模并行能力，基于 GPU 的 ANNS 相比 CPU 方案拥有更优的成本效益（即每美元查询吞吐量 QPS/$）[19,22]。该经济优势推动了 GPU ANNS 在工业界落地 [75]，硬件复用进一步放大了这一优势。老旧或低端 GPU（如 NVIDIA V100）虽不再适合高负载大模型任务，但用于 ANNS 仍具备很高效率，可以复用以降低部署成本。</p>
+<p><strong>基于 MMIO 数据传输的 xCopier 可扩展性</strong>。xCopier 采用基于 MMIO 的数据传输（§6.1），在高并发（即大批次）场景下，其性能依然优于 DMA。例如，批大小 10k 时，单步传输总数据量仅约 1MB，MMIO 仍可维持性能优势（图 12）。因此，即使所有 SM 计算单元满载，xCopier 也不会遇到带宽瓶颈。当 MMIO 不可用时，xCopier 会回退至 DMA 拷贝。</p>
+<p><strong>延迟扩展（deferred expansion）的必要性</strong>。延迟扩展的一个直观替代方案是单纯依靠硬件让出机制（即在数据传输时切换至其他查询）。但受限于 GPU 资源与批大小约束，仅靠让出机制不足以掩盖延迟。GPU 计算资源（如共享内存与寄存器）严格限制了 SM 上可同时驻留的查询数量；数据传输过程中的线程让出会快速阻塞所有活跃查询，造成 GPU 空闲。此外，纯让出机制需要极大批大小才能实现查询间的有效交错，对延迟敏感的在线服务并不适用。FlowANN 的延迟扩展克服了上述两点局限：它在单个查询内部将传输开销与计算重叠，无需高并发也能保证高性能。</p>
+<h1>九、相关工作</h1>
+<p><strong>基于 SSD 的 ANNS</strong>。已有研究 [76–78] 采用流水线从 SSD 读取数据。FlashANN [42] 在检索流程中做了一步松弛，但仍然保留严格的步级依赖。PipeANN [11] 放宽计算与 I/O 的执行顺序，以充分打满 SSD 的 I/O 带宽。但它对所有节点的扩展采用同等处理策略，当某些重要节点扩展被推迟时，会产生非最优检索路径。此外，和 CPU-SSD 场景不同，GPU-CPU 之间的计算 / I/O 差距更小（延迟接近），可挖掘的 I/O 并行度受限。FlowANN 考虑了不同节点之间发现 - 扩展窗口的差异性，在最小计算开销下维持接近最优的检索路径，同时降低延迟、提升吞吐量。</p>
+<p>此外，本文认为 SSD 并不适合作为 GPU 图 ANNS 的二级存储：(1) SSD 延迟（约 100 微秒 [79]）远高于图检索单步执行时间（6–14 微秒），难以被计算掩盖，造成 GPU 利用率低下；(2) GPU 服务器通常具备 TB 级内存 [80–82]，足以存放十亿级数据集与图。</p>
+<p><strong>分布式 ANNS</strong>。分布式 ANNS 系统 [43,83,84] 侧重横向扩展，在多节点集群上支持近似最近邻检索。这类工作与 FlowANN 具备互补性，FlowANN 主要目标是最大化单 GPU 检索能力；同时 FlowANN 可部署多副本，支持多节点场景。</p>
+<p><strong>GPU ANNS 的计算优化</strong>。已有研究探索并行 [21,51,85,86]、量化 [22,55] 与多 GPU 协同 [23,43]。这些技术均可（或已经）与 FlowANN 结合。</p>
+<p><strong>CPU 上基于图的 ANNS</strong>。大量工作在 CPU 上优化图 ANNS，包括并行策略 [87,88]、增强图结构 [9,10,57,89–92]、改进量化方法 [12,31,93,94] 以及参数调优 [46,95–99]。这些成果同样可与 FlowANN 互补。</p>
+<h1>十、结论</h1>
+<p>本文提出 FlowANN，一套基于图的 ANNS 系统，可在单 GPU 上高效完成十亿规模向量检索。FlowANN 的核心洞察：图检索中刚性的步级依赖，可以被解耦为细粒度的节点级依赖。基于该思路，FlowANN 采用分层图结构，将具备充足发现 - 扩展窗口的边卸载至 CPU。利用该时间窗口，FlowANN 延迟部分节点的发现操作，将边拉取过程与 GPU 计算重叠。在十亿级数据集上的评估表明，在不损失检索精度的前提下，FlowANN 相比现有 SOTA 系统平均提速 4.08–45.7 倍，最高可达 172.6 倍。</p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script><script>MathJax = {tex: {inlineMath: [["$", "$"]]}};</script><script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</html>
