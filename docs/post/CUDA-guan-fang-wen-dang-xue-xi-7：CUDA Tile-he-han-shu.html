@@ -1,0 +1,1016 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="原文链接：
+[2.4.Writing Tile Kernels](https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-tile-kernels.html)
+# 前言
+CUDA Tile 提供了一种不同于前面章节介绍的单指令多线程（SIMT）模型的 GPU 内核代码编写方式。">
+<meta property="og:title" content="CUDA官方文档学习7：CUDA Tile核函数">
+<meta property="og:description" content="原文链接：
+[2.4.Writing Tile Kernels](https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-tile-kernels.html)
+# 前言
+CUDA Tile 提供了一种不同于前面章节介绍的单指令多线程（SIMT）模型的 GPU 内核代码编写方式。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/CUDA-guan-fang-wen-dang-xue-xi-7%EF%BC%9ACUDA%20Tile-he-han-shu.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>CUDA官方文档学习7：CUDA Tile核函数</title>
+<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">CUDA官方文档学习7：CUDA Tile核函数</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/78" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>原文链接：<br>
+<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-tile-kernels.html" rel="nofollow">2.4.Writing Tile Kernels</a></p>
+<h1>前言</h1>
+<p>CUDA Tile 提供了一种不同于前面章节介绍的单指令多线程（SIMT）模型的 GPU 内核代码编写方式。Tile 编程允许程序员以另一种形式表达并行逻辑，而将最底层的并行处理交由编译器与内置算子完成。借助该机制，Tile 能够让开发者更简便地调用 NVIDIA GPU 的各类新型高性能硬件单元，例如<strong>TMA 多维单元（Tensor Memory Access，张量内存访问）</strong> 与张量核心（Tensor Core），</p>
+<ul>
+<li>Python 环境下可通过 cuTile 软件包 <code class="notranslate">cuda.tile</code> 使用 CUDA Tile 编程。</li>
+<li>C++ 版本的 CUDA Tile 自 CUDA Toolkit 13.3 版本起正式纳入工具集。</li>
+</ul>
+<p>围绕 Tile 核函数的应用代码，包括设备内存分配、主机与设备间的数据传输、核函数启动调度等任务，与前面章节介绍的 SIMT 核函数完全一致。Tile 核函数操作由标准 CUDA API 分配的全局内存，计算结果同样以相同方式回传至主机。唯一的区别在于<strong>核函数内部</strong>的代码编写逻辑。</p>
+<p>在 SIMT 核函数中，开发者以单个线程为思考单位：计算全局线程索引，加载该线程对应的数据元素，对元素执行运算，并保存结果。而在 Tile 核函数中，开发者以整个线程块为思考单位：加载包含大量元素的一个分片（tile），对整个分片执行运算，再存储结果。由编译器负责将分片运算映射到线程块内的硬件线程；这部分工作在 SIMT 编程中需要开发者手动显式处理。</p>
+<p>本章专门聚焦这一差异：如何编写核函数入口，以及在入口内实现分片运算。所有代码范式均同时提供 CuTile Python（<code class="notranslate">cuda.tile</code>）与 CUDA Tile C++（<code class="notranslate">cuda::tiles</code>）两种实现。二者共用同一套编译器后端（CUDA Tile IR，CUDA 分片中间表示），因此拥有完全相同的执行语义。</p>
+<p>按照约定，两种语言中均将 Tile API 别名定义为<code class="notranslate">ct</code>：</p>
+<ul>
+<li>Python：<code class="notranslate">import cuda.tile as ct</code></li>
+<li>C++：<code class="notranslate">namespace ct = cuda::tiles;</code><br>
+Python 中，Tile API 位于<code class="notranslate">cuda.tile</code>模块，导入方式如上所示。<br>
+C++ 中，Tile API 位于<code class="notranslate">cuda::tiles</code>命名空间，由头文件<code class="notranslate">cuda_tile.h</code>暴露：</li>
+</ul>
+<div class="highlight highlight-source-c++"><pre class="notranslate"># <span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">"</span>cuda_tile.h<span class="pl-pds">"</span></span>
+<span class="pl-k">namespace</span> <span class="pl-en">ct</span> <span class="pl-k">=</span> cuda::tiles;</pre></div>
+<p>下文代码片段中的<code class="notranslate">ct.</code>（Python）与<code class="notranslate">ct::</code>（C++）前缀，代表对应语言下的 Tile API。</p>
+<h1>1.内核和函数声明</h1>
+<p>Tile 核函数是 GPU 入口函数，在启动网格中的每个线程块执行一次。Tile 函数可由 Tile 核函数或其他 Tile 函数调用，但本身不能由主机函数调用。与 SIMT 核函数一样，Tile 核函数无法由主机代码直接调用，<strong>必须通过启动（launch）的方式执行</strong>。</p>
+<p>在 CUDA Tile C++ 中：</p>
+<ul>
+<li><code class="notranslate">__tile_global__</code> 对应 SIMT 中的<code class="notranslate">__global__</code>，用于标记 Tile 核函数入口。</li>
+<li><code class="notranslate">__tile__</code> 对应 SIMT 中的<code class="notranslate">__device__</code>，表示该函数编译至 GPU 端，可被其他<code class="notranslate">__tile__</code>或<code class="notranslate">__tile_global__</code>函数调用。</li>
+</ul>
+<p>数组与标量参数的传递方式和 SIMT 核函数完全相同。Tile 代码与 SIMT 代码可以共存：单个<code class="notranslate">.cu</code>源文件中可以同时定义<code class="notranslate">__tile_global__</code>核函数与<code class="notranslate">__global__</code>核函数，同一个主机程序也可以启动这两类核函数。</p>
+<blockquote>
+<p><strong>注意</strong> 当前，<code class="notranslate">__tile__</code> 函数<strong>不能</strong>被 <code class="notranslate">__global__</code> 或 <code class="notranslate">__device__</code> 函数调用。 同理，<code class="notranslate">__device__</code> 函数<strong>不能</strong>被 <code class="notranslate">__tile_global__</code> 或 <code class="notranslate">__tile__</code> 函数调用。该限制在未来版本的 CUDA 中可能会被解除。</p>
+</blockquote>
+<p>在 cuTile Python 中：</p>
+<ul>
+<li>装饰器 <code class="notranslate">@ct.kernel</code>：将函数标记为 Tile 核函数入口</li>
+<li>装饰器 <code class="notranslate">@ct.function</code>：标记该函数可被 Tile 核函数或其他 Tile 函数调用<br>
+实际使用时，凡是在核函数内部调用的函数都会自动编译为 Tile 代码（是创造了一个Tile函数副本，而不是说这个函数就变成了Tile函数，所以还是可以被主机函数调用的）因此 <code class="notranslate">@ct.function</code> 装饰器是可选的。<br>
+数组参数支持任意驻留在设备显存（条件1）、并且对外暴露 DLPack 或者 CUDA Array Interface 的数组类型（条件2），标量参数直接传参，主机会直接把数值拷贝给kernel参数，不需要显存也不需要DLPack</li>
+</ul>
+<blockquote>
+<p>哪些库的GPU数组/张量支持上述两个接口？（举5个例子）<br>
+1.pytorch；2.CuPy；3.Numba CUDA Device Array；4.JAX；5.CUDA Python原生数组</p>
+</blockquote>
+<p>C++：</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">"</span>cuda_tile.h<span class="pl-pds">"</span></span>
+<span class="pl-c"><span class="pl-c">//</span> Tile kernel entry point. Cannot be called directly; must be launched.</span>
+__tile_global__ <span class="pl-k">void</span> <span class="pl-en">my_kernel</span>(<span class="pl-k">float</span>* a, <span class="pl-k">float</span>* b, <span class="pl-k">float</span>* c) {
+    ...
+}
+<span class="pl-c"><span class="pl-c">//</span> Tile function. Callable from tile kernels and tile functions.</span>
+__tile__ <span class="pl-k">float</span> <span class="pl-en">helper</span>(<span class="pl-k">float</span> x, <span class="pl-k">float</span> y) {
+    <span class="pl-k">return</span> x + y;
+}</pre></div>
+<p>Python：</p>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-k">import</span> <span class="pl-s1">cuda</span>.<span class="pl-s1">tile</span> <span class="pl-k">as</span> <span class="pl-s1">ct</span>
+
+<span class="pl-c"># Tile kernel entry point. Cannot be called directly; must be launched.</span>
+<span class="pl-en">@<span class="pl-s1">ct</span>.<span class="pl-c1">kernel</span></span>
+<span class="pl-k">def</span> <span class="pl-en">my_kernel</span>(<span class="pl-s1">a</span>, <span class="pl-s1">b</span>, <span class="pl-s1">c</span>):
+    ...
+
+<span class="pl-c"># Tile function. Callable from tile kernels and tile functions.</span>
+<span class="pl-c"># @ct.function is optional, any function called from tile code</span>
+<span class="pl-c"># is automatically compiled as tile code.</span>
+<span class="pl-en">@<span class="pl-s1">ct</span>.<span class="pl-c1">function</span></span>
+<span class="pl-k">def</span> <span class="pl-en">helper</span>(<span class="pl-s1">x</span>, <span class="pl-s1">y</span>):
+    <span class="pl-k">return</span> <span class="pl-s1">x</span> <span class="pl-c1">+</span> <span class="pl-s1">y</span></pre></div>
+<h1>2.启动内核</h1>
+<p>Tile 核函数在<strong>Tile 块网格</strong>上启动，就像 SIMT 核函数在线程块网格上启动一样。由程序员指定网格形状，最多支持三维。在程序员视角下，<strong>每个 Tile 块由单个逻辑线程执行</strong>；块内部的并行交由编译器管理。</p>
+<p>在 C++ 中，Tile 核复用 SIMT 大家熟悉的三尖括号<code class="notranslate">&lt;&lt;&lt;&gt;&gt;&gt;</code>启动语法： 第一个尖括号参数是网格形状（Tile 块的数量）；第二个是 SIMT 中使用的<strong>单块线程数</strong>。对于 Tile 核，线程数量由编译器在内部决定，<strong>第二个参数必须写为 1</strong>。</p>
+<p>Tile 核本质也是普通 CUDA 核函数，因此可以通过运行时已有 API <code class="notranslate">cudaLaunchKernel</code>、<code class="notranslate">cudaLaunchKernelEx</code> 启动，同样使用<code class="notranslate">grid, 1</code>的配置。当需要把 Tile 核集成到已使用上述 API 完成核启动的代码库时，该特性十分有用。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> second arg must be 1</span>
+my_kernel&lt;&lt;&lt;dim3(num_blocks_x, num_blocks_y), <span class="pl-c1">1</span>&gt;&gt;&gt;(a, b, c);  </pre></div>
+<p>在 Python 中，<code class="notranslate">ct.launch</code>接收 4 个位置参数：CUDA 流、指定各维度 Tile 块数量的网格元组、核函数对象，以及核函数参数组成的元组。</p>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-k">import</span> <span class="pl-s1">torch</span>
+<span class="pl-s1">stream</span> <span class="pl-c1">=</span> <span class="pl-s1">torch</span>.<span class="pl-c1">cuda</span>.<span class="pl-c1">current_stream</span>()     <span class="pl-c"># CUDA stream object</span>
+<span class="pl-s1">grid</span> <span class="pl-c1">=</span> (<span class="pl-s1">num_blocks_x</span>, <span class="pl-s1">num_blocks_y</span>, <span class="pl-c1">1</span>)   <span class="pl-c"># tile-block grid (x, y, z)</span>
+<span class="pl-s1">ct</span>.<span class="pl-c1">launch</span>(<span class="pl-s1">stream</span>, <span class="pl-s1">grid</span>, <span class="pl-s1">my_kernel</span>, (<span class="pl-s1">a</span>, <span class="pl-s1">b</span>, <span class="pl-s1">c</span>))</pre></div>
+<h2>2.1 Grid-Sizing 模式</h2>
+<p>一种常用范式是启动足够多的块，使其能够覆盖整个数组；其中最后一个块在一个或多个维度上，其覆盖范围可能会超出数组本身的边界。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">int</span> num_blocks = (N + tile_size - <span class="pl-c1">1</span>) / tile_size;   <span class="pl-c"><span class="pl-c">//</span> ceil division -&gt; covers partial tail</span>
+kernel&lt;&lt;&lt;num_blocks, <span class="pl-c1">1</span>&gt;&gt;&gt;(in, out, N);</pre></div>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-k">import</span> <span class="pl-s1">math</span>
+<span class="pl-s1">grid</span> <span class="pl-c1">=</span> (<span class="pl-s1">math</span>.<span class="pl-c1">ceil</span>(<span class="pl-c1">N</span> <span class="pl-c1">/</span> <span class="pl-c1">TILE</span>),)   <span class="pl-c"># ceil division -&gt; covers partial tail</span>
+<span class="pl-s1">ct</span>.<span class="pl-c1">launch</span>(<span class="pl-s1">stream</span>, <span class="pl-s1">grid</span>, <span class="pl-s1">my_kernel</span>, (<span class="pl-s1">arr_in</span>, <span class="pl-s1">arr_out</span>, <span class="pl-c1">TILE</span>))</pre></div>
+<p>后续第六节的子小节会介绍：当数组长度无法被分片大小整除时该如何处理。</p>
+<h1>三、查询块的位置</h1>
+<p>每个块都需要知道自身在网格中的位置，从而确定要处理哪一部分数据。 在 SIMT 编程模型中，程序员需要结合<code class="notranslate">blockIdx</code>与<code class="notranslate">threadIdx</code>来计算全局线程索引。 而在 Tile 代码中，<strong>只需要块索引</strong>；块内部所有线程级索引的计算都由编译器自动处理。</p>
+<p>在 C++ 中： <code class="notranslate">ct::bid()</code> 返回一个<code class="notranslate">uint3</code>类型值，包含三个维度下的块索引。 <code class="notranslate">ct::num_blocks()</code> 返回一个<code class="notranslate">dim3</code>类型值，存放各个维度的总块数（由核函数启动参数决定），可通过<code class="notranslate">.x</code>、<code class="notranslate">.y</code>、<code class="notranslate">.z</code>访问各个维度分量。</p>
+<p>在 Python 中： <code class="notranslate">ct.bid(axis)</code> 返回当前块在指定维度（0、1 或 2）上的索引，类型为 int32 标量。 <code class="notranslate">ct.num_blocks(axis)</code> 返回该维度上的总块数，常用于边界检查与循环计数。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">"</span>cuda_tile.h<span class="pl-pds">"</span></span>
+__tile_global__ <span class="pl-k">void</span> <span class="pl-en">my_kernel</span>(<span class="pl-k">float</span>* a, <span class="pl-k">float</span>* b, <span class="pl-k">float</span>* c) {
+    <span class="pl-k">namespace</span> <span class="pl-en">ct</span> <span class="pl-k">=</span> cuda::tiles;
+    <span class="pl-k">int</span> bid_x = <span class="pl-c1">ct::bid</span>().<span class="pl-smi">x</span>;          <span class="pl-c"><span class="pl-c">//</span> block index along .x</span>
+    <span class="pl-k">int</span> bid_y = <span class="pl-c1">ct::bid</span>().<span class="pl-smi">y</span>;          <span class="pl-c"><span class="pl-c">//</span> block index along .y</span>
+    <span class="pl-k">int</span> num_x = <span class="pl-c1">ct::num_blocks</span>().<span class="pl-smi">x</span>;   <span class="pl-c"><span class="pl-c">//</span> total blocks along .x</span>
+}</pre></div>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-en">@<span class="pl-s1">ct</span>.<span class="pl-c1">kernel</span></span>
+<span class="pl-k">def</span> <span class="pl-en">my_kernel</span>(<span class="pl-s1">a</span>, <span class="pl-s1">b</span>, <span class="pl-s1">c</span>):
+    <span class="pl-s1">bid_x</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">bid</span>(<span class="pl-c1">0</span>)          <span class="pl-c"># block index along axis 0</span>
+    <span class="pl-s1">bid_y</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">bid</span>(<span class="pl-c1">1</span>)          <span class="pl-c"># block index along axis 1</span>
+    <span class="pl-s1">num_x</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">num_blocks</span>(<span class="pl-c1">0</span>)   <span class="pl-c"># total blocks along axis 0</span></pre></div>
+<h1>四、创建Tiles</h1>
+<p>确定了块的标识之后，下一个问题就是 Tile 核实际操作的对象是什么 —— 也就是<strong>Tile</strong>：它是固定大小的多维标量元素数组，其形状与元素类型在编译期就已知。Tile 的每个维度长度必须是 2 的幂。Tile 具备<strong>值语义</strong>，这意味着拷贝 Tile 时会复制它的所有元素，两份拷贝完全独立。尽管如此，Tile 拷贝的开销很低，因为编译器控制 Tile 在硬件内部的表示形式。程序员无需为 Tile 分配或释放内存。</p>
+<p>实际使用中，Tile 的创建方式有两种：从数组加载数据（Tile 空间加载与存储），或是使用工厂函数生成按指定模式填充的 Tile。</p>
+<p>在 C++ 中，Tile 类型是显式声明的：<code class="notranslate">ct::tile&lt;T, ct::shape&lt;dims...&gt;&gt;</code>。其中<code class="notranslate">T</code>是元素类型，<code class="notranslate">ct::shape&lt;dims...&gt;</code>通过模板参数编码各个维度（整数值代表每个轴上编译期确定的尺寸）。例如，<code class="notranslate">ct::tile&lt;float, ct::shape&lt;8&gt;&gt;</code>是包含 8 个 float 的一维 Tile；<code class="notranslate">ct::tile&lt;float, ct::shape&lt;4, 4&gt;&gt;</code>是 4×4 的 float 二维 Tile。由于形状是类型的一部分，它在编译期始终可知。</p>
+<p>工厂函数将完整 Tile 类型（下文记作<code class="notranslate">Tile</code>）作为模板参数：</p>
+<ul>
+<li><code class="notranslate">ct::zeros&lt;Tile&gt;()</code> 与 <code class="notranslate">ct::ones&lt;Tile&gt;()</code>：生成全部元素为 0 或 1 的 Tile</li>
+<li><code class="notranslate">ct::full&lt;Tile&gt;(val)</code>：每个元素都取值为<code class="notranslate">val</code>的 Tile</li>
+<li><code class="notranslate">ct::iota&lt;Tile&gt;()</code>：元素依次为<code class="notranslate">(0, 1, ..., N−1)</code>的 Tile，N 是 Tile 总元素数量</li>
+</ul>
+<p>本章所有 C++ 示例都会使用<code class="notranslate">using</code>类型别名（例如<code class="notranslate">using f32x4x4 = ct::tile&lt;float, ct::shape&lt;4, 4&gt;&gt;</code>），让调用处的 Tile 类型更易阅读。</p>
+<p>在 Python 中，传给 Tile 工厂函数的 shape 元组与 dtype 参数都必须是<strong>编译期常量</strong>。Python 字面量（如<code class="notranslate">(64, 64)</code>）和<code class="notranslate">ct.float32</code>天然满足该要求；也可以使用带<code class="notranslate">Constant</code>注解的核参数来提供，详见后文<code class="notranslate">Python Constant[T]</code>。生成的 Tile 会暴露<code class="notranslate">.shape</code>、<code class="notranslate">.dtype</code>、<code class="notranslate">.ndim</code>属性，反映其编译期属性。</p>
+<p>以下是这些工厂函数：</p>
+<ul>
+<li><code class="notranslate">ct.zeros(shape, dtype)</code> 与 <code class="notranslate">ct.ones(shape, dtype)</code> —— 生成全部元素为 0 或 1 的 Tile。</li>
+<li><code class="notranslate">ct.full(shape, fill_value, dtype)</code> —— 所有元素填充为任意指定常量值的 Tile。</li>
+<li><code class="notranslate">ct.arange(size, dtype=...)</code> —— 一维 Tile，元素内容为 <code class="notranslate">[0, 1, …, size−1]</code>。</li>
+</ul>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">"</span>cuda_tile.h<span class="pl-pds">"</span></span>
+__tile__ <span class="pl-k">void</span> <span class="pl-en">factories</span>() {
+    <span class="pl-k">namespace</span> <span class="pl-en">ct</span> <span class="pl-k">=</span> cuda::tiles;
+    <span class="pl-k">using</span> i32x8   = ct::tile&lt;<span class="pl-k">int</span>,   ct::shape&lt;<span class="pl-c1">8</span>&gt;&gt;;      <span class="pl-c"><span class="pl-c">//</span> 1-D: 8 ints</span>
+    <span class="pl-k">using</span> f32x4x4 = ct::tile&lt;<span class="pl-k">float</span>, ct::shape&lt;<span class="pl-c1">4</span>, <span class="pl-c1">4</span>&gt;&gt;;   <span class="pl-c"><span class="pl-c">//</span> 2-D: 4x4 floats</span>
+    <span class="pl-k">auto</span> z      = ct::zeros&lt;f32x4x4&gt;();       <span class="pl-c"><span class="pl-c">//</span> all zeros</span>
+    <span class="pl-k">auto</span> o      = ct::ones&lt;f32x4x4&gt;();        <span class="pl-c"><span class="pl-c">//</span> all ones</span>
+    <span class="pl-k">auto</span> filled = ct::full&lt;f32x4x4&gt;(<span class="pl-c1">3</span>.<span class="pl-c1">14f</span>);   <span class="pl-c"><span class="pl-c">//</span> all 3.14</span>
+    <span class="pl-k">auto</span> seq    = ct::iota&lt;i32x8&gt;();          <span class="pl-c"><span class="pl-c">//</span> {0, 1, 2, 3, 4, 5, 6, 7}</span>
+}</pre></div>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-k">import</span> <span class="pl-s1">cuda</span>.<span class="pl-s1">tile</span> <span class="pl-k">as</span> <span class="pl-s1">ct</span>
+<span class="pl-en">@<span class="pl-s1">ct</span>.<span class="pl-c1">function</span></span>
+<span class="pl-k">def</span> <span class="pl-en">factories</span>():
+    <span class="pl-s1">zeros</span>  <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">zeros</span>((<span class="pl-c1">64</span>, <span class="pl-c1">64</span>), <span class="pl-s1">dtype</span><span class="pl-c1">=</span><span class="pl-s1">ct</span>.<span class="pl-c1">float32</span>)            <span class="pl-c"># 64x64 tile of 0.0</span>
+    <span class="pl-s1">ones</span>   <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">ones</span>((<span class="pl-c1">128</span>,), <span class="pl-s1">dtype</span><span class="pl-c1">=</span><span class="pl-s1">ct</span>.<span class="pl-c1">float16</span>)               <span class="pl-c"># 128-element tile of 1.0</span>
+    <span class="pl-s1">filled</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">full</span>((<span class="pl-c1">32</span>, <span class="pl-c1">32</span>), <span class="pl-c1">3.14</span>, <span class="pl-s1">dtype</span><span class="pl-c1">=</span><span class="pl-s1">ct</span>.<span class="pl-c1">float32</span>)       <span class="pl-c"># 32x32 tile of 3.14</span>
+    <span class="pl-s1">seq</span>    <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">arange</span>(<span class="pl-c1">8</span>, <span class="pl-s1">dtype</span><span class="pl-c1">=</span><span class="pl-s1">ct</span>.<span class="pl-c1">int32</span>)                    <span class="pl-c"># [0, 1, 2, 3, 4, 5, 6, 7]</span></pre></div>
+<h1>五、编译期常量</h1>
+<p>Tile 编译器会为每一组 Tile 形状、数据类型以及其他结构参数的组合，生成专用机器码。 因此，所有会影响生成代码的参数值，都必须在<strong>编译期就确定</strong>。也就是说：Tile 的形状和数据类型必须编译期已知。<br>
+在【创建 Tiles】章节，使用字面量来指定 Tile 的形状与数据类型，例如： <code class="notranslate">ct.zeros((64, 64), dtype=ct.float32)</code> 以及 <code class="notranslate">ct::tile&lt;int, ct::shape&lt;8&gt;&gt;</code>。<br>
+形状也可以作为编译期已知值，通过核函数接口传入，后续章节会展示相关用法。</p>
+<h2>5.1 Python Constant[T]</h2>
+<p>在核函数参数上添加 <code class="notranslate">ct.Constant[T]</code> 类型注解，会将该参数标记为<strong>常量嵌入</strong>。 这意味着，在内核中每次使用该参数时，效果等价于直接在对应位置写入字面量。<br>
+类型参数是可选的；不带类型参数的 <code class="notranslate">ct.Constant</code> 可以嵌入任意类型的常量。<br>
+<code class="notranslate">ct.Constant</code> 最常用于整型（<code class="notranslate">ct.Constant[int]</code>），一般用来作为控制 Tile 形状与循环边界的参数。</p>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-k">import</span> <span class="pl-s1">cuda</span>.<span class="pl-s1">tile</span> <span class="pl-k">as</span> <span class="pl-s1">ct</span>
+<span class="pl-en">@<span class="pl-s1">ct</span>.<span class="pl-c1">kernel</span></span>
+<span class="pl-k">def</span> <span class="pl-en">my_kernel</span>(<span class="pl-c1">TILE</span>: <span class="pl-s1">ct</span>.<span class="pl-c1">Constant</span>[<span class="pl-s1">int</span>]):
+    <span class="pl-c"># TILE is constant-embedded: wherever TILE appears, the compiler sees its</span>
+    <span class="pl-c"># literal value (e.g., 128) and generates specialized code. Here TILE drives</span>
+    <span class="pl-c"># the shape of a factory-built tile.</span>
+    <span class="pl-s1">zeros</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">zeros</span>((<span class="pl-c1">TILE</span>,), <span class="pl-s1">dtype</span><span class="pl-c1">=</span><span class="pl-s1">ct</span>.<span class="pl-c1">float32</span>)</pre></div>
+<h2>5.2 C++ integral constant 与 ic 字面量</h2>
+<p>在 CUDA Tile C++ 中，编译期数值通过 <code class="notranslate">ct::integral_constant</code> 表达，这是一种<strong>数值编码在类型本身之中</strong>的类型。 <code class="notranslate">ct::literals</code> 命名空间下的 <code class="notranslate">_ic</code> 字面量提供了简洁简写形式：<code class="notranslate">0_ic</code> 会生成 <code class="notranslate">ct::integral_constant&lt;0&gt;</code>。</p>
+<p>接收编译期数值的 API，既支持非类型模板参数（NTTP）形式，也支持 <code class="notranslate">_ic</code> 字面量形式。 例如：<code class="notranslate">ct::cat</code> 用于沿着指定维度拼接两个 Tile，该维度必须在编译期确定。下面两行代码调用 <code class="notranslate">ct::cat</code> 时使用同一个编译期轴，二者的区别仅在于编译期数值的书写位置。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">"</span>cuda_tile.h<span class="pl-pds">"</span></span>
+__tile__ <span class="pl-k">void</span> <span class="pl-en">concat_demo</span>() {
+    <span class="pl-k">namespace</span> <span class="pl-en">ct</span> <span class="pl-k">=</span> cuda::tiles;
+    <span class="pl-k">using</span> <span class="pl-k">namespace</span> <span class="pl-en">ct</span>::literals<span class="pl-k">;</span>
+    <span class="pl-k">using</span> T = ct::tile&lt;<span class="pl-k">int</span>, ct::shape&lt;<span class="pl-c1">4</span>, <span class="pl-c1">8</span>&gt;&gt;;
+    T lhs = ct::full&lt;T&gt;(<span class="pl-c1">0</span>);
+    T rhs = ct::full&lt;T&gt;(<span class="pl-c1">1</span>);
+    <span class="pl-k">auto</span> a = ct::cat&lt;<span class="pl-c1">0</span>&gt;(lhs, rhs);     <span class="pl-c"><span class="pl-c">//</span> NTTP form</span>
+    <span class="pl-k">auto</span> b = <span class="pl-c1">ct::cat</span>(lhs, rhs, 0_ic);  <span class="pl-c"><span class="pl-c">//</span> _ic form</span>
+}</pre></div>
+<p><code class="notranslate">_ic</code>字面量还有另一个常用场景。<code class="notranslate">ct::extents</code> 和 <code class="notranslate">ct::shape</code> 都支持两种形式：非类型模板参数（NTTP）形式（例如 <code class="notranslate">ct::extents&lt;std::uint32_t, 4, 8&gt;</code>）与大括号初始化形式。</p>
+<p>和 NTTP 形式不同，大括号形式<strong>支持运行时值</strong>。当存在一个或多个维度要到核启动阶段才能确定时，就使用这种写法：编译期维度用<code class="notranslate">_ic</code>字面量，运行时维度使用普通变量。 像<code class="notranslate">ct::tensor_span</code>、<code class="notranslate">ct::partition_view</code>这类 Tile 空间 API，就用该形式封装这类数组。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">auto</span> shape2d = ct::extents{8_ic, length};  <span class="pl-c"><span class="pl-c">//</span> 8 is compile-time; length is runtime</span></pre></div>
+<p>在任何需要传入编译期值的 API 参数位置，<code class="notranslate">_ic</code>字面量都是统一简写方式，例如<code class="notranslate">ct::cat</code>的拼接维度、extents 或 shape 的分量。</p>
+<h1>六、加载与存储Tiles</h1>
+<p>CUDA Tile 编程模型中有两类核心内存对象：<strong>tile（片）</strong> 与<strong>array（数组）</strong>。<br>
+array 是位于全局显存中的多维元素容器，tile 核的所有线程块都可以访问它。<br>
+tile 同样是多维元素容器，但它仅属于单个 CUDA Tile 代码线程块。tile 通常是 array 中元素的一个子集。本节介绍如何将 array 的数据加载到 tile 中以供 tile 核使用，以及将 tile 的数据写回 array。</p>
+<p>后续小节会介绍两种 tile 加载与存储方式：</p>
+<ul>
+<li><strong>Tile-Space Loads and Stores（Tile 空间加载与存储）</strong>：使用 tile 空间索引，借助视图对象规定 array 元素映射到 tile 的规整可预测访问模式。</li>
+<li><strong>Gather and Scatter（聚集与分散）</strong>：加载 / 存储时，依靠存放索引或指针的 tile，分别指定 tile 元素读写对应的 array 源元素或目标元素。</li>
+</ul>
+<p><strong>性能提示</strong>：在支持的硬件上，编译器可将 Tile 空间加载指令下沉到<strong>张量内存加速器（TMA）</strong> 执行，性能远高于逐元素 gather 操作。（C++ 相关内容可参见后续小节《C++ 性能优化建议》）</p>
+<p>程序员需要自行决定加载时越界元素取何值。 Python 版本默认会静默丢弃越界写操作；C++ 中使用带掩码版本 API 时，越界写同样会被静默丢弃。</p>
+<h2>6.1 Tile-Space Loads and Stores</h2>
+<p>使用 Tile 空间加载时，会创建一个<strong>视图对象</strong>，用来规定如何将数组切分为由多个 Tile 大小区域构成的网格。这种映射关系就称为<strong>Tile 空间</strong>；Tile 核可以借助 Tile 空间索引，每次加载或存储其中一块区域。</p>
+<p>Tile 空间加载的核心概念是数组的<strong>分块视图（tiled view）</strong>，它定义数组元素如何映射到指定尺寸的各个 Tile。图 19 展示的分块视图是一种<strong>partition view（分区视图）</strong>，它属于 Tile 空间，其中所有 Tile 大小固定、互不重叠，且 Tile 之间没有空隙。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260917114225.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260917114225.png" alt="image.png" style="max-width: 100%;"></a><br>
+当数组各维度无法被 Tile 尺寸整除时，在一个或多个维度上跨越数组边界的 Tile 只会被部分填充。程序员可以指定加载这类 Tile 时的处理逻辑，相关内容将在后面的小节介绍。</p>
+<p>分区视图（partition view）是可在数组上定义的多种 Tile 空间之一。两种编程语言中还支持另外两类 Tile 空间：</p>
+<ul>
+<li>固定形状的数据块，块之间由步长隔开；块与块之间可以存在空隙，也可以相互重叠。 C++ 中对应的是<code class="notranslate">ct::strided_view</code>；Python 则向<code class="notranslate">Array.tiled_view</code>传入<code class="notranslate">traversal_steps</code>参数。</li>
+<li>通过一个存放元素索引的 Tile，在单个维度上选取数据块，用于聚集与分散小节介绍的不规则访存模式。 C++ 中为<code class="notranslate">ct::gather_scatter_view</code>；Python 使用<code class="notranslate">ct.load_advanced_indexing</code>与<code class="notranslate">ct.store_advanced_indexing</code>。<br>
+本章仅演示分区视图，它也是<code class="notranslate">Array.tiled_view</code>默认生成的 Tile 空间。其余视图类型请查阅对应语言的 API 参考文档（CUDA Tile C++ API 参考、cuTile Python 分块视图与高级索引）。</li>
+</ul>
+<h3>6.1.1 分区视图的加载与存储</h3>
+<p>结构化 Tile 空间加载是全局显存与 Tile 之间迁移数据的首选方式。核函数必须先构建一个视图对象用于定义 Tile 空间，之后再凭借 Tile 空间索引，逐块加载或存储 Tile。</p>
+<p>在 C++ 中，分区视图分为两步构建：</p>
+<ul>
+<li><code class="notranslate">ct::tensor_span</code>：将原生指针与<code class="notranslate">ct::extents</code>绑定，为指针赋予多维结构。</li>
+<li><code class="notranslate">ct::partition_view</code>：将这个 span 切分为固定大小 Tile 组成的网格，并提供基于 Tile 空间坐标操作的<code class="notranslate">.load(idx...)</code>与<code class="notranslate">.store(tile, idx...)</code>接口。</li>
+</ul>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__tile_global__ <span class="pl-k">void</span> <span class="pl-en">vec_add</span>(<span class="pl-k">float</span>* __restrict__ a, <span class="pl-k">float</span>* __restrict__ b, <span class="pl-k">float</span>* __restrict__ out) {
+    <span class="pl-k">namespace</span> <span class="pl-en">ct</span> <span class="pl-k">=</span> cuda::tiles;
+    <span class="pl-k">using</span> <span class="pl-k">namespace</span> <span class="pl-en">ct</span>::literals<span class="pl-k">;</span>
+	<span class="pl-c"><span class="pl-c">//</span> 向cuTile承诺：指针地址是16字节对齐，因为TMA硬件对内存对齐有要求</span>
+    a   = <span class="pl-c1">ct::assume_aligned</span>(a,   16_ic);
+    b   = <span class="pl-c1">ct::assume_aligned</span>(b,   16_ic);
+    out = <span class="pl-c1">ct::assume_aligned</span>(out, 16_ic);
+
+    <span class="pl-c"><span class="pl-c">//</span> Step 1: attach a shape to each raw pointer. 128_ic marks 128 as a compile-time constant.</span>
+    <span class="pl-k">auto</span> aSpan = ct::tensor_span{a,   ct::extents{128_ic}};
+    <span class="pl-k">auto</span> bSpan = ct::tensor_span{b,   ct::extents{128_ic}};
+    <span class="pl-k">auto</span> oSpan = ct::tensor_span{out, ct::extents{128_ic}};
+
+    <span class="pl-c"><span class="pl-c">//</span> Step 2: partition each span into a tile space of fixed 8-element tiles.</span>
+    <span class="pl-k">auto</span> aView = ct::partition_view{aSpan, ct::shape{8_ic}};
+    <span class="pl-k">auto</span> bView = ct::partition_view{bSpan, ct::shape{8_ic}};
+    <span class="pl-k">auto</span> oView = ct::partition_view{oSpan, ct::shape{8_ic}};
+
+    <span class="pl-k">int</span>  bx    = <span class="pl-c1">ct::bid</span>().<span class="pl-smi">x</span>;             <span class="pl-c"><span class="pl-c">//</span> this block's tile-space index along .x</span>
+    <span class="pl-k">auto</span> aTile = aView.<span class="pl-c1">load</span>(bx);          <span class="pl-c"><span class="pl-c">//</span> pick the bx-th tile of a</span>
+    <span class="pl-k">auto</span> bTile = bView.<span class="pl-c1">load</span>(bx);
+    oView.<span class="pl-c1">store</span>(aTile + bTile, bx);       <span class="pl-c"><span class="pl-c">//</span> write the tile back at the bx-th position of out</span>
+}</pre></div>
+<p>在 Python 中，<code class="notranslate">Array.tiled_view(tile_shape)</code>会返回一个<code class="notranslate">TiledView</code>，把数组划分成指定形状的 Tile。该视图提供接收 Tile 空间索引的<code class="notranslate">.load(index)</code> / <code class="notranslate">.store(index, tile)</code>方法，与 C++ 的<code class="notranslate">partition_view</code>一一对应。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">@ct.kernel
+def <span class="pl-en">vec_add</span>(a, b, c, <span class="pl-c1">TILE</span>: ct.Constant[<span class="pl-k">int</span>]):
+    a_view = a.tiled_view((<span class="pl-c1">TILE</span>,))
+    b_view = b.tiled_view((<span class="pl-c1">TILE</span>,))
+    c_view = c.tiled_view((<span class="pl-c1">TILE</span>,))
+
+    bid = ct.bid(<span class="pl-c1">0</span>)
+    a_tile = a_view.load((bid,))
+    b_tile = b_view.load((bid,))
+    c_view.store((bid,), a_tile + b_tile)
+</pre></div>
+<blockquote>
+<p><strong>注</strong> 本章 C++ 示例代码会给指针参数加上<code class="notranslate">__restrict__</code>注解，并在核函数体开头调用<code class="notranslate">ct::assume_aligned(ptr, 16_ic)</code>。这些是重要的性能注解，将在后续小节《C++ 性能优化建议》详述。数值字面量后的<code class="notranslate">_ic</code>后缀（例如<code class="notranslate">128_ic</code>、<code class="notranslate">8_ic</code>）用于标记其为编译期常量，相关内容在《编译期常量》小节已介绍。</p>
+</blockquote>
+<h3>6.1.2 Python 一次性加载与存储接口</h3>
+<p>Python 额外提供了<strong>单调用形式</strong>：可以在每次 load /store 调用时直接内联指定 Tile 形状，无需显式创建 view 视图对象。<br>
+<code class="notranslate">ct.load(array, index, shape)</code>：在给定的 Tile 空间索引位置，读取一块指定形状的 Tile。<br>
+<code class="notranslate">ct.store(array, index, tile)</code>：对应的写回操作。<br>
+<code class="notranslate">ct.load</code> / <code class="notranslate">ct.store</code> 与 <code class="notranslate">Array.tiled_view</code> 表达<strong>完全相同的 Tile 空间访问模式</strong>，二者的区别仅在于 Tile 形状定义的位置：</p>
+<ul>
+<li>使用<code class="notranslate">Array.tiled_view</code>：Tile 形状一次性绑定到 view 视图对象上。</li>
+<li>使用<code class="notranslate">ct.load</code> / <code class="notranslate">ct.store</code>：每次调用都要内联传入 Tile 形状。<br>
+当多次加载、存储复用同一种分块规则时，推荐使用<code class="notranslate">tiled_view</code>；<br>
+如果只是一次性单次加载，追求代码简洁，则可以使用<code class="notranslate">ct.load</code> / <code class="notranslate">ct.store</code>。</li>
+</ul>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-en">@<span class="pl-s1">ct</span>.<span class="pl-c1">kernel</span></span>
+<span class="pl-k">def</span> <span class="pl-en">vec_add</span>(<span class="pl-s1">a</span>, <span class="pl-s1">b</span>, <span class="pl-s1">c</span>, <span class="pl-c1">TILE</span>: <span class="pl-s1">ct</span>.<span class="pl-c1">Constant</span>[<span class="pl-s1">int</span>]):
+    <span class="pl-s1">bid</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">bid</span>(<span class="pl-c1">0</span>)                                    <span class="pl-c"># this block's tile-space index along axis 0</span>
+    <span class="pl-s1">a_tile</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">load</span>(<span class="pl-s1">a</span>, <span class="pl-s1">index</span><span class="pl-c1">=</span>(<span class="pl-s1">bid</span>,), <span class="pl-s1">shape</span><span class="pl-c1">=</span>(<span class="pl-c1">TILE</span>,))   <span class="pl-c"># (index, shape) = pick the bid-th TILE-sized region of a</span>
+    <span class="pl-s1">b_tile</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">load</span>(<span class="pl-s1">b</span>, <span class="pl-s1">index</span><span class="pl-c1">=</span>(<span class="pl-s1">bid</span>,), <span class="pl-s1">shape</span><span class="pl-c1">=</span>(<span class="pl-c1">TILE</span>,))
+    <span class="pl-s1">ct</span>.<span class="pl-c1">store</span>(<span class="pl-s1">c</span>, <span class="pl-s1">index</span><span class="pl-c1">=</span>(<span class="pl-s1">bid</span>,), <span class="pl-s1">tile</span><span class="pl-c1">=</span><span class="pl-s1">a_tile</span> <span class="pl-c1">+</span> <span class="pl-s1">b_tile</span>)    <span class="pl-c"># write the tile back to the bid-th region of c</span></pre></div>
+<h3>6.1.3 Tile空间边界处理</h3>
+<p>在 C++ 中，<code class="notranslate">partition_view</code> 提供<strong>无掩码</strong>与<strong>带掩码</strong>两套接口：</p>
+<ul>
+<li><code class="notranslate">.load(idx...)</code> / <code class="notranslate">.store(tile, idx...)</code>：假定整个 Tile 完全落在数组合法范围内。访问部分越界的 Tile 属于<strong>未定义行为</strong>。</li>
+<li><code class="notranslate">.load_masked(idx...)</code> / <code class="notranslate">.store_masked(tile, idx...)</code>：安全处理边缘的部分填充 Tile。
+<ul>
+<li><code class="notranslate">.load_masked()</code>：默认将越界位置填充 0；也可选择其他填充模式（例如浮点 Tile 填充 NaN）。</li>
+<li><code class="notranslate">.store_masked()</code>：静默丢弃越界位置的写操作，不会写入越界内存。</li>
+</ul>
+</li>
+</ul>
+<p>当数组长度可以被 Tile 尺寸整除时，推荐使用无掩码版本的加载 / 存储。当必须处理边界情况时，即便 Tile 是完全填充的完整 Tile，也可以使用带掩码版本。</p>
+<p>本节也是本指南中<strong>第一个数组维度为运行时值</strong>的 C++ 示例。 <code class="notranslate">ct::extents{N}</code> 支持运行时维度；<code class="notranslate">ct::extents</code> 可以混合编译期常量（<code class="notranslate">_ic</code>）与运行时值。因此<code class="notranslate">span</code>和<code class="notranslate">partition_view</code>可以封装那些<strong>仅在内核启动时才确定大小</strong>的数组。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__tile_global__ <span class="pl-k">void</span> <span class="pl-en">edge_safe</span>(<span class="pl-k">float</span>* __restrict__ in, <span class="pl-k">float</span>* __restrict__ out, <span class="pl-k">int</span> N) {
+    <span class="pl-k">namespace</span> <span class="pl-en">ct</span> <span class="pl-k">=</span> cuda::tiles;
+    <span class="pl-k">using</span> <span class="pl-k">namespace</span> <span class="pl-en">ct</span>::literals<span class="pl-k">;</span>
+
+    in  = <span class="pl-c1">ct::assume_aligned</span>(in,  16_ic);
+    out = <span class="pl-c1">ct::assume_aligned</span>(out, 16_ic);
+
+    <span class="pl-c"><span class="pl-c">//</span> ct::extents{N} uses a runtime dimension; 128_ic stays compile-time.</span>
+    <span class="pl-k">auto</span> inView  = ct::partition_view{ct::tensor_span{in,  ct::extents{N}}, ct::shape{128_ic}};
+    <span class="pl-k">auto</span> outView = ct::partition_view{ct::tensor_span{out, ct::extents{N}}, ct::shape{128_ic}};
+
+    <span class="pl-k">int</span>  bx   = <span class="pl-c1">ct::bid</span>().<span class="pl-smi">x</span>;
+    <span class="pl-k">auto</span> tile = inView.<span class="pl-c1">load_masked</span>(bx);    <span class="pl-c"><span class="pl-c">//</span> masked load: OOB lanes default to 0</span>
+    outView.<span class="pl-c1">store_masked</span>(tile, bx);        <span class="pl-c"><span class="pl-c">//</span> masked store: OOB writes silently discarded</span>
+}</pre></div>
+<p>在 Python 中，<code class="notranslate">ct.load</code>支持<code class="notranslate">padding_mode</code>参数，用于指定越界元素填充的值。两种常用模式：</p>
+<ul>
+<li><code class="notranslate">PaddingMode.UNDETERMINED</code>（默认值）：越界元素的值由底层实现决定。加载操作仍然会做边界检查，<strong>不会读取数组以外的内存</strong>，只是越界通道的值是未指定的。适合永远不会读取这些越界通道的场景。</li>
+<li><code class="notranslate">PaddingMode.ZERO</code>：越界元素填充 0。</li>
+</ul>
+<p>对于写操作<code class="notranslate">ct.store</code>，不需要<code class="notranslate">padding_mode</code>参数：默认会对照数组做边界检查，<strong>静默丢弃对越界位置的写入</strong>。<code class="notranslate">tiled_view</code>遵循相同规则，它会在创建视图时就固定<code class="notranslate">padding_mode</code>。</p>
+<p><code class="notranslate">ct.load</code>和<code class="notranslate">ct.store</code>还支持<code class="notranslate">check_bounds</code>参数，默认值为<code class="notranslate">True</code>。 <code class="notranslate">padding_mode</code>决定越界通道里填什么值；而<code class="notranslate">check_bounds</code>决定<strong>是否开启边界检测</strong>： 若设置<code class="notranslate">check_bounds=False</code>，访问超出数组范围属于未定义行为，可能读取或覆盖相邻内存。 这就等价上面 C++ 无掩码版本的<code class="notranslate">.load()</code> / <code class="notranslate">.store()</code>，适用原则也完全一致。 <code class="notranslate">TiledView.load</code>与<code class="notranslate">TiledView.store</code>也支持该关键字参数。</p>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-en">@<span class="pl-s1">ct</span>.<span class="pl-c1">kernel</span></span>
+<span class="pl-k">def</span> <span class="pl-en">edge_safe</span>(<span class="pl-s1">arr_in</span>, <span class="pl-s1">arr_out</span>, <span class="pl-c1">TILE</span>: <span class="pl-s1">ct</span>.<span class="pl-c1">Constant</span>[<span class="pl-s1">int</span>]):
+    <span class="pl-s1">bid</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">bid</span>(<span class="pl-c1">0</span>)
+    <span class="pl-s1">tile</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">load</span>(<span class="pl-s1">arr_in</span>, <span class="pl-s1">index</span><span class="pl-c1">=</span>(<span class="pl-s1">bid</span>,), <span class="pl-s1">shape</span><span class="pl-c1">=</span>(<span class="pl-c1">TILE</span>,),
+                   <span class="pl-s1">padding_mode</span><span class="pl-c1">=</span><span class="pl-s1">ct</span>.<span class="pl-c1">PaddingMode</span>.<span class="pl-c1">ZERO</span>)   <span class="pl-c"># OOB lanes of a partial edge tile become 0</span>
+    <span class="pl-s1">ct</span>.<span class="pl-c1">store</span>(<span class="pl-s1">arr_out</span>, <span class="pl-s1">index</span><span class="pl-c1">=</span>(<span class="pl-s1">bid</span>,), <span class="pl-s1">tile</span><span class="pl-c1">=</span><span class="pl-s1">tile</span>)         <span class="pl-c"># OOB writes are silently discarded</span></pre></div>
+<p>在 C++ 核函数中，<code class="notranslate">.load_masked()</code> 和 <code class="notranslate">.store_masked()</code> 用于处理边缘的<strong>部分 Tile</strong>。 在 Python 核函数中，加载时指定<code class="notranslate">PaddingMode.ZERO</code>可以保证边缘部分 Tile 用 0 填充；而<code class="notranslate">ct.store</code>在默认开启边界检查的情况下，会静默丢弃超出数组边界的写入操作。</p>
+<p>完整的填充模式、掩码选项与填充值说明，请查阅对应语言的 API 参考文档（CUDA Tile C++ 视图填充、cuTile Python 填充模式）。</p>
+<h2>6.2 Gather和Scatter</h2>
+<p>在上一小节里的 Tile 空间加载操作使用了分区视图，它对数组做<strong>规则、块对齐</strong>的划分。 当访问模式是<strong>不规则、数据依赖型</strong>时（例如查找表、置换重排场景），<strong>聚集（gather）与分散（scatter）操作</strong>支持通过任意索引或地址，从数组里非均匀、非连续的位置读取 Tile，或将 Tile 写入这类位置。</p>
+<p>Gather 与 scatter 操作在 C++ 和 Python 中的写法略有差异：</p>
+<ul>
+<li>Python：向<code class="notranslate">ct.gather()</code> / <code class="notranslate">ct.scatter()</code>传入<strong>整型索引 Tile</strong>，内置边界检查。</li>
+<li>C++：传入<strong>指针 Tile</strong>给<code class="notranslate">ct::load()</code> / <code class="notranslate">ct::store()</code>；配套掩码版本<code class="notranslate">ct::load_masked()</code>、<code class="notranslate">ct::store_masked()</code>，可接收布尔掩码 Tile 来处理数组边界处的 Tile。</li>
+</ul>
+<p>在 C++ 中，gather/scatter 的实现方式是构造一个指针 Tile：每个元素对应一个指针，再将该指针 Tile 传给<code class="notranslate">ct::load()</code>或<code class="notranslate">ct::store()</code>。标量指针与整型 Tile 之间按元素做算术运算，生成指针 Tile。这是 C++ 里构造 gather/scatter 索引 Tile 的标准写法。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__tile_global__ <span class="pl-k">void</span> <span class="pl-en">vec_add_gather</span>(<span class="pl-k">int</span>* __restrict__ a, <span class="pl-k">int</span>* __restrict__ b, <span class="pl-k">int</span>* __restrict__ out) {
+    <span class="pl-k">namespace</span> <span class="pl-en">ct</span> <span class="pl-k">=</span> cuda::tiles;
+    <span class="pl-k">using</span> <span class="pl-k">namespace</span> <span class="pl-en">ct</span>::literals<span class="pl-k">;</span>
+    <span class="pl-k">using</span> i32x8 = ct::tile&lt;<span class="pl-k">int</span>, ct::shape&lt;<span class="pl-c1">8</span>&gt;&gt;;
+    a   = <span class="pl-c1">ct::assume_aligned</span>(a,   16_ic);
+    b   = <span class="pl-c1">ct::assume_aligned</span>(b,   16_ic);
+    out = <span class="pl-c1">ct::assume_aligned</span>(out, 16_ic);
+    <span class="pl-k">int</span> bx       = <span class="pl-c1">ct::bid</span>().<span class="pl-smi">x</span>;
+    <span class="pl-k">auto</span> offsets = <span class="pl-c1">8</span> * bx + ct::iota&lt;i32x8&gt;();   <span class="pl-c"><span class="pl-c">//</span> element-level offsets, one per lane</span>
+    <span class="pl-c"><span class="pl-c">//</span> scalar pointer + int tile = tile of pointers (one pointer per offset).</span>
+    <span class="pl-k">auto</span> aPtrs = a + offsets;
+    <span class="pl-k">auto</span> bPtrs = b + offsets;
+    <span class="pl-k">auto</span> aTile = <span class="pl-c1">ct::load</span>(aPtrs);                <span class="pl-c"><span class="pl-c">//</span> gather: one load per pointer</span>
+    <span class="pl-k">auto</span> bTile = <span class="pl-c1">ct::load</span>(bPtrs);
+    <span class="pl-c1">ct::store</span>(out + offsets, aTile + bTile);     <span class="pl-c"><span class="pl-c">//</span> scatter: one store per pointer</span>
+}</pre></div>
+<p>在 Python 中，<code class="notranslate">ct.gather</code>读取索引 Tile 中每个下标对应的元素。默认开启边界检查：越界索引会返回填充值（默认为 0，可通过<code class="notranslate">padding_value=</code>配置）；也可以设置<code class="notranslate">check_bounds=False</code>关闭边界检查。 <code class="notranslate">ct.scatter</code>按每个索引写入一个值；越界写操作会被静默丢弃，同样支持<code class="notranslate">check_bounds=False</code>。</p>
+<h3>6.2.1 Gather与Scatter的边界处理</h3>
+<p>上一节介绍的 gather/scatter 操作，其边界处理遵循一套独立的规则。</p>
+<p>在 Python 中，<code class="notranslate">ct.gather</code> 和 <code class="notranslate">ct.scatter</code> <strong>默认自带边界安全保护</strong>：越界读会返回填充值（默认是 0）；越界写会被静默丢弃。 如果能保证所有索引都在合法范围内，可以关闭边界检查；一旦关闭，发生越界访问就属于未定义行为。 可选的掩码、填充值参数，请查阅 API 参考文档（CUDA Tile C++ 加载操作、cuTile Python 加载 / 存储操作）。</p>
+<p>在 C++ 中，<strong>不会自动做边界检查</strong>。需要程序员自己构造布尔掩码（例如：把偏移量和数组长度做比较），再将掩码传入 <code class="notranslate">ct::load_masked</code> 或者 <code class="notranslate">ct::store_masked</code>。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__tile_global__ <span class="pl-k">void</span> <span class="pl-en">gather_safe</span>(<span class="pl-k">int</span>* __restrict__ arr, <span class="pl-k">int</span>* __restrict__ out, <span class="pl-k">int</span> N) {
+    <span class="pl-k">namespace</span> <span class="pl-en">ct</span> <span class="pl-k">=</span> cuda::tiles;
+    <span class="pl-k">using</span> <span class="pl-k">namespace</span> <span class="pl-en">ct</span>::literals<span class="pl-k">;</span>
+    <span class="pl-k">using</span> i32x8 = ct::tile&lt;<span class="pl-k">int</span>, ct::shape&lt;<span class="pl-c1">8</span>&gt;&gt;;
+
+    arr = <span class="pl-c1">ct::assume_aligned</span>(arr, 16_ic);
+    out = <span class="pl-c1">ct::assume_aligned</span>(out, 16_ic);
+
+    <span class="pl-k">int</span> bx       = <span class="pl-c1">ct::bid</span>().<span class="pl-smi">x</span>;
+    <span class="pl-k">auto</span> offsets = <span class="pl-c1">8</span> * bx + ct::iota&lt;i32x8&gt;();   <span class="pl-c"><span class="pl-c">//</span> element-level offsets, one per lane</span>
+    <span class="pl-k">auto</span> mask    = offsets &lt; N;                  <span class="pl-c"><span class="pl-c">//</span> boolean tile: true where the offset is in-bounds</span>
+
+    <span class="pl-k">auto</span> ptrs = arr + offsets;                   <span class="pl-c"><span class="pl-c">//</span> tile of pointers, one per offset</span>
+    <span class="pl-k">auto</span> tile = <span class="pl-c1">ct::load_masked</span>(ptrs, mask, <span class="pl-c1">0</span>);  <span class="pl-c"><span class="pl-c">//</span> masked lanes get the pad value 0</span>
+    <span class="pl-c1">ct::store_masked</span>(out + offsets, tile, mask); <span class="pl-c"><span class="pl-c">//</span> masked lanes are skipped on the store</span>
+}</pre></div>
+<h1>七、控制流</h1>
+<p>从程序员视角来看，一个 Tile 核函数<strong>每个 block 只走一条控制流路径</strong>。条件判断、循环边界中的标量值负责驱动控制流；而函数体内的 Tile 运算，则由编译器分发到硬件线程上执行。<br>
+并非所有控制流语法都支持。例如，Tile 代码<strong>不允许在循环内部 return 返回</strong>。完整限制列表请查阅各语言的 API 参考文档。</p>
+<h2>7.1 循环</h2>
+<p>一种常见写法：遍历数组里的多个 Tile，依次处理每一块。<br>
+C++ 中，<code class="notranslate">ct::irange</code> 是一个正向区间，表示从下界开始、<strong>递增到上界（不含上界）</strong> 的整数序列，可指定可选步长。 使用<code class="notranslate">ct::irange</code>能够向编译器提供迭代边界的结构化信息，便于编译器更好地优化生成代码。想要启用该优化，循环变量必须通过基于<code class="notranslate">ct::irange</code>的范围 for 语法绑定。<br>
+Python 中，Tile 代码支持内置<code class="notranslate">range()</code>、<code class="notranslate">for</code>、<code class="notranslate">while</code>以及嵌套循环。<br>
+步长参数<strong>必须严格为正数</strong>，不支持负步长区间。<br>
+下面的单 Block 核函数示例，用于对一维数组的全部 Tile 求和：</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__tile_global__ <span class="pl-k">void</span> <span class="pl-en">tile_sum</span>(<span class="pl-k">float</span>* __restrict__ arr, <span class="pl-k">float</span>* __restrict__ out, <span class="pl-k">int</span> num_tiles) {
+    <span class="pl-k">namespace</span> <span class="pl-en">ct</span> <span class="pl-k">=</span> cuda::tiles;
+    <span class="pl-k">using</span> <span class="pl-k">namespace</span> <span class="pl-en">ct</span>::literals<span class="pl-k">;</span>
+    <span class="pl-k">using</span> f32x8 = ct::tile&lt;<span class="pl-k">float</span>, ct::shape&lt;<span class="pl-c1">8</span>&gt;&gt;;
+
+    arr = <span class="pl-c1">ct::assume_aligned</span>(arr, 16_ic);
+    out = <span class="pl-c1">ct::assume_aligned</span>(out, 16_ic);
+
+    <span class="pl-k">auto</span> inView  = ct::partition_view{ct::tensor_span{arr, ct::extents{<span class="pl-c1">8</span> * num_tiles}},ct::shape{8_ic}};
+    <span class="pl-k">auto</span> outView = ct::partition_view{ct::tensor_span{out, ct::extents{8_ic}},ct::shape{8_ic}};
+
+    <span class="pl-k">auto</span> acc = ct::full&lt;f32x8&gt;(<span class="pl-c1">0</span>.<span class="pl-c1">0f</span>);
+    <span class="pl-c"><span class="pl-c">//</span> range-for over ct::irange gives the compiler structured iteration bounds.</span>
+    <span class="pl-k">for</span> (<span class="pl-k">auto</span> k : <span class="pl-c1">ct::irange</span>(<span class="pl-c1">0</span>, num_tiles)) {
+        <span class="pl-k">auto</span> tile = inView.<span class="pl-c1">load</span>(k);
+        acc = acc + tile;                               <span class="pl-c"><span class="pl-c">//</span> accumulate the k-th tile into acc</span>
+    }
+    outView.<span class="pl-c1">store</span>(acc, <span class="pl-c1">0</span>);                              <span class="pl-c"><span class="pl-c">//</span> write the final result as the 0-th tile of out</span>
+}</pre></div>
+<h2>7.2 条件</h2>
+<p>标准的<code class="notranslate">if/else</code>条件分支可以正常使用。由于每个 block 只会走<strong>单条控制流路径</strong>，因此传统 CUDA 中需要考虑的 warp 内分支发散问题，<strong>不适用于 Tile 核函数</strong>。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__tile_global__ <span class="pl-k">void</span> <span class="pl-en">conditional_load</span>(<span class="pl-k">float</span>* __restrict__ arr, <span class="pl-k">float</span>* __restrict__ out, <span class="pl-k">int</span> N) {
+    <span class="pl-k">namespace</span> <span class="pl-en">ct</span> <span class="pl-k">=</span> cuda::tiles;
+    <span class="pl-k">using</span> <span class="pl-k">namespace</span> <span class="pl-en">ct</span>::literals<span class="pl-k">;</span>
+    <span class="pl-k">using</span> f32x8 = ct::tile&lt;<span class="pl-k">float</span>, ct::shape&lt;<span class="pl-c1">8</span>&gt;&gt;;
+    arr = <span class="pl-c1">ct::assume_aligned</span>(arr, 16_ic);
+    out = <span class="pl-c1">ct::assume_aligned</span>(out, 16_ic);
+    <span class="pl-k">auto</span> inView  = ct::partition_view{ct::tensor_span{arr, ct::extents{N}}, ct::shape{8_ic}};
+    <span class="pl-k">auto</span> outView = ct::partition_view{ct::tensor_span{out, ct::extents{N}}, ct::shape{8_ic}};
+    <span class="pl-k">int</span> bx   = <span class="pl-c1">ct::bid</span>().<span class="pl-smi">x</span>;
+    <span class="pl-k">int</span> nb_x = <span class="pl-c1">ct::num_blocks</span>().<span class="pl-smi">x</span>;
+    <span class="pl-k">auto</span> tile = ct::full&lt;f32x8&gt;(<span class="pl-c1">0</span>.<span class="pl-c1">0f</span>);    <span class="pl-c"><span class="pl-c">//</span> default for the last-block branch</span>
+    <span class="pl-c"><span class="pl-c">//</span> Scalar condition -&gt; one control-flow path per block; no divergence to reason about.</span>
+    <span class="pl-k">if</span> (bx &lt; nb_x - <span class="pl-c1">1</span>) {
+        tile = inView.<span class="pl-c1">load</span>(bx);           <span class="pl-c"><span class="pl-c">//</span> all blocks except the last</span>
+    }
+    outView.<span class="pl-c1">store_masked</span>(tile, bx);       <span class="pl-c"><span class="pl-c">//</span> masked to handle a potentially partial final tile</span>
+}</pre></div>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-en">@<span class="pl-s1">ct</span>.<span class="pl-c1">kernel</span></span>
+<span class="pl-k">def</span> <span class="pl-en">conditional_load</span>(<span class="pl-s1">arr</span>, <span class="pl-s1">out</span>, <span class="pl-c1">TILE</span>: <span class="pl-s1">ct</span>.<span class="pl-c1">Constant</span>[<span class="pl-s1">int</span>]):
+    <span class="pl-s1">bid</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">bid</span>(<span class="pl-c1">0</span>)
+    <span class="pl-c"># Scalar condition -&gt; one control-flow path per block; no divergence to reason about.</span>
+    <span class="pl-k">if</span> <span class="pl-s1">bid</span> <span class="pl-c1">&lt;</span> <span class="pl-s1">ct</span>.<span class="pl-c1">num_blocks</span>(<span class="pl-c1">0</span>) <span class="pl-c1">-</span> <span class="pl-c1">1</span>:
+        <span class="pl-s1">tile</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">load</span>(<span class="pl-s1">arr</span>, <span class="pl-s1">index</span><span class="pl-c1">=</span>(<span class="pl-s1">bid</span>,), <span class="pl-s1">shape</span><span class="pl-c1">=</span>(<span class="pl-c1">TILE</span>,))    <span class="pl-c"># all blocks except the last</span>
+    <span class="pl-k">else</span>:
+        <span class="pl-s1">tile</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">zeros</span>((<span class="pl-c1">TILE</span>,), <span class="pl-s1">dtype</span><span class="pl-c1">=</span><span class="pl-s1">ct</span>.<span class="pl-c1">float32</span>)          <span class="pl-c"># last block: emit zeros</span>
+    <span class="pl-s1">ct</span>.<span class="pl-c1">store</span>(<span class="pl-s1">out</span>, <span class="pl-s1">index</span><span class="pl-c1">=</span>(<span class="pl-s1">bid</span>,), <span class="pl-s1">tile</span><span class="pl-c1">=</span><span class="pl-s1">tile</span>)</pre></div>
+<h1>八、元素级算术与广播</h1>
+<h2>8.1 broadcasting</h2>
+<p>广播机制遵循 NumPy 语义：标量会在整个 Tile 上复制；<strong>单例维度（长度为 1）</strong> 会被扩展，去匹配另一个操作数对应的维度；低秩操作数会把缺失的前置维度视作单例维度，对齐到高秩操作数的尾部维度。如果两个对应的维度都不是单例且大小不相等，那么该操作属于非法构造。</p>
+<p>下面示例在一次加法运算中，同时演示单例维度扩展与秩提升： 一个形状为<code class="notranslate">8×2</code>的 2 阶 Tile，先做秩提升变为<code class="notranslate">1×8×2</code>，再和形状为<code class="notranslate">4×1×2</code>的 3 阶 Tile 广播，最终得到公共形状<code class="notranslate">4×8×2</code>。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">auto</span> x = ct::iota&lt;ct::tile&lt;<span class="pl-k">int</span>, ct::shape&lt;<span class="pl-c1">8</span>, <span class="pl-c1">2</span>&gt;&gt;&gt;();      <span class="pl-c"><span class="pl-c">//</span> 8x2   (rank 2)</span>
+<span class="pl-k">auto</span> y = ct::iota&lt;ct::tile&lt;<span class="pl-k">int</span>, ct::shape&lt;<span class="pl-c1">4</span>, <span class="pl-c1">1</span>, <span class="pl-c1">2</span>&gt;&gt;&gt;();   <span class="pl-c"><span class="pl-c">//</span> 4x1x2 (rank 3)</span>
+<span class="pl-k">auto</span> z = x + y;    </pre></div>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">x</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">full</span>((<span class="pl-c1">8</span>, <span class="pl-c1">2</span>),    <span class="pl-c1">3</span>, <span class="pl-s1">dtype</span><span class="pl-c1">=</span><span class="pl-s1">ct</span>.<span class="pl-c1">int32</span>)   <span class="pl-c"># 8x2   (rank 2)</span>
+<span class="pl-s1">y</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">full</span>((<span class="pl-c1">4</span>, <span class="pl-c1">1</span>, <span class="pl-c1">2</span>), <span class="pl-c1">5</span>, <span class="pl-s1">dtype</span><span class="pl-c1">=</span><span class="pl-s1">ct</span>.<span class="pl-c1">int32</span>)   <span class="pl-c"># 4x1x2 (rank 3)</span>
+<span class="pl-s1">z</span> <span class="pl-c1">=</span> <span class="pl-s1">x</span> <span class="pl-c1">+</span> <span class="pl-s1">y</span>                                    <span class="pl-c"># x promoted to 1x8x2, then broadcasts to 4x8x2</span></pre></div>
+<h2>8.2 Arithmetic Operators</h2>
+<p>所有受支持的算术运算符都会对 Tile 按元素执行运算，并生成具有广播后形状的新 Tile。标量与 Tile 运算时，该标量会广播至 Tile 的每一个元素。当操作数类型不同时，会优先选用信息保留能力更强的类型：</p>
+<ul>
+<li><strong>Tile 与 Tile 运算</strong>：结果 Tile 的类型为精度或表示范围更大的类型。例如：
+<ul>
+<li><code class="notranslate">int + float</code> 结果为 <code class="notranslate">float</code></li>
+<li><code class="notranslate">int16 + int32</code> 结果为 <code class="notranslate">int32</code></li>
+</ul>
+</li>
+<li><strong>标量与 Tile 运算</strong>：若该标量的类型可以在 Tile 的元素类型中被精确表示（比如整型字面量<code class="notranslate">2</code>与<code class="notranslate">int</code>类型 Tile 运算，或是<code class="notranslate">2.0f</code>与<code class="notranslate">float</code>类型 Tile 运算），运算将直接以 Tile 的元素类型执行。 如果标量需要截断缩小才能适配 Tile 的元素类型（例如字面量<code class="notranslate">2.5</code>与<code class="notranslate">int</code>类型 Tile 运算），Python 与 C++ 两种语言的处理逻辑存在差异：
+<ul>
+<li>Python：将结果提升为可容纳两者取值的类型</li>
+<li>C++：判定该表达式格式非法，直接拒绝编译<br>
+下文代码片段展示了这种标量 - Tile 运算的差异化行为。</li>
+</ul>
+</li>
+</ul>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">using</span> i32x8 = ct::tile&lt;<span class="pl-k">int</span>, ct::shape&lt;<span class="pl-c1">8</span>&gt;&gt;;
+i32x8 x = ct::full&lt;i32x8&gt;(<span class="pl-c1">3</span>);
+x + <span class="pl-c1">2</span>;       <span class="pl-c"><span class="pl-c">//</span> OK - int literal matches int tile element type</span>
+x + <span class="pl-c1">2.5</span>;     <span class="pl-c"><span class="pl-c">//</span> ill-formed - 2.5 would narrow to int</span></pre></div>
+<div class="highlight highlight-source-c++"><pre class="notranslate">x = ct.full((<span class="pl-c1">8</span>,), <span class="pl-c1">3</span>, dtype=ct.int32)
+x + <span class="pl-c1">2</span>          # int32 - <span class="pl-k">int</span> literal matches int32 tile dtype
+x + <span class="pl-c1">2.5</span>        # float32 - result promoted to hold both</pre></div>
+<p>在实际开发中，只要条件允许，应当使用 Tile 元素对应的类型来书写标量字面量，并进行显式类型转换。当操作数精度不同时，上述规则在内核函数内同样生效。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__tile_global__ <span class="pl-k">void</span> <span class="pl-en">elementwise</span>(<span class="pl-k">float</span>* __restrict__ a, <span class="pl-k">float</span>* __restrict__ b, <span class="pl-k">float</span>* __restrict__ out, <span class="pl-k">int</span> N) {
+    <span class="pl-k">namespace</span> <span class="pl-en">ct</span> <span class="pl-k">=</span> cuda::tiles;
+    <span class="pl-k">using</span> <span class="pl-k">namespace</span> <span class="pl-en">ct</span>::literals<span class="pl-k">;</span>
+
+    a   = <span class="pl-c1">ct::assume_aligned</span>(a,   16_ic);
+    b   = <span class="pl-c1">ct::assume_aligned</span>(b,   16_ic);
+    out = <span class="pl-c1">ct::assume_aligned</span>(out, 16_ic);
+
+    <span class="pl-k">auto</span> aView = ct::partition_view{ct::tensor_span{a,   ct::extents{N}}, ct::shape{8_ic}};
+    <span class="pl-k">auto</span> bView = ct::partition_view{ct::tensor_span{b,   ct::extents{N}}, ct::shape{8_ic}};
+    <span class="pl-k">auto</span> cView = ct::partition_view{ct::tensor_span{out, ct::extents{N}}, ct::shape{8_ic}};
+
+    <span class="pl-k">int</span>  bx = <span class="pl-c1">ct::bid</span>().<span class="pl-smi">x</span>;
+    <span class="pl-k">auto</span> x  = aView.<span class="pl-c1">load</span>(bx);
+    <span class="pl-k">auto</span> y  = bView.<span class="pl-c1">load</span>(bx);
+    <span class="pl-c"><span class="pl-c">//</span> 2.0f matches the float tiles' element type, so no narrowing conversion is required.</span>
+    <span class="pl-c"><span class="pl-c">//</span> The scalar is broadcast across every element; + then runs elementwise.</span>
+    <span class="pl-k">auto</span> z  = <span class="pl-c1">2</span>.<span class="pl-c1">0f</span> * x + y;
+    cView.<span class="pl-c1">store</span>(z, bx);
+}</pre></div>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-en">@<span class="pl-s1">ct</span>.<span class="pl-c1">kernel</span></span>
+<span class="pl-k">def</span> <span class="pl-en">elementwise</span>(<span class="pl-s1">a</span>, <span class="pl-s1">b</span>, <span class="pl-s1">c</span>, <span class="pl-c1">TILE</span>: <span class="pl-s1">ct</span>.<span class="pl-c1">Constant</span>[<span class="pl-s1">int</span>]):
+    <span class="pl-s1">bid</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">bid</span>(<span class="pl-c1">0</span>)
+    <span class="pl-s1">x</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">load</span>(<span class="pl-s1">a</span>, <span class="pl-s1">index</span><span class="pl-c1">=</span>(<span class="pl-s1">bid</span>,), <span class="pl-s1">shape</span><span class="pl-c1">=</span>(<span class="pl-c1">TILE</span>,))
+    <span class="pl-s1">y</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">load</span>(<span class="pl-s1">b</span>, <span class="pl-s1">index</span><span class="pl-c1">=</span>(<span class="pl-s1">bid</span>,), <span class="pl-s1">shape</span><span class="pl-c1">=</span>(<span class="pl-c1">TILE</span>,))
+    <span class="pl-c"># 2.0 is a loosely typed float constant; with float tiles, the result stays float.</span>
+    <span class="pl-c"># Scalars are broadcast across every element of the tile, then + runs elementwise.</span>
+    <span class="pl-s1">z</span> <span class="pl-c1">=</span> <span class="pl-c1">2.0</span> <span class="pl-c1">*</span> <span class="pl-s1">x</span> <span class="pl-c1">+</span> <span class="pl-s1">y</span>
+    <span class="pl-s1">ct</span>.<span class="pl-c1">store</span>(<span class="pl-s1">c</span>, <span class="pl-s1">index</span><span class="pl-c1">=</span>(<span class="pl-s1">bid</span>,), <span class="pl-s1">tile</span><span class="pl-c1">=</span><span class="pl-s1">z</span>)</pre></div>
+<p>当你需要<strong>显式控制舍入模式</strong>或<strong>次正规数处理逻辑</strong>时，CUDA Tile API 提供了可暴露这些选项的数学函数，既支持逐元素算术运算（例如 <code class="notranslate">ct.add</code>、<code class="notranslate">ct::add</code>），也支持超越函数（例如 <code class="notranslate">exp</code> 和 <code class="notranslate">tanh</code>）。</p>
+<h1>九、Tile原语</h1>
+<p>工厂函数（用于创建 Tile）、加载与存储（Tile 空间读写）以及逐元素算术运算（逐元素运算与广播机制）都属于<strong>Tile 原语</strong>，即该编程语言内置的基础操作。开发者以 Tile 粒度编写这些操作，编译器会将其映射到硬件执行，支持时会调用张量核心。本节介绍 CUDA Tile 中其他可用的原语。</p>
+<h2>9.1 矩阵乘法</h2>
+<p>两个 Tile 之间的矩阵乘法，是实现两个数组矩阵乘的基础操作。CUDA Tile 提供两种 Tile 矩阵乘形式：纯矩阵乘法（<code class="notranslate">matmul</code>，写法 <code class="notranslate">a @ b</code>），以及<strong>乘累加运算（mma）</strong>，写法 <code class="notranslate">a @ b + acc</code>。 在 MMA 运算中，累加器会将部分乘积从一个 K 维度 Tile 传递到下一个 K 维度 Tile，这对分块矩阵乘法的内层循环十分有用。<code class="notranslate">matmul</code>与<code class="notranslate">mma</code>均支持二维矩阵乘法、三维批量矩阵乘，同时支持操作数与累加器使用不同数据类型（精度）。</p>
+<p>下面内核示例采用一种常见范式：<strong>无论输入精度如何，都使用 FP32 做累加，在存储阶段再转换为输出元素类型</strong>。 Python 中写法：<code class="notranslate">ct.mma(a, b, acc)</code>，其中<code class="notranslate">acc</code>为 FP32 类型； C++ 中写法：<code class="notranslate">ct::mma(a, b, acc)</code>，需要显式指定 FP32 累加器类型。</p>
+<p>K 循环迭代次数为<code class="notranslate">ceil(K/tk)</code>，以此覆盖矩阵 A 的右边界与矩阵 B 的下边界；加载时对不完整的 K 维度 Tile 做零填充（Python 使用<code class="notranslate">PaddingMode.ZERO</code>，C++ 使用<code class="notranslate">.load_masked()</code>）；C 矩阵侧不完整的 M/N 边界 Tile，通过存储侧的越界丢弃机制处理（Python 使用<code class="notranslate">ct.store</code>，C++ 使用<code class="notranslate">.store_masked()</code>）。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__tile_global__ <span class="pl-k">void</span> <span class="pl-en">gemm</span>(<span class="pl-k">const</span> __half* __restrict__ A, <span class="pl-k">const</span> __half* __restrict__ B, <span class="pl-k">float</span>* __restrict__ C,std::<span class="pl-c1">size_t</span> M, std::<span class="pl-c1">size_t</span> K, std::<span class="pl-c1">size_t</span> N) {
+    <span class="pl-k">namespace</span> <span class="pl-en">ct</span> <span class="pl-k">=</span> cuda::tiles;
+    <span class="pl-k">using</span> <span class="pl-k">namespace</span> <span class="pl-en">ct</span>::literals<span class="pl-k">;</span>
+    <span class="pl-k">using</span> f32_acc = ct::tile&lt;<span class="pl-k">float</span>, ct::shape&lt;<span class="pl-c1">32</span>, <span class="pl-c1">32</span>&gt;&gt;;
+    A = <span class="pl-c1">ct::assume_aligned</span>(A, 16_ic);
+    B = <span class="pl-c1">ct::assume_aligned</span>(B, 16_ic);
+    C = <span class="pl-c1">ct::assume_aligned</span>(C, 16_ic);
+    <span class="pl-k">constexpr</span> <span class="pl-k">auto</span> tm = 32_ic;
+    <span class="pl-k">constexpr</span> <span class="pl-k">auto</span> tn = 32_ic;
+    <span class="pl-k">constexpr</span> <span class="pl-k">auto</span> tk = 16_ic;
+    <span class="pl-k">auto</span> aView = ct::partition_view{ct::tensor_span{A, ct::extents{M, K}}, ct::shape{tm, tk}};
+    <span class="pl-k">auto</span> bView = ct::partition_view{ct::tensor_span{B, ct::extents{K, N}}, ct::shape{tk, tn}};
+    <span class="pl-k">auto</span> cView = ct::partition_view{ct::tensor_span{C, ct::extents{M, N}}, ct::shape{tm, tn}};
+    <span class="pl-k">auto</span> [bx, by, bz] = <span class="pl-c1">ct::bid</span>();
+    <span class="pl-k">auto</span> acc = ct::full&lt;f32_acc&gt;(<span class="pl-c1">0</span>.<span class="pl-c1">0f</span>);                 <span class="pl-c"><span class="pl-c">//</span> FP32 accumulator</span>
+    std::<span class="pl-c1">size_t</span> num_k = (K + tk - <span class="pl-c1">1</span>) / tk;
+    <span class="pl-k">for</span> (<span class="pl-k">auto</span> k : <span class="pl-c1">ct::irange</span>(std::<span class="pl-c1">size_t</span>{<span class="pl-c1">0</span>}, num_k)) {
+        acc = <span class="pl-c1">ct::mma</span>(aView.<span class="pl-c1">load_masked</span>(bx, k),  <span class="pl-c"><span class="pl-c">//</span> zero-pad partial K-tile</span>
+                      bView.<span class="pl-c1">load_masked</span>(k, by),
+                      acc);                             <span class="pl-c"><span class="pl-c">//</span> acc += a @ b</span>
+    }
+    cView.<span class="pl-c1">store_masked</span>(acc, bx, by);              <span class="pl-c"><span class="pl-c">//</span> drop OOB edge lanes</span>
+}</pre></div>
+<p>图解：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260918111426.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260918111426.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h2>9.2 规约与扫描</h2>
+<p>归约（Reduction）用于将一个 Tile 压缩为标量，或是一行标量。计算 Softmax 的分母、层归一化的均值与方差、注意力打分中的最大值，这些场景都会用到归约操作。</p>
+<p>有一点需要提前理解：<strong>归约结果的形状</strong>。Python 版本默认会删掉被归约的维度（传入<code class="notranslate">keepdims=True</code>可以保留长度为 1 的维度）；C++ 版本则始终保留该维度，维持 Tile 的维度数不变。下面两段代码都是沿着第 1 轴对 2×4 的 Tile 做归约，二者最直观的差异就体现在输出形状上。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">using</span> <span class="pl-k">namespace</span> <span class="pl-en">ct</span>::literals<span class="pl-k">;</span>
+<span class="pl-k">using</span> i32x2x4 = ct::tile&lt;<span class="pl-k">int</span>, ct::shape&lt;<span class="pl-c1">2</span>, <span class="pl-c1">4</span>&gt;&gt;;
+<span class="pl-c"><span class="pl-c">//</span> [[0,1,2,3],[4,5,6,7]]</span>
+<span class="pl-k">auto</span> x = ct::iota&lt;i32x2x4&gt;();                         
+<span class="pl-k">auto</span> row_sums = ct::sum(x, 1_ic);                     <span class="pl-c"><span class="pl-c">//</span> shape (2, 1) - axis kept</span>
+<span class="pl-c"><span class="pl-c">//</span> row_sums == [[6], [22]]</span></pre></div>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">x</span>   <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">arange</span>(<span class="pl-c1">8</span>, <span class="pl-s1">dtype</span><span class="pl-c1">=</span><span class="pl-s1">ct</span>.<span class="pl-c1">int32</span>).<span class="pl-c1">reshape</span>((<span class="pl-c1">2</span>, <span class="pl-c1">4</span>))    <span class="pl-c"># [[0,1,2,3],[4,5,6,7]]</span>
+<span class="pl-s1">s</span>   <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">sum</span>(<span class="pl-s1">x</span>, <span class="pl-s1">axis</span><span class="pl-c1">=</span><span class="pl-c1">1</span>)                               <span class="pl-c"># shape (2,)    - axis dropped</span>
+<span class="pl-s1">s_k</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">sum</span>(<span class="pl-s1">x</span>, <span class="pl-s1">axis</span><span class="pl-c1">=</span><span class="pl-c1">1</span>, <span class="pl-s1">keepdims</span><span class="pl-c1">=</span><span class="pl-c1">True</span>)                <span class="pl-c"># shape (2, 1)  - axis kept</span>
+<span class="pl-c"># s == [6, 22];  s_k == [[6], [22]]</span></pre></div>
+<p>扫描（Scan）是归约的 “累积版本”，沿着某条轴生成累积结果。例如前缀和（<code class="notranslate">cumsum</code>）输出张量与输入维度完全相同，指定轴上每个位置的值，等于该位置之前（含自身）所有元素的累加和。完整 API 列表请查阅各语言的参考文档.</p>
+<h2>9.3 转置与全排序</h2>
+<p>有两个相关的原语可以<strong>重排 Tile 的维度顺序，而不改动其内部数据</strong>： <code class="notranslate">transpose</code>用于交换前两个维度；<code class="notranslate">permute</code>支持任意维度重排。 当需要在运算之间修改 Tile 的逻辑布局时就会用到它们，例如：生成矩阵乘法操作数的转置、注意力块内行列互换，或是在广播运算前对齐各维度。</p>
+<p>在 Python 中： 对 2 维 Tile 调用<code class="notranslate">ct.transpose(x)</code>会直接交换它的两个维度；更高维的 Tile 需要显式指定<code class="notranslate">axis0</code>/<code class="notranslate">axis1</code>参数。 <code class="notranslate">ct.permute(x, axes)</code>接收一组维度下标构成的元组。</p>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">tx</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">arange</span>(<span class="pl-c1">8</span>, <span class="pl-s1">dtype</span><span class="pl-c1">=</span><span class="pl-s1">ct</span>.<span class="pl-c1">int32</span>).<span class="pl-c1">reshape</span>((<span class="pl-c1">2</span>, <span class="pl-c1">4</span>))
+<span class="pl-s1">ty</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">transpose</span>(<span class="pl-s1">tx</span>)                                            <span class="pl-c"># shape (4, 2)</span>
+
+<span class="pl-s1">tz</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">arange</span>(<span class="pl-c1">8</span>, <span class="pl-s1">dtype</span><span class="pl-c1">=</span><span class="pl-s1">ct</span>.<span class="pl-c1">int32</span>).<span class="pl-c1">reshape</span>((<span class="pl-c1">2</span>, <span class="pl-c1">2</span>, <span class="pl-c1">2</span>))
+<span class="pl-s1">tw</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">permute</span>(<span class="pl-s1">tz</span>, (<span class="pl-c1">2</span>, <span class="pl-c1">0</span>, <span class="pl-c1">1</span>))                                   <span class="pl-c"># axes (0,1,2) -&gt; (2,0,1)</span></pre></div>
+<p>在 C++ 中： <code class="notranslate">ct::transpose(x)</code>交换前两个维度，其余靠后的维度保持不变； <code class="notranslate">ct::permute(x, map)</code>接收一个<code class="notranslate">ct::dimension_map</code>类型对象，用来描述新的维度顺序。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">using</span> <span class="pl-k">namespace</span> <span class="pl-en">ct</span>::literals<span class="pl-k">;</span>
+<span class="pl-k">using</span> t2d = ct::tile&lt;<span class="pl-k">int</span>, ct::shape&lt;<span class="pl-c1">2</span>, <span class="pl-c1">4</span>&gt;&gt;;
+<span class="pl-k">using</span> t3d = ct::tile&lt;<span class="pl-k">int</span>, ct::shape&lt;<span class="pl-c1">2</span>, <span class="pl-c1">2</span>, <span class="pl-c1">2</span>&gt;&gt;;
+
+<span class="pl-k">auto</span> tx = ct::iota&lt;t2d&gt;();
+<span class="pl-k">auto</span> ty = ct::transpose(tx);                             <span class="pl-c"><span class="pl-c">//</span> shape (4, 2)</span>
+
+<span class="pl-k">auto</span> tz = ct::iota&lt;t3d&gt;();
+<span class="pl-c"><span class="pl-c">//</span> axes (0,1,2) -&gt; (2,0,1)</span>
+<span class="pl-k">auto</span> tw = ct::permute(tz, ct::dimension_map{2_ic, 0_ic, 1_ic});  </pre></div>
+<h2>9.4 元素级选择</h2>
+<p>按元素选择是 Tile 形式的条件分支操作：给定一个布尔类型 Tile 与两个操作数 Tile，输出的每个元素会根据对应位置的布尔值，从两个操作数之一选取。条件张量会广播至操作数的形状；两个操作数的类型必须兼容 Python 中该操作为 <code class="notranslate">ct.where(cond, x, y)</code>；C++ 中为 <code class="notranslate">ct::select(cond, lhs, rhs)</code>。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">auto</span> cond = ct::iota&lt;ct::tile&lt;<span class="pl-k">int</span>, ct::shape&lt;<span class="pl-c1">4</span>&gt;&gt;&gt;() &lt; <span class="pl-c1">2</span>;   <span class="pl-c"><span class="pl-c">//</span> {T, T, F, F}</span>
+<span class="pl-k">auto</span> t    = ct::full&lt;ct::tile&lt;<span class="pl-k">float</span>, ct::shape&lt;<span class="pl-c1">4</span>&gt;&gt;&gt;( <span class="pl-c1">1</span>.<span class="pl-c1">0f</span>);
+<span class="pl-k">auto</span> f    = ct::full&lt;ct::tile&lt;<span class="pl-k">float</span>, ct::shape&lt;<span class="pl-c1">4</span>&gt;&gt;&gt;(-<span class="pl-c1">1</span>.<span class="pl-c1">0f</span>);
+<span class="pl-k">auto</span> r    = ct::select(cond, t, f);                        <span class="pl-c"><span class="pl-c">//</span> {1, 1, -1, -1}</span></pre></div>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">cond</span>    <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">arange</span>(<span class="pl-c1">4</span>, <span class="pl-s1">dtype</span><span class="pl-c1">=</span><span class="pl-s1">ct</span>.<span class="pl-c1">int32</span>) <span class="pl-c1">&lt;</span> <span class="pl-c1">2</span>                 <span class="pl-c"># [T, T, F, F]</span>
+<span class="pl-s1">x_true</span>  <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">full</span>((<span class="pl-c1">4</span>,),  <span class="pl-c1">1.0</span>, <span class="pl-s1">dtype</span><span class="pl-c1">=</span><span class="pl-s1">ct</span>.<span class="pl-c1">float32</span>)
+<span class="pl-s1">x_false</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">full</span>((<span class="pl-c1">4</span>,), <span class="pl-c1">-</span><span class="pl-c1">1.0</span>, <span class="pl-s1">dtype</span><span class="pl-c1">=</span><span class="pl-s1">ct</span>.<span class="pl-c1">float32</span>)
+<span class="pl-s1">result</span>  <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">where</span>(<span class="pl-s1">cond</span>, <span class="pl-s1">x_true</span>, <span class="pl-s1">x_false</span>)                  <span class="pl-c"># [1, 1, -1, -1]</span></pre></div>
+<h2>9.5 算术函数</h2>
+<p>Tile 代码中可在<code class="notranslate">ct</code>命名空间下调用常用按元素数学运算函数：</p>
+<ul>
+<li>add（加法）、sub（减法）、mul（乘法）</li>
+<li>truediv（真除法）、floordiv（向下取整除法）、cdiv（复数除法）</li>
+<li>mod（取模）</li>
+<li>pow（幂运算）</li>
+<li>exp（自然指数）、exp2（以 2 为底指数）、log（自然对数）、log2（以 2 为底对数）</li>
+<li>sqrt（平方根）、rsqrt（平方根倒数）</li>
+<li>sin、cos、tan（正弦、余弦、正切）</li>
+<li>sinh、cosh、tanh（双曲正弦、双曲余弦、双曲正切）</li>
+<li>minimum（取较小值）、maximum（取较大值）</li>
+<li>negative（取负数）</li>
+<li>floor（向下取整）、ceil（向上取整）</li>
+</ul>
+<p>每个函数对输入 Tile 执行按元素运算，并返回<strong>相同形状</strong>的 Tile。 这些运算也可以在 Tile 代码中作用于标量。<br>
+如需详细说明以及完整的支持按元素运算列表，请查阅 API 参考文档：</p>
+<ul>
+<li><a href="https://docs.nvidia.com/cuda/cutile-python/operations.html#math" rel="nofollow">cuTile Python 数学运算</a></li>
+<li><a href="https://docs.nvidia.com/cuda/cuda-tile-cpp-api-reference/math_operations.html" rel="nofollow">CUDA Tile C++ 数学运算</a></li>
+</ul>
+<h1>十、原子级内存操作</h1>
+<p>Tile 代码中有两种场景需要使用内存原子操作：</p>
+<ul>
+<li><strong>块间竞争</strong>：每个线程块计算出部分结果，使用原子操作将该部分结果与其他线程块的部分结果合并，写入全局内存的同一位置。</li>
+<li><strong>块内竞争</strong>：同一个 Tile 内的多个元素写入内存的同一个地址。<br>
+对 Tile 执行原子操作时，会为 Tile 中的<strong>每一个元素各执行一次原子更新</strong>。单个元素上的操作具备原子性，但<strong>整个原子调用整体不具备原子性</strong>；各个逐元素原子操作的执行顺序无明确规定。</li>
+</ul>
+<p>在 Python 中，原子操作通过数组下标寻址目标，寻址规则与<code class="notranslate">ct.gather</code>、<code class="notranslate">ct.scatter</code>保持一致。可选参数用于控制边界检查、内存序与线程作用域。默认配置（开启边界检查、ACQ_REL、设备作用域）下，普通调用仅需传入数组、索引、待更新值。 <code class="notranslate">TiledView</code>还提供归约风格的原子成员方法，方法名以<code class="notranslate">atomic_store_</code>作为前缀（例如 <code class="notranslate">TiledView.atomic_store_add(index, update)</code>）；这类接口基于 Tile 空间索引寻址目标，<strong>无返回值</strong>，底层会编译为 PTX 中的原子归约。如果不需要读取内存旧值，推荐使用<code class="notranslate">TiledView</code>版本，性能更优。</p>
+<p>在 C++ 中，原子操作接收指针与对应数值：单个内存地址使用原生指针 + 标量；也支持指针 Tile + 数值 Tile。内存序在调用处以编译期类型标签指定，例如<code class="notranslate">ct::memory_order_relaxed_t{}</code>。线程作用域同样使用同形式类型标签；若省略，则默认为系统全局可见。</p>
+<p><code class="notranslate">ct::partition_view</code>与<code class="notranslate">ct::strided_view</code>额外提供归约原子操作（<code class="notranslate">atomic_add</code>、<code class="notranslate">atomic_sub</code>、<code class="notranslate">atomic_and</code>、<code class="notranslate">atomic_or</code>、<code class="notranslate">atomic_xor</code>、<code class="notranslate">atomic_max</code>、<code class="notranslate">atomic_min</code>）作为成员函数。 这类接口基于 Tile 空间索引寻址，而非裸指针；参数顺序和<code class="notranslate">.store()</code>一致：<strong>先传数值 Tile，最后传索引</strong>。 独立全局函数会返回内存中修改前的旧值，而成员函数<strong>无返回值</strong>。和 Python 一样：不需要旧值时优先选用成员接口。成员接口底层会映射为硬件归约；而指针 Tile 形式会对每个元素单独发起一次原子操作。<code class="notranslate">ct::gather_scatter_view</code>不提供该类原子成员方法。</p>
+<h2>10.1 块间冲突</h2>
+<p>下方代码示例中会出现块间竞争：多个不同线程块向同一个内存位置<code class="notranslate">out</code>写入数据。如果不使用原子操作，并行执行的各个线程块会导致计算结果错误。 本例使用<strong>设备线程作用域</strong>（C++ 为<code class="notranslate">ct::thread_scope_device_t{}</code>；Python 默认就是设备全局作用域），因为该内存操作的结果必须对 GPU 上所有正在运行的线程块可见。 Python 核函数选用<code class="notranslate">TiledView.atomic_store_add</code>，原因是每个块的部分和只需要累加进<code class="notranslate">out[0]</code>，不需要保留旧值。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__tile_global__ <span class="pl-k">void</span> <span class="pl-en">block_sum</span>(<span class="pl-k">int</span>* __restrict__ arr, <span class="pl-k">int</span>* __restrict__ out, std::<span class="pl-c1">size_t</span> N) {
+    <span class="pl-k">namespace</span> <span class="pl-en">ct</span> <span class="pl-k">=</span> cuda::tiles;
+    <span class="pl-k">using</span> <span class="pl-k">namespace</span> <span class="pl-en">ct</span>::literals<span class="pl-k">;</span>
+    <span class="pl-k">constexpr</span> <span class="pl-k">auto</span> <span class="pl-c1">TILE</span> = 16_ic;
+    arr = <span class="pl-c1">ct::assume_aligned</span>(arr, 16_ic);
+    out = <span class="pl-c1">ct::assume_aligned</span>(out, 16_ic);
+    <span class="pl-k">auto</span> aView = ct::partition_view{ct::tensor_span{arr, ct::extents{N}},
+                                    ct::shape{<span class="pl-c1">TILE</span>}};
+    <span class="pl-k">int</span> bid = <span class="pl-c1">ct::bid</span>().<span class="pl-smi">x</span>;
+    <span class="pl-c"><span class="pl-c">//</span> partial final tile -&gt; OOB lanes default to 0</span>
+    <span class="pl-k">auto</span> tile    = aView.<span class="pl-c1">load_masked</span>(bid);      
+    <span class="pl-c"><span class="pl-c">//</span> reduce to a 1-element tile  </span>
+    <span class="pl-k">auto</span> partial = <span class="pl-c1">ct::sum</span>(tile, 0_ic);           
+	<span class="pl-c"><span class="pl-c">//</span> accumulate the scalar into out[0]</span>
+    <span class="pl-c1">ct::atomic_add</span>(out, (<span class="pl-k">int</span>)partial,             
+                   ct::<span class="pl-c1">memory_order_relaxed_t</span>{},  <span class="pl-c"><span class="pl-c">//</span> single-location accumulator -&gt; relaxed suffices</span>
+                   ct::<span class="pl-c1">thread_scope_device_t</span>{});  <span class="pl-c"><span class="pl-c">//</span> visible across the device</span>
+}</pre></div>
+<h2>10.2 块内冲突</h2>
+<p>下面代码片段出现<strong>块内竞争</strong>：一个 Tile 内的所有数值，以原子方式累加至内存的同一个位置。</p>
+<p>本例中，<code class="notranslate">ptrs</code>这个 Tile 里的每一个元素都指向同一个内存地址<code class="notranslate">slot</code>。<code class="notranslate">ct::iota&lt;i32x16&gt;()</code>生成的 Tile 中的每个元素，都会原子地加到该内存地址保存的值上。 同一个 Tile 针对单一内存地址发起的多次原子操作，<strong>执行顺序未做规定</strong>。 这里使用块级线程作用域<code class="notranslate">ct::thread_scope_block_t{}</code>，表示该原子操作的结果<strong>仅需要在当前这个线程块内部可见</strong>。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">using</span> i32x16 = ct::tile&lt;<span class="pl-k">int</span>, ct::shape&lt;<span class="pl-c1">16</span>&gt;&gt;;
+
+<span class="pl-k">int</span>* slot = <span class="pl-c"><span class="pl-c">/*</span> pointer to the contended location <span class="pl-c">*/</span></span>;
+
+<span class="pl-c"><span class="pl-c">//</span> 16 lanes all aim at the same address. Add is commutative, so the</span>
+<span class="pl-c"><span class="pl-c">//</span> unspecified ordering doesn't affect this sum; block scope suffices</span>
+<span class="pl-c"><span class="pl-c">//</span> since contention stays within one block.</span>
+<span class="pl-k">auto</span> ptrs = ct::full&lt;ct::tile&lt;<span class="pl-k">int</span>*, ct::shape&lt;<span class="pl-c1">16</span>&gt;&gt;&gt;(slot);
+<span class="pl-en">ct::atomic_add</span>(ptrs, ct::iota&lt;i32x16&gt;(),
+            ct::memory_order_relaxed_t{},
+            ct::<span class="pl-c1">thread_scope_block_t</span>{});</pre></div>
+<h2>10.3 支持的原子操作</h2>
+<p>Tile 代码支持多种内存原子操作，各类操作的区别在于：待写入的值与内存中原有值的合并方式不同：</p>
+<ul>
+<li><code class="notranslate">atomic_and</code>：将传入值与内存中保存的值执行<strong>逐元素原子按位与</strong>运算</li>
+<li><code class="notranslate">atomic_or</code>：将传入值与内存中保存的值执行<strong>逐元素原子按位或</strong>运算</li>
+<li><code class="notranslate">atomic_xor</code>：将传入值与内存中保存的值执行<strong>逐元素原子按位异或</strong>运算</li>
+<li><code class="notranslate">atomic_max</code>：将传入值与内存中保存的值逐元素比较，把较大值存入内存</li>
+<li><code class="notranslate">atomic_min</code>：将传入值与内存中保存的值逐元素比较，把较小值存入内存</li>
+<li><code class="notranslate">atomic_add</code>：将传入值加到内存原有值上，并将结果存入内存</li>
+<li><code class="notranslate">atomic_sub</code>（仅 C++ 支持）：用内存原有值减去传入值，并将结果存入内存</li>
+<li><code class="notranslate">atomic_xchg</code>：将传入值写入内存，<strong>返回写入前内存里的旧值</strong></li>
+<li><code class="notranslate">atomic_cas</code>（C++ 中名为<code class="notranslate">atomic_compare_exchange</code>）：将内存中的值与传入的期望值逐元素比较；若二者相等，则把内存值替换为目标值。</li>
+</ul>
+<h1>十一、优化提示</h1>
+<p><strong>优化提示（optimization hint）</strong> 是附加在源码构造体（Tile 核函数、load/store 调用点等）上的元数据，用于指导编译器生成目标代码。 优化提示<strong>不会改变程序语义</strong>：无论是否添加该提示，核函数的编译与运行行为完全一致。因此开发者可以自由增删、调优提示，<strong>不会影响程序正确性</strong>。编译器也可以选择忽略任意优化提示。<br>
+优化提示具备两项通用特性：</p>
+<ul>
+<li><strong>提示作用于单独构造体</strong>：提示仅作用于它所附着的特定核函数或特定调用表达式，不会影响周边其他代码。</li>
+<li><strong>提示可按硬件架构单独指定</strong>：针对不同 GPU 架构，同一条提示可以设置不同取值；也可以设置单一值，作用于所有目标硬件。<br>
+C++ 与 Python 两种语言暴露优化提示的方式不同：</li>
+<li>C++：采用 C++ 属性，写在对应的声明或语句上。</li>
+<li>Python：在核函数装饰器、以及各个内存操作调用点上，通过关键字参数传入。<br>
+提示的种类集合、以及每一类提示实际控制的内容，在两种语言中保持一致，详细文档参见后续「提示类型（Hint Kinds）」小节。</li>
+</ul>
+<h2>11.1 C++ the cutile::hint Attribute</h2>
+<p>在 C++ 中，优化提示通过 C++ 属性 <code class="notranslate">cutile::hint</code> 来表达：</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">[[ cutile::hint(arch, kind1=value1, kind2=value2, ...) ]]</span></pre></div>
+<p>第一个参数是目标硬件架构，使用和宏 <code class="notranslate">__CUDA_ARCH__</code> 相同编码规则的整数（例如 <code class="notranslate">900</code> 代表 sm_90，<code class="notranslate">1000</code> 代表 sm_100）。特殊值 <strong>0</strong> 表示<strong>架构无关提示</strong>，适用于所有目标架构。其余每一个参数都是 <code class="notranslate">kind=value</code> 键值对，用于指定提示类型及其取值。</p>
+<p><code class="notranslate">cutile::hint</code> 属性作用于紧跟在它后面的源码构造体：</p>
+<ul>
+<li>对于 Tile 核函数：将该属性写在函数声明处。</li>
+<li>对于内存操作（如<code class="notranslate">ct::load</code>、<code class="notranslate">ct::store</code>以及<code class="notranslate">ct::partition_view</code>对应的加载 / 存储操作）：将该属性写在包含此调用的表达式语句上。</li>
+</ul>
+<p>其他放置位置存在使用限制；完整规则参见<a href="https://docs.nvidia.com/cuda/cuda-tile-cpp-api-reference/optimization_hints.html#hint-specification" rel="nofollow">《CUDA Tile C++ 优化提示规范》</a>。</p>
+<p>下面这个核函数展示了两种放置方式：<strong>核函数级提示</strong>（为 sm_90 与 sm_100 设置不同的<code class="notranslate">num_cta_in_cga</code>值），以及<strong>表达式语句级提示</strong>（标记某次特定加载为带宽密集型访问）。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">[[ cutile::hint(<span class="pl-c1">900</span>,  num_cta_in_cga=<span class="pl-c1">4</span>),    <span class="pl-c"><span class="pl-c">//</span> sm_90:  prefer 4 CTAs per cluster</span>
+   <span class="pl-en">cutile::hint</span>(<span class="pl-c1">1000</span>, num_cta_in_cga=<span class="pl-c1">8</span>) ]]  <span class="pl-c"><span class="pl-c">//</span> sm_100: prefer 8 CTAs per cluster</span>
+__tile_global__ void optimization_hints(<span class="pl-k">float</span>* __restrict__ in,
+                                        <span class="pl-k">float</span>* __restrict__ out) {
+    <span class="pl-k">namespace</span> <span class="pl-en">ct</span> <span class="pl-k">=</span> cuda::tiles;
+    <span class="pl-k">using</span> <span class="pl-k">namespace</span> <span class="pl-en">ct</span>::literals<span class="pl-k">;</span>
+
+    in  = <span class="pl-c1">ct::assume_aligned</span>(in,  16_ic);
+    out = <span class="pl-c1">ct::assume_aligned</span>(out, 16_ic);
+
+    <span class="pl-k">auto</span> inSpan  = ct::tensor_span{in,  ct::extents{128_ic}};
+    <span class="pl-k">auto</span> outSpan = ct::tensor_span{out, ct::extents{128_ic}};
+    <span class="pl-k">auto</span> inView  = ct::partition_view{inSpan,  ct::shape{8_ic}};
+    <span class="pl-k">auto</span> outView = ct::partition_view{outSpan, ct::shape{8_ic}};
+
+    <span class="pl-k">int</span> bx = <span class="pl-c1">ct::bid</span>().<span class="pl-smi">x</span>;
+
+    <span class="pl-c"><span class="pl-c">//</span> Expression-statement hint: tag this particular load as bandwidth-heavy.</span>
+    ct::tile&lt;<span class="pl-k">float</span>, ct::shape&lt;<span class="pl-c1">8</span>&gt;&gt; tile;
+    <span class="pl-k">[[ cutile::hint(0, latency=8) ]]</span>
+    tile = inView.<span class="pl-c1">load</span>(bx);
+
+    outView.<span class="pl-c1">store</span>(tile, bx);
+}</pre></div>
+<p>当多条同类型优化提示作用于同一个源码构造体时，<strong>特定架构的提示优先级高于架构无关提示</strong>。</p>
+<h2>11.2 Python:装饰器参数与调用点关键字参数</h2>
+<p>Python 提供两种方式设置优化提示：</p>
+<ul>
+<li><strong>核函数级提示</strong>：作为<code class="notranslate">@ct.kernel(...)</code>装饰器的关键字参数。编译后的核对象还提供<code class="notranslate">.replace_hints(**hints)</code>方法，该方法会返回一个覆盖了新提示的全新核函数；新核拥有独立的 JIT 缓存，因此<code class="notranslate">replace_hints</code>非常适合作为自动调优循环的基础组件。</li>
+<li><strong>单次调用提示</strong>：在内存操作的调用位置通过关键字参数指定，包括：<code class="notranslate">ct.load</code> / <code class="notranslate">ct.store</code>、<code class="notranslate">TiledView.load</code> / <code class="notranslate">TiledView.store</code>，以及<code class="notranslate">ct.gather</code> / <code class="notranslate">ct.scatter</code>。</li>
+</ul>
+<p>如需按不同架构设置不同取值，用<code class="notranslate">cuda.tile.ByTarget(*, default=..., sm_XXX=..., sm_YYY=...)</code>封装数值。架构键必须采用<code class="notranslate">"sm_&lt;主版本&gt;&lt;次版本&gt;"</code>格式的字符串（例如<code class="notranslate">"sm_100"</code>、<code class="notranslate">"sm_120"</code>）。不使用<code class="notranslate">ByTarget</code>的普通值会作用于所有目标架构，等价于 C++ 中<code class="notranslate">arch=0</code>的架构无关提示。</p>
+<p>下方核函数是上面 C++ 示例的 Python 直接对等实现：<code class="notranslate">ByTarget</code>承载核函数级提示，<code class="notranslate">latency=8</code>关键字代表单次调用提示，而<code class="notranslate">replace_hints</code>可以在<strong>不修改源码</strong>的前提下生成重新调参后的核函数。</p>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-en">@<span class="pl-s1">ct</span>.<span class="pl-c1">kernel</span>(<span class="pl-s1">num_ctas</span><span class="pl-c1">=</span><span class="pl-en">ByTarget</span>(<span class="pl-s1">sm_90</span><span class="pl-c1">=</span><span class="pl-c1">4</span>, <span class="pl-s1">sm_100</span><span class="pl-c1">=</span><span class="pl-c1">8</span>))</span>
+<span class="pl-k">def</span> <span class="pl-en">optimization_hints</span>(<span class="pl-s1">in_</span>, <span class="pl-s1">out</span>, <span class="pl-c1">TILE</span>: <span class="pl-s1">ct</span>.<span class="pl-c1">Constant</span>[<span class="pl-s1">int</span>]):
+    <span class="pl-s1">bid</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">bid</span>(<span class="pl-c1">0</span>)
+
+    <span class="pl-c"># Per-call hint: this particular load is bandwidth-heavy.</span>
+    <span class="pl-s1">tile</span> <span class="pl-c1">=</span> <span class="pl-s1">ct</span>.<span class="pl-c1">load</span>(<span class="pl-s1">in_</span>, <span class="pl-s1">index</span><span class="pl-c1">=</span>(<span class="pl-s1">bid</span>,), <span class="pl-s1">shape</span><span class="pl-c1">=</span>(<span class="pl-c1">TILE</span>,), <span class="pl-s1">latency</span><span class="pl-c1">=</span><span class="pl-c1">8</span>)
+
+    <span class="pl-s1">ct</span>.<span class="pl-c1">store</span>(<span class="pl-s1">out</span>, <span class="pl-s1">index</span><span class="pl-c1">=</span>(<span class="pl-s1">bid</span>,), <span class="pl-s1">tile</span><span class="pl-c1">=</span><span class="pl-s1">tile</span>)
+
+
+<span class="pl-c"># Autotuning: produce a new kernel with overridden hints without editing the</span>
+<span class="pl-c"># source. The new kernel has its own JIT cache.</span>
+<span class="pl-s1">tuned_kernel</span> <span class="pl-c1">=</span> <span class="pl-s1">optimization_hints</span>.<span class="pl-c1">replace_hints</span>(<span class="pl-s1">num_ctas</span><span class="pl-c1">=</span><span class="pl-c1">8</span>)</pre></div>
+<h2>11.3 Hint Kinds</h2>
+<h3>11.3.1 每个CGA中CTA的数量</h3>
+<ul>
+<li>CTA：Cooperative Thread Array，协作线程阵列，等价于 CUDA 的线程块 block</li>
+<li>CGA：Cooperative Group Array，协作组阵列（GPU 硬件集群调度单元）</li>
+<li>C++ 名称：<code class="notranslate">num_cta_in_cga</code>（核函数属性）</li>
+<li>Python 名称：<code class="notranslate">num_ctas</code>（<code class="notranslate">@ct.kernel</code>装饰器参数）</li>
+<li>允许取值：1、2、4、8、16。在 sm_80 架构下，仅支持取值 1。</li>
+<li>含义：启动核函数时，编译器倾向于在每个协作组阵列（CGA）内放置的协作线程阵列（CTA）数量。</li>
+</ul>
+<h3>11.3.2 占用率</h3>
+<ul>
+<li>C++ 名称：<code class="notranslate">occupancy</code>（核函数属性）</li>
+<li>Python 名称：<code class="notranslate">occupancy</code>（<code class="notranslate">@ct.kernel</code>装饰器参数）</li>
+<li>允许取值：闭区间<code class="notranslate">[1, 32]</code>内的任意整数</li>
+<li>含义：每个流式多处理器（SM）上目标活跃 CTA 数量。编译器将该值视为一条建议，并会在代码生成阶段尽量遵循该设置。</li>
+</ul>
+<h3>11.3.3 内存访问延迟</h3>
+<ul>
+<li>C++ 名称：<code class="notranslate">latency</code>（附加在包含调用的表达式语句上的属性）</li>
+<li>Python 名称：<code class="notranslate">latency</code>（调用点处的关键字参数）</li>
+<li>适用范围：Tile 空间加载与存储（C++ 中<code class="notranslate">ct::partition_view</code>；Python 中<code class="notranslate">Array.tiled_view</code>以及<code class="notranslate">ct.load</code> / <code class="notranslate">ct.store</code>），同时适用于聚集 / 分散访存（C++ 中使用指针 Tile 的<code class="notranslate">ct::load</code> / <code class="notranslate">ct::store</code>；Python 中<code class="notranslate">ct.gather</code> / <code class="notranslate">ct.scatter</code>）。</li>
+<li>允许取值：闭区间<code class="notranslate">[1, 10]</code>内任意整数。<strong>1</strong>代表 DRAM 访存压力小，<strong>10</strong>代表访存压力大。更大的取值通常会让编译器调度更深的预取深度。</li>
+</ul>
+<h3>11.3.4 允许使用TMA</h3>
+<ul>
+<li>C++ 名称：<code class="notranslate">allow_tma</code>（附加在包含调用的表达式语句上的属性）</li>
+<li>Python 名称：<code class="notranslate">allow_tma</code>（调用点处的关键字参数）</li>
+<li>适用范围：<strong>仅 Tile 空间加载与存储</strong>（C++ 中<code class="notranslate">ct::partition_view</code>；Python 中<code class="notranslate">Array.tiled_view</code>和<code class="notranslate">ct.load</code> / <code class="notranslate">ct.store</code>）。gather、scatter 操作不支持该提示。</li>
+<li>允许取值：C++ 用<code class="notranslate">true</code>/<code class="notranslate">false</code>；Python 用<code class="notranslate">True</code>/<code class="notranslate">False</code>。默认允许启用 TMA；若将该提示设为<code class="notranslate">false</code>/<code class="notranslate">False</code>，则指示编译器：即使硬件支持 TMA，本次特定的加载 / 存储也<strong>不要编译降级为 TMA 指令</strong>。</li>
+</ul>
+<h1>十二、C++性能提示</h1>
+<p>本指南中所有 C++ 核函数都用到了少数相同的注解与惯用写法。本节将解释它们的作用以及重要意义。</p>
+<h2>12.1 对内存数组使用__restrict__指针</h2>
+<p><code class="notranslate">__restrict__</code> 关键字向编译器做出承诺：在该指针的生命周期内，<strong>只能通过这一个指针</strong>访问它所指向的内存区域。参见 5.4.1.4 节。</p>
+<p>在 Tile C++ 中，如果内存上的数组满足上述条件，<strong>必须</strong>为其指针标注 <code class="notranslate">__restrict__</code> 关键字，才能获得良好的内存操作性能。</p>
+<p>我们可以通过例子理解背后的原因：考虑一个逐元素拷贝场景，若数组指针<strong>未添加 <code class="notranslate">__restrict__</code></strong>：</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__tile_global__ <span class="pl-k">void</span> <span class="pl-en">tile_elementwise_copy</span>(<span class="pl-k">float</span>* out, <span class="pl-k">float</span> <span class="pl-k">const</span>* in) {
+    <span class="pl-k">namespace</span> <span class="pl-en">ct</span> <span class="pl-k">=</span> cuda::tiles;
+
+    <span class="pl-k">using</span> f32x64 = ct::tile&lt;<span class="pl-k">float</span>, ct::shape&lt;<span class="pl-c1">64</span>&gt;&gt;;
+    <span class="pl-k">using</span> i32x64 = ct::tile&lt;<span class="pl-k">int</span>, ct::shape&lt;<span class="pl-c1">64</span>&gt;&gt;;
+
+    <span class="pl-k">auto</span> inPtrs  = in  + <span class="pl-c1">64</span> * <span class="pl-c1">ct::bid</span>().<span class="pl-smi">x</span> + ct::iota&lt;i32x64&gt;();
+    <span class="pl-k">auto</span> outPtrs = out + <span class="pl-c1">64</span> * <span class="pl-c1">ct::bid</span>().<span class="pl-smi">x</span> + ct::iota&lt;i32x64&gt;();
+
+    <span class="pl-k">auto</span> data = <span class="pl-c1">ct::load</span>(inPtrs);   <span class="pl-c"><span class="pl-c">//</span> (1)</span>
+    <span class="pl-c1">ct::store</span>(outPtrs, data);       <span class="pl-c"><span class="pl-c">//</span> (2)</span>
+}</pre></div>
+<p>在 CUDA Tile 程序中，开发者通常无需关心编译器对 Tile 操作的并行化实现细节。但本节会对其进行分析，以此理解：<strong>使用无重叠数组为何能让编译器生成性能更优的代码</strong>。</p>
+<p>我们来看编译器如何并行化<code class="notranslate">load</code>与<code class="notranslate">store</code>这两个 Tile 操作。如果输入数组和输出数组不存在内存重叠，<code class="notranslate">load</code>操作可以被并行拆分为一组相互独立的内存读操作。同理，<code class="notranslate">store</code>操作可以并行拆分为多个内存写操作，每一个写操作仅依赖它所要写入数据元素对应的加载操作。</p>
+<p>但倘若输入、输出数组<strong>可能发生内存重叠</strong>，编译器就必须保证：<strong>当前整个 Tile 的所有内存加载操作全部完成之后，才能发起任意存储写操作</strong>，以此保障程序语义正确。否则，写操作有可能提前执行，在元素被读取之前就覆盖它，造成程序运行结果错误。这会限制编译器交错调度读写操作的能力 —— 所有读操作必须全部结束，才能发起写操作。</p>
+<p>简言之：当编译器无法保证数组内存互不重叠时，只能生成更保守的代码。这就是为什么使用无重叠数组，并通过在指针上标注<code class="notranslate">__restrict__</code>关键字把该信息告知编译器，有助于拿到最优性能。</p>
+<p>如果某块内存区域还可以被其他指针访问，却给该指针加上<code class="notranslate">__restrict__</code>标注，会引发<strong>未定义行为</strong>。</p>
+<h2>11.2 将数组指针标记为 16 字节对齐</h2>
+<p>使用 <code class="notranslate">ct::assume_aligned</code> 将数组指针标记为 16 字节对齐。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__tile_global__ <span class="pl-k">void</span> <span class="pl-en">foo</span>(<span class="pl-k">float</span>* __restrict__ in) {
+    <span class="pl-k">namespace</span> <span class="pl-en">ct</span> <span class="pl-k">=</span> cuda::tiles;
+    <span class="pl-k">using</span> <span class="pl-k">namespace</span> <span class="pl-en">ct</span>::literals<span class="pl-k">;</span>
+
+    in = <span class="pl-c1">ct::assume_aligned</span>(in, 16_ic);
+
+    ct::tensor_span t{in, ct::extents{256_ic, 256_ic}};
+    ct::partition_view{t, ct::shape{4_ic, 4_ic}};
+
+    <span class="pl-c"><span class="pl-c">//</span> ...</span>
+}</pre></div>
+<p>该对齐保证是 <code class="notranslate">ct::partition_view</code> 能够使用张量内存加速器（TMA）的必要条件。采用该方式时，运行时传入的指针<strong>必须满足 16 字节对齐</strong>，否则会产生未定义行为。</p>
+<p><code class="notranslate">cudaMalloc</code> 这类 CUDA 内存分配器返回的指针，天然保证至少为 16 字节对齐。</p>
+<h2>11.3 内存访问优先选用 <code class="notranslate">ct::partition_view</code></h2>
+<p>对于结构化内存访问，优先使用<code class="notranslate">ct::partition_view</code>，而不是 gather/scatter 形式的<code class="notranslate">ct::load</code>与<code class="notranslate">ct::store</code>。基于 view 的写法在支持的硬件上可以编译为张量内存加速器（TMA）指令，性能远优于逐元素 gather 访存。关于 gather/scatter 的相关内容参见《聚集与分散访存》章节。</p>
+<h2>11.4 有界循环使用 <code class="notranslate">ct::irange</code></h2>
+<p>在固定范围迭代时，请使用<code class="notranslate">ct::irange</code>，而非普通 for 循环。这种结构化形式能够让编译器启用流水线、向量化等优化；若循环边界与步长是不透明整型表达式，则无法使用这类优化</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">for</span> (<span class="pl-k">auto</span> idx : ct::irange(lowerBound, upperBound, step)) {
+    <span class="pl-c"><span class="pl-c">//</span> ...</span>
+}</pre></div></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
