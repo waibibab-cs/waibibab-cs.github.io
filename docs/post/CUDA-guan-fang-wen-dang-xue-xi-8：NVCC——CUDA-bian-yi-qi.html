@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="原文链接：
+[2.7.NVCC: The NVIDIA CUDA Compiler](https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/nvcc.html)
+# 前言
+NVIDIA CUDA 编译器（nvcc）是 NVIDIA 提供的工具链，用于编译 CUDA C/C++ 代码以及 PTX 代码。">
+<meta property="og:title" content="CUDA官方文档学习8：NVCC——CUDA编译器">
+<meta property="og:description" content="原文链接：
+[2.7.NVCC: The NVIDIA CUDA Compiler](https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/nvcc.html)
+# 前言
+NVIDIA CUDA 编译器（nvcc）是 NVIDIA 提供的工具链，用于编译 CUDA C/C++ 代码以及 PTX 代码。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/CUDA-guan-fang-wen-dang-xue-xi-8%EF%BC%9ANVCC%E2%80%94%E2%80%94CUDA-bian-yi-qi.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>CUDA官方文档学习8：NVCC——CUDA编译器</title>
+<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">CUDA官方文档学习8：NVCC——CUDA编译器</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/79" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>原文链接：<br>
+<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/nvcc.html" rel="nofollow">2.7.NVCC: The NVIDIA CUDA Compiler</a></p>
+<h1>前言</h1>
+<p>NVIDIA CUDA 编译器（nvcc）是 NVIDIA 提供的工具链，用于编译 CUDA C/C++ 代码以及 PTX 代码。该工具链属于 CUDA 工具包的一部分，包含多种工具：编译器、链接器，以及 PTX 与 Cubin 汇编器。顶层工具 nvcc 负责统筹编译流程，在编译的各个阶段调用对应的工具。</p>
+<p>nvcc 负责 CUDA 代码的离线编译；与之相对，CUDA 运行时编译器 nvrtc 实现<strong>即时编译（JIT，在线编译）</strong>。</p>
+<p>本章介绍开发应用程序所需的 nvcc 最常用用法与细节。nvcc 的完整说明请参阅 nvcc 官方文档。</p>
+<h1>一、CUDA 源文件与头文件</h1>
+<p>由 nvcc 编译的源文件可以同时包含<strong>主机代码（host code）</strong> 与<strong>设备代码（device code）</strong>：主机代码在 CPU 上执行，设备代码在 GPU 上执行。<br>
+nvcc 支持常见 C/C++ 源文件后缀：<code class="notranslate">.c</code>、<code class="notranslate">.cpp</code>、<code class="notranslate">.cc</code>、<code class="notranslate">.cxx</code>，用于仅包含主机代码的文件；<code class="notranslate">.cu</code>后缀用于包含设备代码，或是主机、设备混合代码的文件。<br>
+包含设备代码的头文件一般使用<code class="notranslate">.cuh</code>后缀，以此区分仅主机代码的头文件（<code class="notranslate">.h</code>、<code class="notranslate">.hpp</code>、<code class="notranslate">.hh</code>、<code class="notranslate">.hxx</code>等）。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260921153121.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260921153121.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h1>二、NVCC编译工作流</h1>
+<p>在初始阶段，nvcc将设备代码与主机代码分离，并分别交由 GPU 编译器与主机编译器进行编译。</p>
+<p>编译主机代码时，CUDA编译器nvcc要求系统中存在兼容的主机编译器。CUDA Toolkit规定了Linux与Windows平台下的主机编译器支持策略。仅含主机代码的文件，既可以用 nvcc 构建，也可以直接使用主机编译器构建。生成的目标文件可在链接阶段与 nvcc 输出的、包含 GPU 代码的目标文件合并。</p>
+<p>GPU 编译器将 C/C++ 设备代码编译为 PTX 汇编代码。对于编译命令行中指定的每一种虚拟机指令集架构（例如 <code class="notranslate">compute_90</code>），GPU 编译器都会执行一次编译。</p>
+<p>随后，独立的 PTX 代码会交给 <code class="notranslate">ptxas</code> 工具，由它针对目标硬件指令集（ISA）生成 Cubin。硬件指令集由其 SM 版本标识。</p>
+<p>可以将多个 PTX 和 Cubin 目标文件嵌入到应用或库内的单个二进制 Fatbin 容器中，这样一份二进制程序就能够支持多种虚拟指令集与目标硬件指令集。</p>
+<p>nvcc 会自动调用并协调上述所有工具。<code class="notranslate">-v</code> 参数可展示完整编译流程与工具调用过程；<code class="notranslate">-keep</code> 参数可将编译过程产生的中间文件保存至当前目录，或是由 <code class="notranslate">--keep-dir</code> 指定的目录。</p>
+<p>下面的示例展示 CUDA 源文件 <code class="notranslate">example.cu</code> 的编译工作流：</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> ----- example.cu -----</span>
+#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>stdio.h<span class="pl-pds">&gt;</span></span>
+__global__ <span class="pl-k">void</span> <span class="pl-en">kernel</span>() {
+    <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Hello from kernel<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>);
+}
+
+<span class="pl-k">void</span> <span class="pl-en">kernel_launcher</span>() {
+    kernel&lt;&lt;&lt;<span class="pl-c1">1</span>, <span class="pl-c1">1</span>&gt;&gt;&gt;();
+    <span class="pl-c1">cudaDeviceSynchronize</span>();
+}
+
+<span class="pl-k">int</span> <span class="pl-en">main</span>() {
+    <span class="pl-c1">kernel_launcher</span>();
+    <span class="pl-k">return</span> <span class="pl-c1">0</span>;
+}</pre></div>
+<p><code class="notranslate">nvcc</code>基本的编译工作流如下：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260921153702.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260921153702.png" alt="image.png" style="max-width: 100%;"></a><br>
+支持多 PTX 与 Cubin 架构的 nvcc 编译工作流<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260921154439.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260921154439.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h1>三、NVCC基本使用</h1>
+<p>使用nvcc编译一个CUDA源文件的基本命令是：</p>
+<div class="highlight highlight-source-shell"><pre class="notranslate">nvcc <span class="pl-k">&lt;</span>source_file<span class="pl-k">&gt;</span>.cu -o <span class="pl-k">&lt;</span>output_file<span class="pl-k">&gt;</span></pre></div>
+<p>nvcc 支持常用的编译器选项，用于指定头文件搜索目录 <code class="notranslate">-I &lt;path&gt;</code>、库文件搜索路径 <code class="notranslate">-L &lt;path&gt;</code>、链接其他库 <code class="notranslate">-l&lt;library&gt;</code>，以及定义宏 <code class="notranslate">-D&lt;macro&gt;=&lt;value&gt;</code>。</p>
+<div class="highlight highlight-source-shell"><pre class="notranslate">nvcc example.cu -I path_to_include/ -L path_to_library/ -lcublas -o <span class="pl-k">&lt;</span>output_file<span class="pl-k">&gt;</span></pre></div>
+<h2>3.1 NVCC PTX与Cubin的生成</h2>
+<p>默认情况下，nvcc 会为 CUDA Toolkit 所支持的<strong>最早一代 GPU 架构</strong>（最低版本的<code class="notranslate">compute_XY</code>与<code class="notranslate">sm_XY</code>）生成 PTX 和 Cubin，以此最大化兼容性。</p>
+<ul>
+<li><code class="notranslate">-arch</code>选项：可用于为<strong>单个指定 GPU 架构</strong>生成 PTX 与 Cubin。</li>
+<li><code class="notranslate">-gencode</code>选项：可用于为<strong>多个 GPU 架构</strong>同时生成 PTX 与 Cubin。<br>
+支持的虚拟 GPU 架构与真实 GPU 架构完整列表，可分别通过<code class="notranslate">--list-gpu-code</code>和<code class="notranslate">--list-gpu-arch</code>参数查看</li>
+</ul>
+<div class="highlight highlight-source-shell"><pre class="notranslate">nvcc --list-gpu-code <span class="pl-c"><span class="pl-c">#</span> list all supported real GPU architectures</span>
+nvcc --list-gpu-arch <span class="pl-c"><span class="pl-c">#</span> list all supported virtual GPU architectures</span></pre></div>
+<div class="highlight highlight-source-shell"><pre class="notranslate"><span class="pl-c"><span class="pl-c">#</span> e.g. -arch=compute_80 for NVIDIA Ampere GPUs and later</span>
+<span class="pl-c"><span class="pl-c">#</span> PTX-only, GPU forward compatible</span>
+nvcc example.cu -arch=compute_<span class="pl-k">&lt;</span>XY<span class="pl-k">&gt;</span> 
+<span class="pl-c"><span class="pl-c">#</span> e.g. -arch=sm_80 for NVIDIA Ampere GPUs and later</span>
+<span class="pl-c"><span class="pl-c">#</span> PTX and Cubin, GPU forward compatible</span>
+nvcc example.cu -arch=sm_<span class="pl-k">&lt;</span>XY<span class="pl-k">&gt;</span>      
+<span class="pl-c"><span class="pl-c">#</span> automatically detects and generates Cubin for the current GPU</span>
+<span class="pl-c"><span class="pl-c">#</span> no PTX, no GPU forward compatibility</span>
+nvcc example.cu -arch=native       
+<span class="pl-c"><span class="pl-c">#</span> generate Cubin for all supported GPU architectures</span>
+<span class="pl-c"><span class="pl-c">#</span> also includes the latest PTX for GPU forward compatibility</span>
+nvcc example.cu -arch=all          
+<span class="pl-c"><span class="pl-c">#</span> generate Cubin for all major supported GPU architectures, e.g. sm_80, sm_90,also includes the latest PTX for GPU forward compatibility</span>
+nvcc example.cu -arch=all-major    </pre></div>
+<p>更高级的用法支持单独指定 PTX 与 Cubin 目标：</p>
+<div class="highlight highlight-source-shell"><pre class="notranslate"><span class="pl-c"><span class="pl-c">#</span> generate PTX for virtual architecture compute_80 and compile it to Cubin for real architecture sm_86, keep compute_80 PTX</span>
+nvcc example.cu -arch=compute_80 -gpu-code=sm_86,compute_80 <span class="pl-c"><span class="pl-c">#</span> (PTX and Cubin)</span>
+
+<span class="pl-c"><span class="pl-c">#</span> generate PTX for virtual architecture compute_80 and compile it to Cubin for real architecture sm_86, sm_89</span>
+nvcc example.cu -arch=compute_80 -gpu-code=sm_86,sm_89    <span class="pl-c"><span class="pl-c">#</span> (no PTX)</span>
+nvcc example.cu -gencode=arch=compute_80,code=sm_86,sm_89 <span class="pl-c"><span class="pl-c">#</span> same as above</span>
+
+<span class="pl-c"><span class="pl-c">#</span> (1) generate PTX for virtual architecture compute_80 and compile it to Cubin for real architecture sm_86, sm_89</span>
+<span class="pl-c"><span class="pl-c">#</span> (2) generate PTX for virtual architecture compute_90 and compile it to Cubin for real architecture sm_90</span>
+nvcc example.cu -gencode=arch=compute_80,code=sm_86,sm_89 -gencode=arch=compute_90,code=sm_90</pre></div>
+<h2>3.2 主机代码编译说明</h2>
+<p>编译单元（即源文件及其头文件）如果<strong>不含设备代码或设备符号</strong>，可以直接使用主机编译器进行编译。 如果任意编译单元调用了 CUDA 运行时 API 函数，则应用程序必须链接 CUDA 运行时库。CUDA 运行时同时提供静态库与动态库，分别为<code class="notranslate">libcudart_static</code>和<code class="notranslate">libcudart</code>。 默认情况下，nvcc 会链接静态版本的 CUDA 运行时库。若要使用 CUDA 运行时的动态库版本，需要在编译或链接命令中给 nvcc 传入<code class="notranslate">--cudart=shared</code>参数。</p>
+<p>nvcc 可通过<code class="notranslate">-ccbin &lt;compiler&gt;</code>参数指定用于编译主机函数的主机编译器。 也可以定义环境变量<code class="notranslate">NVCC_CCBIN</code>，以此指定 nvcc 所使用的主机编译器。 nvcc 的<code class="notranslate">-Xcompiler</code>参数可以将参数透传给主机编译器。例如，下面示例中，<code class="notranslate">-O3</code>参数会由 nvcc 传递给主机编译器。</p>
+<div class="highlight highlight-source-shell"><pre class="notranslate">nvcc example.cu -ccbin=clang++
+
+<span class="pl-k">export</span> NVCC_CCBIN=<span class="pl-s"><span class="pl-pds">'</span>gcc<span class="pl-pds">'</span></span>
+nvcc example.cu -Xcompiler=-O3</pre></div>
+<h2>3.3 GPU代码的分离编译</h2>
+<p>nvcc 默认采用<strong>全程序编译（whole-program compilation）</strong>，该模式要求所有 GPU 代码与符号都必须位于使用它们的同一个编译单元内。CUDA 设备函数可以调用其他编译单元中定义的设备函数，或访问其他编译单元里的设备变量；但必须在 nvcc 命令行指定<code class="notranslate">-rdc=true</code>（或别名<code class="notranslate">-dc</code>），才能启用跨编译单元的设备代码链接。这种支持链接不同编译单元内设备代码与符号的能力，就称为<strong>分离编译（separate compilation）</strong>。</p>
+<p>分离编译可以实现更灵活的代码组织，能够缩短编译耗时，还可生成体积更小的二进制程序。但相比全程序编译，分离编译会增加构建阶段的复杂度。设备代码链接可能会对性能产生影响，因此默认不开启。<strong>链接时优化（LTO，Link-Time Optimization）</strong> 有助于降低分离编译带来的性能开销。</p>
+<p>启用分离编译需要满足以下条件：</p>
+<ul>
+<li>在某个编译单元中定义的<strong>非 const 设备变量</strong>，在其他编译单元中引用时必须使用<code class="notranslate">extern</code>关键字。</li>
+<li>所有<strong>const 设备变量</strong>，其定义与引用都必须使用<code class="notranslate">extern</code>关键字。</li>
+<li>所有 CUDA 源文件（<code class="notranslate">.cu</code>）编译时都必须带上<code class="notranslate">-dc</code>或<code class="notranslate">-rdc=true</code>参数。</li>
+</ul>
+<p>主机函数与设备函数默认拥有外部链接属性，<strong>不需要 extern 关键字</strong>。注意：从 CUDA 13 开始，<code class="notranslate">__global__</code>函数以及<code class="notranslate">__managed__</code>/<code class="notranslate">__device__</code>/<code class="notranslate">__constant__</code>变量默认为内部链接属性。</p>
+<p>下面示例中，<code class="notranslate">definition.cu</code>定义了一个变量和一个函数，<code class="notranslate">example.cu</code>引用它们。两个文件分开编译，再链接合并为最终二进制程序。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> ----- definition.cu -----</span>
+<span class="pl-k">extern</span> __device__ <span class="pl-k">int</span> device_variable = <span class="pl-c1">5</span>;
+__device__        <span class="pl-k">int</span> <span class="pl-en">device_function</span>() { <span class="pl-k">return</span> <span class="pl-c1">10</span>; }</pre></div>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> ----- example.cu -----</span>
+<span class="pl-k">extern</span> __device__ <span class="pl-k">int</span>  device_variable;
+__device__        <span class="pl-k">int</span> <span class="pl-en">device_function</span>();
+
+__global__ <span class="pl-k">void</span> <span class="pl-en">kernel</span>(<span class="pl-k">int</span>* ptr) {
+    device_variable = <span class="pl-c1">0</span>;
+    *ptr            = <span class="pl-c1">device_function</span>();
+}</pre></div>
+<div class="highlight highlight-source-shell"><pre class="notranslate">nvcc -dc definition.cu -o definition.o
+nvcc -dc example.cu    -o example.o
+nvcc definition.o example.o -o program</pre></div>
+<h1>四、常用编译器选项</h1>
+<p>本节介绍 nvcc 最常用的编译器选项，涵盖语言特性、优化、调试、性能剖析以及构建相关方面。全部选项的完整说明可查阅 nvcc 官方文档。</p>
+<h2>4.1 语言特性</h2>
+<p>nvcc 支持 C++ 核心语言特性，从 C++03 到 C++23。可使用<code class="notranslate">-std</code>选项指定要启用的 C++ 语言标准：</p>
+<ul>
+<li><code class="notranslate">--std={c++03|c++11|c++14|c++17|c++20|c++23}</code><br>
+除此之外，nvcc 还支持以下语言扩展：</li>
+<li><code class="notranslate">-restrict</code>：声明所有核函数指针参数均为 restrict 指针。</li>
+<li><code class="notranslate">-extended-lambda</code>：允许在 lambda 表达式声明中使用<code class="notranslate">__host__</code>、<code class="notranslate">__device__</code>修饰符。</li>
+<li><code class="notranslate">-expt-relaxed-constexpr</code>：（实验性选项）允许主机代码调用<code class="notranslate">__device__ constexpr</code>函数，同时允许设备代码调用<code class="notranslate">__host__ constexpr</code>函数。<br>
+关于这些特性的更多细节，可参见扩展 Lambda 与 constexpr 相关章节。</li>
+</ul>
+<h2>4.2 调试选项</h2>
+<p>nvcc 支持以下选项用于生成调试信息：</p>
+<ul>
+<li><code class="notranslate">-g</code>：为主机代码生成调试信息。gdb/lldb 等工具依靠该信息对主机代码调试。</li>
+<li><code class="notranslate">-G</code>：为设备代码生成调试信息。cuda-gdb 依靠该信息调试设备端代码；该选项同时定义宏<code class="notranslate">__CUDACC_DEBUG__</code>。</li>
+<li><code class="notranslate">-lineinfo</code>：为设备代码生成行号信息。该选项<strong>不影响运行性能</strong>，常配合 compute-sanitizer 工具追踪核函数执行。<br>
+nvcc 默认对 GPU 代码使用最高优化等级<code class="notranslate">-O3</code>。调试选项<code class="notranslate">-G</code>会禁用一部分编译器优化，因此调试版本性能会低于发布版本。可定义<code class="notranslate">-DNDEBUG</code>关闭运行时断言（断言同样会拖慢执行速度）。</li>
+</ul>
+<h2>4.3 优化选项</h2>
+<p>nvcc 提供大量性能优化选项。本节简要介绍开发者常用的部分选项，附带相关参考链接；完整内容请查阅 nvcc 文档。</p>
+<ul>
+<li><code class="notranslate">-Xptxas</code>：将参数传递给 PTX 汇编器 ptxs。nvcc 文档列出了 ptxs 的常用参数。例如<code class="notranslate">-Xptxas=-maxrregcount=N</code>用于指定每个线程最多可使用的寄存器数量。</li>
+<li><code class="notranslate">-extra-device-vectorization</code>：开启更激进的设备代码向量化优化。</li>
+<li><code class="notranslate">--apply-controls=/path/to/file</code>：向 nvcc 与 ptxas 传入高级控制文件（ACF）。该文件会修改默认编译行为，使编译更适配特定负载。使用高级控制文件可能引发编译失败或运行结果错误，请自行承担风险。可访问 CompileIQ GitHub 主页了解高级控制文件的生成方法。<br>
+其余用于精细控制浮点数行为的选项<br>
+下面这些选项用于输出编译器报告，对高级代码优化很有用：</li>
+<li><code class="notranslate">-res-usage</code>：编译结束后打印资源使用报告，包含每个核函数分配的寄存器、共享内存、常量内存与本地内存大小。</li>
+<li><code class="notranslate">-opt-info=inline</code>：打印函数内联相关信息。</li>
+<li><code class="notranslate">-Xptxas=-warn-lmem-usage</code>：使用本地内存时输出警告。</li>
+<li><code class="notranslate">-Xptxas=-warn-spills</code>：寄存器溢出到本地内存时输出警告。</li>
+</ul>
+<h2>4.4 链接时优化（LTO）</h2>
+<p>分离编译由于跨文件优化的能力受限，性能可能低于全程序编译。<strong>链接时优化（LTO）</strong> 可以解决该问题：它在链接阶段，对多个独立编译得到的文件执行跨文件优化；代价是编译耗时增加。LTO 能够在保留分离编译灵活性的同时，恢复大部分全程序编译的性能。</p>
+<p>nvcc 需要使用 <strong><code class="notranslate">-dlto</code></strong> 选项，或是 <code class="notranslate">lto_&lt;SM版本&gt;</code> 这类链接时优化目标，来开启 LTO：</p>
+<div class="highlight highlight-source-shell"><pre class="notranslate">nvcc -dc -dlto -arch=sm_100 definition.cu -o definition.o
+nvcc -dc -dlto -arch=sm_100 example.cu    -o example.o
+nvcc -dlto definition.o example.o -o program</pre></div>
+<div class="highlight highlight-source-shell"><pre class="notranslate">nvcc -dc -arch=lto_100 definition.cu -o definition.o
+nvcc -dc -arch=lto_100 example.cu    -o example.o
+nvcc -dlto definition.o example.o -o program</pre></div>
+<h2>4.5 性能分析选项</h2>
+<p>可直接使用 Nsight Compute 和 Nsight Systems 工具对 CUDA 程序做性能分析，<strong>编译阶段无需额外传参数</strong>。不过，nvcc 可以生成附加信息，将源码与生成的机器代码关联起来，辅助性能分析：</p>
+<ul>
+<li><code class="notranslate">-lineinfo</code>：为设备代码生成行号信息；可在性能分析工具里查看源代码。性能分析工具要求<strong>原始源码必须放在编译时的相同路径下</strong>。</li>
+<li><code class="notranslate">-src-in-ptx</code>：将原始源代码保留在 PTX 中，规避上面 <code class="notranslate">-lineinfo</code> 的路径限制。<strong>该选项必须搭配 <code class="notranslate">-lineinfo</code> 使用</strong>。</li>
+</ul>
+<h2>4.6 Fatbin压缩</h2>
+<p>nvcc 默认会对程序或库二进制文件内存储的 fatbin 进行压缩。可通过下面选项控制 fatbin 压缩行为：</p>
+<ul>
+<li><code class="notranslate">-no-compress</code>：关闭 fatbin 压缩。</li>
+<li><code class="notranslate">--compress-mode={default|size|speed|balance|none}</code>：设置压缩模式。
+<ul>
+<li><code class="notranslate">speed</code>：优先保证快速解压；</li>
+<li><code class="notranslate">size</code>：目标是减小 fatbin 文件体积；</li>
+<li><code class="notranslate">balance</code>：在解压速度与文件大小之间做权衡；</li>
+<li>默认模式为 <code class="notranslate">speed</code>；</li>
+<li><code class="notranslate">none</code>：关闭压缩。</li>
+</ul>
+</li>
+</ul>
+<h2>4.7 编译器性能控制选项</h2>
+<p>nvcc 提供了若干选项，用于分析并<strong>加速编译过程本身</strong>：</p>
+<ul>
+<li><code class="notranslate">-t &lt;N&gt;</code>：针对单个编译单元，为多 GPU 架构并行编译所使用的 CPU 线程数。</li>
+<li><code class="notranslate">-split-compile &lt;N&gt;</code>：优化阶段并行处理所用的 CPU 线程数。</li>
+<li><code class="notranslate">-split-compile-extended &lt;N&gt;</code>：更激进的拆分编译模式，<strong>需要开启链接时优化（LTO）</strong>。</li>
+<li><code class="notranslate">-Ofc &lt;N&gt;</code>：设备代码编译速度等级。</li>
+<li><code class="notranslate">-time &lt;filename&gt;</code>：生成 CSV（逗号分隔值）表格，记录每个编译阶段耗时。</li>
+<li><code class="notranslate">-fdevice-time-trace</code>：生成设备代码编译的时间追踪日志。</li>
+</ul></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
