@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="本节将介绍更高级的 CUDA API 与特性。">
+<meta property="og:title" content="CUDA官方文档学习9：高级CUDA API和特性">
+<meta property="og:description" content="本节将介绍更高级的 CUDA API 与特性。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/CUDA-guan-fang-wen-dang-xue-xi-9%EF%BC%9A-gao-ji-CUDA%20API-he-te-xing.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>CUDA官方文档学习9：高级CUDA API和特性</title>
+<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">CUDA官方文档学习9：高级CUDA API和特性</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/80" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>本节将介绍更高级的 CUDA API 与特性。本节所讨论的技术或特性，通常不需要修改 CUDA 内核代码，但依然可以在主机侧（host-side）、应用层面影响 GPU 任务执行、性能表现，同时也会影响 CPU 侧性能。</p>
+<h1>一、cudaLaunchKernelEx</h1>
+<p>在 CUDA 早期版本引入三尖括号语法（<code class="notranslate">&lt;&lt;&lt;&gt;&gt;&gt;</code>）时，内核的启动配置（Kernel Configuration）仅有 4 个可编程参数：</p>
+<ul>
+<li>线程块维度（thread block dimensions）</li>
+<li>网格维度（grid dimensions）</li>
+<li>动态共享内存（可选；未指定时为 0）</li>
+<li>流（stream；未指定时使用默认流）<br>
+部分 CUDA 特性可以受益于在内核启动时额外传入的属性与提示信息。 <code class="notranslate">cudaLaunchKernelEx</code> 允许程序通过 <code class="notranslate">cudaLaunchConfig_t</code> 结构体设置上述执行配置参数。除此之外，<code class="notranslate">cudaLaunchConfig_t</code> 结构体还支持传入一个或多个 <code class="notranslate">cudaLaunchAttribute</code>，用于对内核启动的其他行为进行控制或给出性能提示。</li>
+</ul>
+<p>例如：</p>
+<ul>
+<li><code class="notranslate">cudaLaunchAttributePreferredSharedMemoryCarveout</code>（后续小节会讲解），需要通过 <code class="notranslate">cudaLaunchKernelEx</code> 来指定；</li>
+<li><code class="notranslate">cudaLaunchAttributeClusterDimension</code> 属性（本章后续讲解），用于指定本次内核启动期望的集群大小。</li>
+</ul>
+<h1>二、启动簇（cluster）</h1>
+<p>前文介绍的<strong>线程块簇（Thread block clusters）</strong>，是计算能力 9.0 及以上硬件才支持的可选线程块组织层级。它可以保证：同一个簇内的所有线程块，会在<strong>同一个 GPC 上同时执行</strong>。这就允许规模超过单个 SM 容纳上限的线程组，互相交换数据并执行同步操作。</p>
+<p><a href="https://waibibab-cs.github.io/post/CUDA-guan-fang-wen-dang-xue-xi-2%EF%BC%9ACUDA%20C%2B%2B-ru-men.html#6.%E7%BA%BF%E7%A8%8B%E5%9D%97%E9%9B%86%E7%BE%A4" rel="nofollow">cuda c++</a>第六小节展示了如何使用三尖括号语法来声明并启动使用簇特性的内核。在该小节中，使用<code class="notranslate">__cluster_dims__</code>注解指定启动内核时必须采用的簇维度。如果使用三尖括号语法启动，簇的大小是<strong>隐式确定</strong>的。</p>
+<h2>2.1 使用 <code class="notranslate">cudaLaunchKernelEx</code> 启动带簇特性的内核</h2>
+<p>和使用三尖括号语法启动簇内核不同：采用本 API 时，<strong>每次启动都可以单独配置线程块簇的大小</strong>。下方代码示例演示如何使用<code class="notranslate">cudaLaunchKernelEx</code>启动簇内核。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> Kernel definition</span>
+<span class="pl-c"><span class="pl-c">//</span> No compile time attribute attached to the kernel</span>
+__global__ <span class="pl-k">void</span> <span class="pl-en">cluster_kernel</span>(<span class="pl-k">float</span> *input, <span class="pl-k">float</span>* output)
+{
+
+}
+
+<span class="pl-k">int</span> <span class="pl-en">main</span>()
+{
+    <span class="pl-k">float</span> *input, *output;
+    dim3 <span class="pl-smi">threadsPerBlock</span>(<span class="pl-c1">16</span>, <span class="pl-c1">16</span>);
+    dim3 <span class="pl-smi">numBlocks</span>(N / threadsPerBlock.<span class="pl-smi">x</span>, N / threadsPerBlock.<span class="pl-smi">y</span>);
+
+    <span class="pl-c"><span class="pl-c">//</span> Kernel invocation with runtime cluster size</span>
+    {
+        cudaLaunchConfig_t config = {<span class="pl-c1">0</span>};
+        <span class="pl-c"><span class="pl-c">//</span> The grid dimension is not affected by cluster launch, and is still enumerated</span>
+        <span class="pl-c"><span class="pl-c">//</span> using number of blocks.</span>
+        <span class="pl-c"><span class="pl-c">//</span> The grid dimension should be a multiple of cluster size.</span>
+        config.<span class="pl-smi">gridDim</span> = numBlocks;
+        config.<span class="pl-smi">blockDim</span> = threadsPerBlock;
+
+        cudaLaunchAttribute attribute[<span class="pl-c1">1</span>];
+        attribute[<span class="pl-c1">0</span>].<span class="pl-smi">id</span> = cudaLaunchAttributeClusterDimension;
+        attribute[<span class="pl-c1">0</span>].<span class="pl-smi">val</span>.<span class="pl-smi">clusterDim</span>.<span class="pl-smi">x</span> = <span class="pl-c1">2</span>; <span class="pl-c"><span class="pl-c">//</span> Cluster size in X-dimension</span>
+        attribute[<span class="pl-c1">0</span>].<span class="pl-smi">val</span>.<span class="pl-smi">clusterDim</span>.<span class="pl-smi">y</span> = <span class="pl-c1">1</span>;
+        attribute[<span class="pl-c1">0</span>].<span class="pl-smi">val</span>.<span class="pl-smi">clusterDim</span>.<span class="pl-smi">z</span> = <span class="pl-c1">1</span>;
+        config.<span class="pl-smi">attrs</span> = attribute;
+        config.<span class="pl-smi">numAttrs</span> = <span class="pl-c1">1</span>;
+
+        <span class="pl-c1">cudaLaunchKernelEx</span>(&amp;config, cluster_kernel, input, output);
+    }
+}</pre></div>
+<p>有两类和线程块簇（thread block clusters）相关的 <code class="notranslate">cudaLaunchAttribute</code>： <code class="notranslate">cudaLaunchAttributeClusterDimension</code> 与 <code class="notranslate">cudaLaunchAttributePreferredClusterDimension</code>。</p>
+<p>属性 ID <code class="notranslate">cudaLaunchAttributeClusterDimension</code> 用于指定<strong>必需的簇维度</strong>，内核将按照该维度执行簇。该属性的值 <code class="notranslate">clusterDim</code> 是一个三维值。网格（grid）对应的 x、y、z 维度，<strong>必须能被所指定簇维度的对应分量整除</strong>。设置该属性的效果，类似于在内核定义时加上编译期属性 <code class="notranslate">__cluster_dims__</code>（参见《使用三尖括号语法启动簇》小节），但它的优势是：<strong>同一个内核，在多次启动时，可以在运行时修改簇维度</strong>。</p>
+<p>对于计算能力 10.0 及以上的 GPU，另一属性 ID <code class="notranslate">cudaLaunchAttributePreferredClusterDimension</code> 允许应用额外指定<strong>首选簇维度</strong>。首选簇维度必须是内核上 <code class="notranslate">__cluster_dims__</code> 属性，或是传给 <code class="notranslate">cudaLaunchKernelEx</code> 的 <code class="notranslate">cudaLaunchAttributeClusterDimension</code> 所规定的<strong>最小簇维度的整数倍</strong>。也就是说：除首选簇维度之外，必须额外指定一个最小簇维度。网格（grid）对应的 x、y、z 维度，也必须能被该首选簇维度的对应分量整除。</p>
+<p>所有线程块都会以至少等于最小簇维度的簇来执行。在条件允许时，会采用首选簇维度，但不保证所有簇都一定按照首选簇维度执行。所有线程块的簇大小只会是最小簇维度或者首选簇维度二者之一。使用首选簇维度的内核，必须保证：无论是在最小簇维度还是首选簇维度下运行，内核逻辑都能正确工作。</p>
+<h2>2.2 以簇为单位定义线程块</h2>
+<p>当内核使用 <code class="notranslate">__cluster_dims__</code> 注解定义时，网格内簇的数量是隐式确定的，可以用网格总大小除以指定的簇大小计算得到。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-en">__cluster_dims__</span>((<span class="pl-c1">2</span>, <span class="pl-c1">2</span>, <span class="pl-c1">2</span>)) __global__ void foo();
+<span class="pl-c"><span class="pl-c">//</span> 8x8x8 clusters each with 2x2x2 thread blocks.</span>
+foo&lt;&lt;&lt;dim3(<span class="pl-c1">16</span>, <span class="pl-c1">16</span>, <span class="pl-c1">16</span>), dim3(<span class="pl-c1">1024</span>, <span class="pl-c1">1</span>, <span class="pl-c1">1</span>)&gt;&gt;&gt;();</pre></div>
+<p>在上例中，内核启动时网格包含 16×16×16 个线程块，这等价于使用了 8×8×8 个簇。</p>
+<p>内核还可以使用另一种注解 <code class="notranslate">__block_size__</code>，在内核定义阶段同时指定所需的线程块大小与簇大小。使用该注解后，三尖括号启动语法里传入的网格维度，<strong>不再代表线程块数量，而是代表簇的数量</strong>，如下所示。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> Implementation detail of how many threads per block and blocks per cluster</span>
+<span class="pl-c"><span class="pl-c">//</span> is handled as an attribute of the kernel.</span>
+<span class="pl-en">__block_size__</span>((<span class="pl-c1">1024</span>, <span class="pl-c1">1</span>, <span class="pl-c1">1</span>), (<span class="pl-c1">2</span>, <span class="pl-c1">2</span>, <span class="pl-c1">2</span>)) __global__ void foo();
+<span class="pl-c"><span class="pl-c">//</span> 8x8x8 clusters.</span>
+foo&lt;&lt;&lt;dim3(<span class="pl-c1">8</span>, <span class="pl-c1">8</span>, <span class="pl-c1">8</span>)&gt;&gt;&gt;();</pre></div>
+<p><code class="notranslate">__block_size__</code> 需要传入两个三元组参数。第一个三元组表示线程块维度，第二个三元组代表簇大小；如果省略第二个三元组，则默认取值为<code class="notranslate">(1,1,1)</code>。在内核启动时如果要指定动态共享内存大小、或者指定流，那么三尖括号<code class="notranslate">&lt;&lt;&lt;&gt;&gt;&gt;</code>中的第二个参数必须填写占位值<code class="notranslate">1</code>；填写其他数值会导致未定义行为。</p>
+<p>注意：不能同时在 <code class="notranslate">__block_size__</code> 和 <code class="notranslate">__cluster_dims__</code> 中设置第二个三元组；同时，<code class="notranslate">__block_size__</code> 搭配空的 <code class="notranslate">__cluster_dims__</code> 也是非法写法。当指定了 <code class="notranslate">__block_size__</code> 的第二个三元组时，代表启用 “以簇为单位定义线程块（Blocks as Clusters）” 特性，编译器会把<code class="notranslate">&lt;&lt;&lt;&gt;&gt;&gt;</code>内的第一个参数解读为<strong>簇的数量</strong>，而不是线程块数量。</p>
+<h1>三、stream与event的更多细节</h1>
+<p>CUDA 流章节介绍了 CUDA 流的基础概念。默认情况下，提交到同一个 CUDA 流上的操作是串行执行的：后一个操作必须等待前一个操作完成后才能开始执行。唯一例外是新引入的<strong>可编程依赖启动与同步（Programmatic Dependent Launch and Synchronization）</strong> 特性。使用多个 CUDA 流是实现并发执行的一种方式；另一种方式是使用 CUDA 图。这两种方案也可以组合使用。</p>
+<p>提交至不同 CUDA 流的任务，在满足特定条件时可以并发执行，例如：不存在事件依赖、不存在隐式同步、GPU 资源充足等。</p>
+<p>若在两个来自不同 CUDA 流的独立操作之间，提交了任何 NULL 流上的 CUDA 操作，那么这两个独立操作就无法并发执行；除非这些流是非阻塞 CUDA 流。这类流通过运行时 API <code class="notranslate">cudaStreamCreateWithFlags()</code>，搭配<code class="notranslate">cudaStreamNonBlocking</code>标志创建。为提升 GPU 任务并发执行的潜力，推荐用户创建非阻塞 CUDA 流。</p>
+<p>同时建议用户选择<strong>满足需求的最低粒度同步原语</strong>。举例来说，如果仅需要 CPU 阻塞等待某一个指定 CUDA 流上的全部任务完成，应当优先使用针对该流的<code class="notranslate">cudaStreamSynchronize()</code>，而非<code class="notranslate">cudaDeviceSynchronize()</code>；后者会不必要地等待该设备上所有 CUDA 流中的 GPU 任务全部结束。如果需要 CPU 等待但不阻塞，则可以在轮询循环中调用<code class="notranslate">cudaStreamQuery()</code>并检查返回值。</p>
+<p>借助 CUDA 事件（CUDA Events）也可以实现类似的同步效果。例如：在该流上记录事件，调用<code class="notranslate">cudaEventSynchronize()</code>以阻塞方式等待该事件捕获的任务完成。同样，该方式相比<code class="notranslate">cudaDeviceSynchronize()</code>更优、作用范围更精准。调用<code class="notranslate">cudaEventQuery()</code>并在轮询循环中检查返回值，则是对应的非阻塞方案。</p>
+<p>如果同步操作处于应用程序的<strong>关键路径</strong>上，同步方式的选择就尤为重要。表 4 从宏观层面总结了主机端各类同步方案。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260927135328.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260927135328.png" alt="image.png" style="max-width: 100%;"></a><br>
+若要在多个 CUDA 流之间实现同步（即表达任务依赖关系），推荐使用<strong>非计时型 CUDA 事件</strong>，详见 CUDA 事件章节。开发者可以调用<code class="notranslate">cudaStreamWaitEvent()</code>，让某个流后续提交的所有操作，等待一个预先记录完成的事件（例如，该事件记录在另一个流上）。需要注意：对于任何等待或查询事件状态的 CUDA API，开发者必须保证已经提前调用过<code class="notranslate">cudaEventRecord</code>；未经记录的事件，查询时会始终返回成功。</p>
+<p>CUDA 事件默认会携带计时信息，供<code class="notranslate">cudaEventElapsedTime()</code>接口调用。但如果 CUDA 事件仅用于表达流之间的任务依赖，则不需要计时信息。这类场景下，推荐创建<strong>禁用计时信息</strong>的事件以提升性能。可以通过<code class="notranslate">cudaEventCreateWithFlags()</code>接口搭配<code class="notranslate">cudaEventDisableTiming</code>标志实现。</p>
+<h2>3.1 流的优先级</h2>
+<p>流的相对优先级可在创建流时通过<code class="notranslate">cudaStreamCreateWithPriority()</code>指定。可用优先级范围按【最高优先级，最低优先级】顺序，可调用<code class="notranslate">cudaDeviceGetStreamPriorityRange()</code>获取。运行时，GPU 调度器会参考流优先级来决定任务的执行顺序，但这些优先级仅为<strong>提示（hint）</strong>，而非硬性保证。</p>
+<p>在挑选待启动任务时，高优先级流中的待执行任务会优先于低优先级流任务。高优先级任务不会抢占已经正在运行的低优先级任务。GPU 不会在任务执行过程中重新评估任务队列；提升某个流的优先级，也无法中断正在执行中的任务。流优先级仅对任务执行产生倾向性影响，并不强制严格的执行顺序。开发者可以利用流优先级来调控任务执行，但不能依赖它获得严格的顺序保证。</p>
+<p>下面的代码示例将获取当前设备支持的优先级范围，并创建两个非阻塞 CUDA 流，分别赋予设备可用的最高优先级与最低优先级。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> get the range of stream priorities for this device</span>
+<span class="pl-k">int</span> leastPriority, greatestPriority;
+<span class="pl-en">cudaDeviceGetStreamPriorityRange</span>(&amp;leastPriority, &amp;greatestPriority);
+
+<span class="pl-c"><span class="pl-c">//</span> create streams with highest and lowest available priorities</span>
+cudaStream_t st_high, st_low;
+<span class="pl-en">cudaStreamCreateWithPriority</span>(&amp;st_high, cudaStreamNonBlocking, greatestPriority));
+<span class="pl-en">cudaStreamCreateWithPriority</span>(&amp;st_low, cudaStreamNonBlocking, leastPriority);</pre></div>
+<h2>3.2 显式同步</h2>
+<p>如前文所述，流之间存在多种同步方式。下文介绍不同粒度下的常用方法：</p>
+<ul>
+<li><strong>cudaDeviceSynchronize()</strong>：阻塞等待，直到所有主机线程的所有流中，此前提交的全部命令都执行完毕。</li>
+<li><strong>cudaStreamSynchronize()</strong>：接收一个流作为参数，阻塞等待该流内所有先前提交的命令执行完成。可用于让主机与指定流完成同步，设备上其他流可继续执行。</li>
+<li><strong>cudaStreamWaitEvent()</strong>：接收一个流与一个事件作为参数（事件相关说明参见 CUDA 事件章节）。调用该函数后，添加到指定流内的后续所有命令，都会延迟执行，直到给定事件完成。</li>
+<li><strong>cudaStreamQuery()</strong>：为应用程序提供查询接口，判断某个流中先前提交的全部命令是否已经执行完毕。</li>
+</ul>
+<h2>3.3 隐式同步</h2>
+<p>如果主机线程在来自不同流的两条命令之间，执行了下述任意一种操作，则这两条命令无法并发执行：</p>
+<ul>
+<li>分配页锁定主机内存</li>
+<li>分配设备内存</li>
+<li>设备内存置值操作</li>
+<li>同一设备内存地址空间内的内存拷贝</li>
+<li>提交至 NULL 流（默认流）的任意 CUDA 命令</li>
+<li>在 L1 缓存 / 共享内存的不同配置之间切换<br>
+需要做依赖检查的操作包含：待检查核函数所在流内的其他所有命令，以及对该流执行的<code class="notranslate">cudaStreamQuery()</code>调用。因此应用程序应当遵循以下准则，最大化内核并发执行的可能性：</li>
+<li>所有相互独立的操作，应当在存在依赖关系的操作之前提交；</li>
+<li>任何形式的同步操作，都应当尽可能延后执行。</li>
+</ul>
+<h1>四、可编程依赖内核启动（PDL）</h1>
+<p>正如前文所述，CUDA 流的语义保证内核按提交顺序执行。 如此一来，若存在两个连续内核，且第二个内核依赖第一个内核的计算结果，开发者可以放心：当第二个内核开始执行时，其所依赖的数据已经就绪。</p>
+<p>但存在这样一种场景：第一个内核已经把后续内核所需的数据写入全局内存，而它自身还有剩余工作尚未完成；同理，被依赖的第二个内核，在需要读取第一个内核的数据之前，也可以执行一部分与该数据无关的独立计算。 在这种场景下，<strong>两个内核的执行可以部分重叠</strong>（前提是硬件资源充足）。这种重叠也可以覆盖第二个内核的启动开销。</p>
+<p>除硬件资源余量之外，可实现的重叠程度取决于内核的具体结构，例如：</p>
+<ul>
+<li>第一个内核在执行的哪个阶段，完成第二个内核所依赖的计算；</li>
+<li>第二个内核在执行的哪个阶段，才开始使用第一个内核输出的数据。</li>
+</ul>
+<p>由于该特性高度依赖具体内核逻辑，很难做到完全自动化。因此 CUDA 提供了一种机制，允许应用开发者手动指定两个内核之间的同步点，该技术就叫做<strong>可编程依赖内核启动（Programmatic Dependent Kernel Launch）</strong>，相关时序场景见下图。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260928153115.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260928153115.png" alt="image.png" style="max-width: 100%;"></a><br>
+i. 第一个内核（称为<strong>主内核 primary kernel</strong>）需要调用一个专用函数，标记它已经完成后续依赖内核（也叫<strong>次内核 secondary kernel</strong>）所需的全部数据准备工作。该操作用函数 <code class="notranslate">cudaTriggerProgrammaticLaunchCompletion()</code> 实现。</p>
+<p>ii. 对应的依赖次内核，需要标记：它已经执行完自身所有与主内核无关的独立计算，现在开始等待主内核完成其所依赖的计算任务。该操作用函数 <code class="notranslate">cudaGridDependencySynchronize()</code> 实现。</p>
+<p>iii. 启动第二个内核时，需要设置特殊启动属性：<code class="notranslate">cudaLaunchAttributeProgrammaticStreamSerialization</code>，并将其字段 <code class="notranslate">programmaticStreamSerializationAllowed</code> 设置为 <code class="notranslate">1</code>。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__global__ <span class="pl-k">void</span> <span class="pl-en">primary_kernel</span>() {
+    <span class="pl-c"><span class="pl-c">//</span> Initial work that should finish before starting secondary kernel</span>
+
+    <span class="pl-c"><span class="pl-c">//</span> Trigger the secondary kernel</span>
+    <span class="pl-c1">cudaTriggerProgrammaticLaunchCompletion</span>();
+
+    <span class="pl-c"><span class="pl-c">//</span> Work that can coincide with the secondary kernel</span>
+}
+
+__global__ <span class="pl-k">void</span> <span class="pl-en">secondary_kernel</span>()
+{
+    <span class="pl-c"><span class="pl-c">//</span> Initialization, Independent work, etc.</span>
+
+    <span class="pl-c"><span class="pl-c">//</span> Will block until all primary kernels the secondary kernel is dependent on have</span>
+    <span class="pl-c"><span class="pl-c">//</span> completed and flushed results to global memory</span>
+    <span class="pl-c1">cudaGridDependencySynchronize</span>();
+
+    <span class="pl-c"><span class="pl-c">//</span> Dependent work</span>
+}
+
+<span class="pl-c"><span class="pl-c">//</span> Launch the secondary kernel with the special attribute</span>
+
+<span class="pl-c"><span class="pl-c">//</span> Set Up the attribute</span>
+cudaLaunchAttribute attribute[<span class="pl-c1">1</span>];
+attribute[<span class="pl-c1">0</span>].id = cudaLaunchAttributeProgrammaticStreamSerialization;
+attribute[<span class="pl-c1">0</span>].val.programmaticStreamSerializationAllowed = <span class="pl-c1">1</span>;
+
+<span class="pl-c"><span class="pl-c">//</span> Set the attribute in a kernel launch configuration</span>
+ cudaLaunchConfig_t config = {<span class="pl-c1">0</span>};
+
+<span class="pl-c"><span class="pl-c">//</span> Base launch configuration</span>
+config.gridDim = grid_dim;
+config.blockDim = block_dim;
+config.dynamicSmemBytes= <span class="pl-c1">0</span>;
+config.stream = stream;
+
+<span class="pl-c"><span class="pl-c">//</span> Add special attribute for PDL</span>
+config.attrs = attribute;
+config.numAttrs = <span class="pl-c1">1</span>;
+
+<span class="pl-c"><span class="pl-c">//</span> Launch primary kernel</span>
+primary_kernel&lt;&lt;&lt;grid_dim, block_dim, <span class="pl-c1">0</span>, stream&gt;&gt;&gt;();
+
+<span class="pl-c"><span class="pl-c">//</span> Launch secondary (dependent) kernel using the configuration with</span>
+<span class="pl-c"><span class="pl-c">//</span> the attribute</span>
+<span class="pl-en">cudaLaunchKernelEx</span>(&amp;config, secondary_kernel);</pre></div>
+<h1>五、批量内存传输</h1>
+<p>在 CUDA 开发中，批量处理是一种常见技术模式。宽泛来讲，批量就是将若干个（通常是小规模的）任务打包合并为单个（通常规模更大的）操作。批次内的子任务不必完全相同，尽管多数场景下它们是一致的。cuBLAS 库提供的批量矩阵乘法就是该思想的典型例子。</p>
+<p>一般来说，和 CUDA Graph、PDL 类似，批量处理的目的是降低<strong>逐个提交子任务带来的调度开销</strong>。在内存传输场景下，每次发起内存拷贝都会产生一定的 CPU 与驱动开销。此外，常规的<code class="notranslate">cudaMemcpyAsync()</code>函数，就其现有接口形式而言，无法向驱动提供充足信息用于传输优化，例如源地址、目标地址相关的提示信息。 在 Tegra 平台上，开发者可以选择使用流式多处理器（SM）或者拷贝引擎（CE）来执行数据传输。该选择目前由驱动中的启发式策略决定。这一点十分关键：使用 SM 执行传输可能获得更快的拷贝速度，但会占用一部分可用计算资源；反过来，使用 CE 拷贝虽然传输速度可能更慢，但整体应用性能反而更高，因为 SM 可以保留下来执行其他计算任务。</p>
+<p>上述考量推动了<code class="notranslate">cudaMemcpyBatchAsync()</code>（以及配套的<code class="notranslate">cudaMemcpyBatch3DAsync()</code>）接口的设计。这组 API 支持对批量内存传输做优化。除源地址、目标地址指针数组之外，该 API 还可以通过内存拷贝属性，指定：</p>
+<ul>
+<li>对拷贝执行顺序的预期；</li>
+<li>源端、目的端存储位置的提示；</li>
+<li>是否希望让数据传输与计算任务重叠执行（该特性目前仅在带 CE 拷贝引擎的 Tegra 平台上支持）。</li>
+</ul>
+<p>我们先来看最简单的用例：将锁页主机内存的数据批量传输至锁页设备内存。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">std::vector&lt;<span class="pl-k">void</span> *&gt; <span class="pl-en">srcs</span>(batch_size);
+std::vector&lt;<span class="pl-k">void</span> *&gt; <span class="pl-en">dsts</span>(batch_size);
+std::vector&lt;<span class="pl-c1">size_t</span>&gt; <span class="pl-en">sizes</span>(batch_size);
+
+<span class="pl-c"><span class="pl-c">//</span> Allocate the source and destination buffers</span>
+<span class="pl-c"><span class="pl-c">//</span> initialize with the stream number</span>
+<span class="pl-k">for</span> (<span class="pl-c1">size_t</span> i = <span class="pl-c1">0</span>; i &lt; batch_size; i++) {
+    <span class="pl-c1">cudaMallocHost</span>(&amp;srcs[i], sizes[i]);
+    <span class="pl-c1">cudaMalloc</span>(&amp;dsts[i], sizes[i]);
+    <span class="pl-c1">cudaMemsetAsync</span>(srcs[i], sizes[i], stream);
+}
+
+<span class="pl-c"><span class="pl-c">//</span> Setup attributes for this batch of copies</span>
+cudaMemcpyAttributes attrs = {};
+attrs.srcAccessOrder = cudaMemcpySrcAccessOrderStream;
+
+<span class="pl-c"><span class="pl-c">//</span> All copies in the batch have same copy attributes.</span>
+<span class="pl-c1">size_t</span> attrsIdxs = <span class="pl-c1">0</span>;  <span class="pl-c"><span class="pl-c">//</span> Index of the attributes</span>
+
+<span class="pl-c"><span class="pl-c">//</span> Launch the batched memory transfer</span>
+<span class="pl-en">cudaMemcpyBatchAsync</span>(&amp;dsts[<span class="pl-c1">0</span>], &amp;srcs[<span class="pl-c1">0</span>], &amp;sizes[<span class="pl-c1">0</span>], batch_size,
+    &amp;attrs, &amp;attrsIdxs, <span class="pl-c1">1</span> <span class="pl-c"><span class="pl-c">/*</span>numAttrs<span class="pl-c">*/</span></span>, <span class="pl-c1">nullptr</span> <span class="pl-c"><span class="pl-c">/*</span>failIdx<span class="pl-c">*/</span></span>, stream);</pre></div>
+<p><code class="notranslate">cudaMemcpyBatchAsync()</code> 的前几个参数很容易理解：它们是存放源指针、目标指针以及传输长度的数组，每个数组都必须包含 <code class="notranslate">batch_size</code> 个元素。新增的信息来自拷贝属性。该函数需要一个指向属性数组的指针，以及对应的属性索引数组。原则上还可以传入一个 <code class="notranslate">size_t</code> 类型数组，用于记录发生失败的传输任务编号；但此处传入 <code class="notranslate">nullptr</code> 也是安全的，这种情况下不会记录失败任务的索引。</p>
+<p>再来看属性部分。在本示例中，所有传输任务是同构的，因此我们仅使用一套属性，并将其应用于全部传输任务。这一点由属性索引（attrIndex）参数控制。该参数本质上可以是一个数组：数组第<code class="notranslate">i</code>个元素代表属性数组第<code class="notranslate">i</code>项所作用的第一个传输任务的下标。本例中，attrIndex 被视作只有单个元素的数组，取值为<code class="notranslate">0</code>，含义是：<code class="notranslate">attribute[0]</code> 将作用于下标从 0 开始的所有传输任务，也就是全部传输。</p>
+<p>最后说明：我们将 <code class="notranslate">srcAccessOrder</code> 属性设置为 <code class="notranslate">cudaMemcpySrcAccessOrderStream</code>。这代表源数据将按照流的提交顺序进行访问。换言之，本次内存拷贝会阻塞，直到流中所有操作这些源、目标指针数据的前置内核全部执行完成。程序必须保证源内存在拷贝完成前始终有效且不被修改。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260928162725.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20260928162725.png" alt="image.png" style="max-width: 100%;"></a></p>
+<p>下一个示例，我们将介绍更复杂的异构批量传输场景。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">std::vector&lt;<span class="pl-k">void</span> *&gt; <span class="pl-en">srcs</span>(batch_size);
+std::vector&lt;<span class="pl-k">void</span> *&gt; <span class="pl-en">dsts</span>(batch_size);
+std::vector&lt;<span class="pl-c1">size_t</span>&gt; <span class="pl-en">sizes</span>(batch_size);
+
+<span class="pl-c"><span class="pl-c">//</span> Allocate the src and dst buffers</span>
+<span class="pl-k">for</span> (<span class="pl-c1">size_t</span> i = <span class="pl-c1">0</span>; i &lt; batch_size - <span class="pl-c1">10</span>; i++) {
+    <span class="pl-c1">cudaMallocHost</span>(&amp;srcs[i], sizes[i]);
+    <span class="pl-c1">cudaMalloc</span>(&amp;dsts[i], sizes[i]);
+}
+
+<span class="pl-k">int</span> buffer[<span class="pl-c1">10</span>];
+
+<span class="pl-k">for</span> (<span class="pl-c1">size_t</span> i = batch_size - <span class="pl-c1">10</span>; i &lt; batch_size; i++) {
+    srcs[i] = &amp;buffer[<span class="pl-c1">10</span> - (batch_size - i];
+    <span class="pl-c1">cudaMalloc</span>(&amp;dsts[i], sizes[i]);
+}
+
+<span class="pl-c"><span class="pl-c">//</span> Setup attributes for this batch of copies</span>
+cudaMemcpyAttributes attrs[<span class="pl-c1">2</span>] = {};
+attrs[<span class="pl-c1">0</span>].srcAccessOrder = cudaMemcpySrcAccessOrderStream;
+attrs[<span class="pl-c1">1</span>].srcAccessOrder = cudaMemcpySrcAccessOrderDuringApiCall;
+
+<span class="pl-c1">size_t</span> attrsIdxs[<span class="pl-c1">2</span>];
+attrsIdxs[<span class="pl-c1">0</span>] = <span class="pl-c1">0</span>;
+attrsIdxs[<span class="pl-c1">1</span>] = batch_size - <span class="pl-c1">10</span>;
+
+<span class="pl-c"><span class="pl-c">//</span> Launch the batched memory transfer</span>
+<span class="pl-en">cudaMemcpyBatchAsync</span>(&amp;dsts[<span class="pl-c1">0</span>], &amp;srcs[<span class="pl-c1">0</span>], &amp;sizes[<span class="pl-c1">0</span>], batch_size,
+    &amp;attrs, &amp;attrsIdxs, <span class="pl-c1">2</span> <span class="pl-c"><span class="pl-c">/*</span>numAttrs<span class="pl-c">*/</span></span>, <span class="pl-c1">nullptr</span> <span class="pl-c"><span class="pl-c">/*</span>failIdx<span class="pl-c">*/</span></span>, stream);</pre></div>
+<p>这里包含两类传输任务：<code class="notranslate">batch_size - 10</code> 个从锁页主机内存向锁页设备内存的传输，以及 10 个从主机数组向锁页设备内存的传输。此外，该缓冲区数组仅存在于主机端，并且生命周期只在当前作用域内 —— 这类地址被称为<strong>临时指针（ephemeral pointer）</strong>。由于 API 是异步执行的，当 API 调用返回后，该指针可能就已经失效。想要使用这类临时指针执行拷贝，必须将属性中的<code class="notranslate">srcAccessOrder</code>设置为<code class="notranslate">cudaMemcpySrcAccessOrderDuringApiCall</code>。</p>
+<p>本例中我们使用两套属性：第一套属性作用于下标从 0 开始、小于<code class="notranslate">batch_size-10</code>的所有传输任务；第二套属性作用于下标从<code class="notranslate">batch_size-10</code>开始、小于<code class="notranslate">batch_size</code>的所有传输任务。</p>
+<p>如果缓冲区数组不是在栈上分配，而是通过<code class="notranslate">malloc</code>在堆上分配，那么这块数据就不再是临时数据。内存会保持有效，直到指针被显式释放。在这种场景下，拷贝的最优调度方式取决于系统硬件：</p>
+<ul>
+<li>如果系统支持硬件托管内存，或者 GPU 可以通过地址转换实现对主机内存的一致性访问，那么推荐使用流顺序模式；</li>
+<li>如果不支持上述特性，则应立即执行传输，此时属性的<code class="notranslate">srcAccessOrder</code>应设置为<code class="notranslate">cudaMemcpyAccessOrderAny</code>。</li>
+</ul>
+<p><code class="notranslate">cudaMemcpyBatchAsync</code>还允许开发者提供源端与目标端存储位置的提示信息。通过设置<code class="notranslate">cudaMemcpyAttributes</code>结构体的<code class="notranslate">srcLocation</code>与<code class="notranslate">dstLocation</code>字段实现。<code class="notranslate">srcLocation</code>和<code class="notranslate">dstLocation</code>均为<code class="notranslate">cudaMemLocation</code>类型，该结构体包含存储位置类型以及位置 ID。 这个<code class="notranslate">cudaMemLocation</code>结构体，和<code class="notranslate">cudaMemPrefetchAsync()</code>中用来向运行时提供预取提示的结构体是同一个。下方代码示例将演示，如何配置从设备内存传输到主机指定 NUMA 节点的提示信息。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> Allocate the source and destination buffers</span>
+std::vector&lt;<span class="pl-k">void</span> *&gt; <span class="pl-en">srcs</span>(batch_size);
+std::vector&lt;<span class="pl-k">void</span> *&gt; <span class="pl-en">dsts</span>(batch_size);
+std::vector&lt;<span class="pl-c1">size_t</span>&gt; <span class="pl-en">sizes</span>(batch_size);
+
+<span class="pl-c"><span class="pl-c">//</span> cudaMemLocation structures we will use tp provide location hints</span>
+<span class="pl-c"><span class="pl-c">//</span> Device device_id</span>
+cudaMemLocation srcLoc = {cudaMemLocationTypeDevice, dev_id};
+
+<span class="pl-c"><span class="pl-c">//</span> Host with numa Node numa_id</span>
+cudaMemLocation dstLoc = {cudaMemLocationTypeHostNuma, numa_id};
+
+<span class="pl-c"><span class="pl-c">//</span> Allocate the src and dst buffers</span>
+<span class="pl-k">for</span> (<span class="pl-c1">size_t</span> i = <span class="pl-c1">0</span>; i &lt; batch_size; i++) {
+    <span class="pl-c1">cudaMallocManaged</span>(&amp;srcs[i], sizes[i]);
+    <span class="pl-c1">cudaMallocManaged</span>(&amp;dsts[i], sizes[i]);
+
+    <span class="pl-c1">cudaMemPrefetchAsync</span>(srcs[i], sizes[i], srcLoc, <span class="pl-c1">0</span>, stream);
+    <span class="pl-c1">cudaMemPrefetchAsync</span>(dsts[i], sizes[i], dstLoc, <span class="pl-c1">0</span>, stream);
+    <span class="pl-c1">cudaMemsetAsync</span>(srcs[i], sizes[i], stream);
+}
+
+<span class="pl-c"><span class="pl-c">//</span> Setup attributes for this batch of copies</span>
+cudaMemcpyAttributes attrs = {};
+
+<span class="pl-c"><span class="pl-c">//</span> These are managed memory pointers so Stream Order is appropriate</span>
+attrs.srcAccessOrder = cudaMemcpySrcAccessOrderStream;
+
+<span class="pl-c"><span class="pl-c">//</span> Now we can specify the location hints here.</span>
+attrs.srcLocHint = srcLoc;
+attrs.dstlocHint = dstLoc;
+
+<span class="pl-c"><span class="pl-c">//</span> All copies in the batch have same copy attributes.</span>
+<span class="pl-c1">size_t</span> attrsIdxs = <span class="pl-c1">0</span>;
+
+<span class="pl-c"><span class="pl-c">//</span> Launch the batched memory transfer</span>
+<span class="pl-en">cudaMemcpyBatchAsync</span>(&amp;dsts[<span class="pl-c1">0</span>], &amp;srcs[<span class="pl-c1">0</span>], &amp;sizes[<span class="pl-c1">0</span>], batch_size,
+    &amp;attrs, &amp;attrsIdxs, <span class="pl-c1">1</span> <span class="pl-c"><span class="pl-c">/*</span>numAttrs<span class="pl-c">*/</span></span>, <span class="pl-c1">nullptr</span> <span class="pl-c"><span class="pl-c">/*</span>failIdx<span class="pl-c">*/</span></span>, stream);</pre></div>
+<p>最后要介绍的是一个标志位，用于提示系统在执行传输时，优先选用 SM（流式多处理器）还是 CE（拷贝引擎）。该配置项位于 <code class="notranslate">cudaMemcpyAttributes::flags</code>，可选取值如下：</p>
+<ul>
+<li><code class="notranslate">cudaMemcpyFlagDefault</code> —— 默认行为</li>
+<li><code class="notranslate">cudaMemcpyFlagPreferOverlapWithCompute</code> —— 提示系统优先使用 CE 执行传输，让数据传输与计算任务实现重叠执行。<br>
+综上，关于 <code class="notranslate">cudaMemcpyBatchAsync</code> 的核心要点总结如下：</li>
+<li><code class="notranslate">cudaMemcpyBatchAsync</code> 函数（及其 3D 版本）支持开发者一次性指定一批内存传输任务，摊薄每一次传输的启动开销。</li>
+<li>除源指针、目标指针和传输长度之外，该函数可接收一组或多组内存拷贝属性。属性可以提供：待传输内存类型、源指针对应的流顺序行为、源端与目标端存储位置提示，以及是否尽可能让传输与计算重叠、或是使用 SM 执行传输的提示。</li>
+<li>基于上述全部信息，CUDA 运行时能够尽可能对内存传输做深度优化。</li>
+</ul>
+<h1>六、环境变量</h1>
+<p>CUDA 提供了多种环境变量（参见 5.2 节），它们能够影响程序执行行为与性能。如果不显式设置，CUDA 会为这些环境变量使用合理的默认值；但部分场景下需要针对性调整，例如用于调试，或是为了提升性能。</p>
+<p>举例而言，增大环境变量 <code class="notranslate">CUDA_DEVICE_MAX_CONNECTIONS</code> 的取值，有助于降低来自不同 CUDA 流的独立任务因<strong>虚假依赖</strong>被串行化执行的概率。当多个任务复用底层相同资源时，就可能产生这类虚假依赖。建议先使用默认值；仅当出现性能问题时（例如：不同 CUDA 流上相互独立的任务发生意料之外的串行执行，且排除了 SM 资源不足等其他原因），再探究该环境变量带来的影响。值得注意：在开启 MPS（多进程服务）时，该环境变量的默认值会更小。</p>
+<p>与之类似，对于延迟敏感型应用，可以将环境变量 <code class="notranslate">CUDA_MODULE_LOADING</code> 设置为 <code class="notranslate">EAGER</code>。此举可以把模块加载带来的全部开销转移到应用初始化阶段，避开业务关键路径。当前默认模式为延迟模块加载（lazy）。在默认模式下，也可以在应用初始化阶段主动调用各个 Kernel 做 “预热”，强制提前加载模块，达到和立即加载相近的效果。</p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
