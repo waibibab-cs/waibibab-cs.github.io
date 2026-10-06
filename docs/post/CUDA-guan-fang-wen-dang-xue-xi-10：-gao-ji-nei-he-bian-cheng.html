@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="本章将首先深入讲解NVIDIA GPU的硬件模型，随后介绍CUDA核代码中用于提升核函数性能的若干高级特性。">
+<meta property="og:title" content="CUDA官方文档学习10：高级内核编程">
+<meta property="og:description" content="本章将首先深入讲解NVIDIA GPU的硬件模型，随后介绍CUDA核代码中用于提升核函数性能的若干高级特性。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/CUDA-guan-fang-wen-dang-xue-xi-10%EF%BC%9A-gao-ji-nei-he-bian-cheng.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>CUDA官方文档学习10：高级内核编程</title>
+<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">CUDA官方文档学习10：高级内核编程</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/82" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>本章将首先深入讲解NVIDIA GPU的硬件模型，随后介绍CUDA核代码中用于提升核函数性能的若干高级特性。本章会引入与线程作用域、异步执行以及配套同步原语相关的一系列概念。这些理论阐述，是理解核代码内各类高级性能特性所必需的基础。</p>
+<p>其中部分特性的详细说明，将在本编程指南后续章节的专题板块展开。</p>
+<p>本章介绍的高级同步原语，完整内容见官当文档4.10节与4.11节。<br>
+异步数据拷贝（含张量内存加速器TMA）在本章进行引入，完整内容见官方文档4.12节。</p>
+<h1>一、使用PTX</h1>
+<p>并行线程执行（PTX）是CUDA用于对硬件指令集架构（ISA）进行抽象的虚拟机指令集架构，已于官方文档1.3.3节介绍。直接编写PTX代码属于高度进阶的优化手段，大多数开发者并不需要使用，仅应作为最后的备选方案。尽管如此，在某些场景下，直接编写PTX所带来的细粒度控制能力，能够为特定应用提升性能。这类场景通常出现在应用中对性能极度敏感的代码段——哪怕只有零点几个百分点的性能提升，也能带来显著收益。全部可用的PTX指令可查阅《PTX指令集架构文档》。</p>
+<p><strong>cuda::ptx 命名空间</strong><br>
+在代码中直接使用PTX的一种方式，是借助libcu++库提供的cuda::ptx命名空间。该命名空间提供了与PTX指令一一对应的C++函数，简化了在C++程序内调用PTX指令的操作。更多详情，请参考cuda::ptx命名空间文档。</p>
+<p><strong>内联PTX</strong><br>
+在代码中嵌入PTX的另一种方式是使用内联PTX。该方法在对应文档中有详细描述，其原理与在CPU上编写汇编代码十分相似。</p>
+<h1>二、硬件实现</h1>
+<p>流式多处理器（Streaming Multiprocessor，简称SM，参见GPU硬件模型）被设计为可并发执行数百个线程。为管理如此大规模的线程，它采用一种独特的并行计算模型——单指令多线程（Single-Instruction, Multiple-Thread，SIMT），相关介绍见《SIMT执行模型》章节。指令采用流水线方式执行，既利用单个线程内部的指令级并行，也通过并发硬件多线程挖掘大规模的线程级并行，详见《硬件多线程》章节。与CPU核心不同，SM按序发射指令，不做分支预测，也不执行推测执行。</p>
+<p>《SIMT执行模型》与《硬件多线程》章节描述了所有GPU设备共有的SM架构特性。《计算能力》章节则针对不同计算能力的设备给出具体细节。</p>
+<p>NVIDIA GPU架构采用小端序存储表示。</p>
+<h2>2.1 SIMT执行模型</h2>
+<p>每个流式多处理器（SM）以warp（线程束）为单位创建、管理、调度和执行线程，一个warp包含32个并行线程。构成warp的所有线程从同一个程序地址开始执行，但每个线程拥有独立的指令地址计数器与寄存器状态，因此可以独立地进行分支、执行不同代码。warp一词源自纺织工艺，是最早的并行线程相关术语。半线程束（half-warp）指一个warp的前16个或后16个线程；四分之一线程束（quarter-warp）则对应一个warp四等分后的其中一组。</p>
+<blockquote>
+<p>同warp的每个线程拥有独立PC（指令地址计数器）+独立寄存器。刚启动的时候，32个线程PC相同，从同一个代码地址开始跑。但是每个线程都有自己单独的PC、单独的寄存器栈。理论上，每个线程可以跑到完全不同的代码地址，独立分支。<br>
+既然每个线程都有独立PC，为什么还会有分支发散？答案在下一段：虽然线程PC独立，但是warp的硬件指令发射单元，一次只能广播一条指令给warp内所有线程。</p>
+</blockquote>
+<p>一个warp每次执行同一条公共指令。因此，当warp内全部32个线程的执行路径一致时，硬件可以达到最高执行效率。如果warp内线程因数据相关的条件分支产生路径分歧，warp会依次执行每一条被选中的分支路径，同时禁用不在该路径上的线程。分支发散仅发生在同一个warp内部；不同warp之间相互独立执行，无论它们执行的代码路径相同还是完全无关。</p>
+<blockquote>
+<p>CUDA的一个warp硬件在同一时刻仅能广播发射单条指令；若warp内32个线程程序计数器PC不一致产生分支分化时，硬件会串行执行不同分支路径：先执行if分支，将走else的线程标记为非活跃，这类线程不参与计算但仍占用指令发射周期，随后再切换执行else分支并禁用if侧线程。当warp出现分支 divergence，原本一轮指令发射就能完成的任务需要多轮发射，直接降低硬件执行效率，极端场景下性能会减半；只有warp内所有线程走完全相同分支时，全部32线程都处于活跃状态，硬件才能跑满100%效率。</p>
+</blockquote>
+<p>SIMT架构与SIMD（单指令多数据）向量体系结构有相似之处：二者均由单条指令控制多个处理单元。但二者存在关键区别：SIMD向量架构会向软件暴露SIMD向量宽度；而SIMT指令定义的是单个线程的执行与分支行为。<br>
+与SIMD向量机不同，SIMT允许程序员编写两种代码：面向独立标量线程的线程级并行代码，以及面向协同线程的数据并行代码。从代码正确性角度来说，程序员基本可以忽略SIMT机制；但如果编写代码时尽量避免warp内线程发生分支发散，能够获得显著的性能提升。<br>
+这一点在实践中类似于高速缓存行：设计代码保证正确性时，可以完全不用关心缓存行大小；但想要达到峰值性能，就必须在代码结构上将其纳入考量。与之相对，向量架构需要软件手动将加载操作合并为向量，并自行处理分支发散问题。</p>
+<blockquote>
+<p>SIMD（如AVX/AVX512）与SIMT的共同点是单条指令控制多个计算单元；二者核心差异在于：SIMD的向量宽度对软件显式暴露，需要程序员手动打包向量数据、用软件mask处理分支，硬件无独立PC，所有向量lane必须同步执行，而SIMT以标量线程为编程单元，开发者编写单线程逻辑，由编译器和硬件自动将32个线程打包为warp，每个线程具备独立PC，支持自由分支；从编码角度，SIMT代码正确性不受warp分支发散影响，仅会带来性能损耗，这一点类似CPU缓存行——保证结果正确时无需关心warp，但追求峰值性能就要减少分支发散；相比SIMD，SIMT免去程序员手动合并访存与处理向量mask的负担，访存合并、线程打包交由硬件与编译器自动完成。</p>
+</blockquote>
+<h3>2.1.1 独立线程调度</h3>
+<p>在计算能力低于7.0的GPU上，线程束（warp）使用由该warp全部32个线程共享的单个程序计数器，同时搭配一个活动掩码，标记warp内处于活动状态的线程。因此，处于分歧代码区域或不同执行状态的同warp线程，无法互相发送信号或交换数据；依赖锁/互斥量实现细粒度数据共享的算法，可能会发生死锁，死锁是否出现取决于竞争线程所属的warp。</p>
+<blockquote>
+<p>上述计算能力的GPU中，SIMT的硬件核心是：一个warp内32个线程共享同一个PC，依靠32位active mask控制线程是否参与运算，同一时刻PC只能指向一处代码地址，被mask禁用的线程停留在这个公共PC，仅不执行计算，并非持有独立PC等待。若warp线程发生分支分化，不同分支里的线程无法跨分支通信或互相等待，例如if分支线程自旋等待else分支线程写flag时，任一时刻只有一侧线程能运行，另一方被屏蔽，永远无法完成该同步逻辑。</p>
+</blockquote>
+<p>在计算能力7.0及更高版本的GPU中，独立线程调度实现了线程间完全并发，不再受warp限制。启用独立线程调度后，GPU为每个线程维护独立的执行状态，包括程序计数器与调用栈，并且能够以单线程粒度让出执行权——目的或是为了更好利用执行资源，或是让某个线程等待其他线程产生的数据。调度优化器负责将同一个warp内的活动线程编组为SIMT执行单元。该机制保留了前代GPU SIMT执行的高吞吐特性，但灵活性大幅提升：线程现在可以在子warp粒度发生分支发散与重新汇聚。</p>
+<blockquote>
+<p>该硬件升级核心为：打破传统SIMT架构下整个warp共用PC、必须整体调度的限制，为每个线程配备独立PC与独立调用栈，支持单线程粒度yield让出执行权，线程阻塞等待时仅暂停自身而不冻结整个warp；调度器动态将处于相同PC地址的活跃线程打包为子warp粒度的SIMT单元发射指令，同一warp内不同线程子集可各自组成SIMT组独立执行，既保留SIMT批量发射带来的高吞吐，又大幅提升分支发散场景下的执行灵活性。</p>
+</blockquote>
+<p>独立线程调度会破坏那些依赖旧GPU架构隐式warp同步行为的代码。warp同步代码假设：同一个warp内的线程在每一条指令处都是锁步执行。但如今线程可以在子warp粒度发散、重新汇聚，使得该假设不再成立。这会导致实际参与代码执行的线程集合与预期不符。任何面向CC7.0之前GPU开发的warp同步代码（例如无需同步的warp内规约操作），都需要重新审查以保证兼容性。开发者应当使用__syncwarp()对这类代码做显式同步，确保代码在所有代际GPU上行为正确。</p>
+<blockquote>
+<p>【⬆️讲解】<br>
+什么是隐式warp同步行为？老CUDA程序员写代码时，依赖一个旧硬件带来的隐性假设：同一个warp内所有线程，每一条指令都锁步执行（lockstep）。只要warp到达某一行代码，所有线程一定都到达这一行。<br>
+典型例子：无同步的warp内规约求和（intra-warp reduction）老代码写法（CC&lt;7.0）：</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> 旧代码，依赖隐式warp锁步，Volta之后会出错</span>
+<span class="pl-k">if</span> (lane &lt; <span class="pl-c1">16</span>) val += shfl_xor(val,<span class="pl-c1">16</span>);
+<span class="pl-k">if</span> (lane &lt; <span class="pl-c1">8</span>)  val += shfl_xor(val,<span class="pl-c1">8</span>);
+<span class="pl-k">if</span> (lane &lt; <span class="pl-c1">4</span>)  val += shfl_xor(val,<span class="pl-c1">4</span>);</pre></div>
+<p>旧硬件：warp所有线程锁步，执行完第一行所有线程全部完成，才会进入下一行if，不需要同步。<br>
+Volta独立线程调度摧毁了这个假设！<br>
+现在warp内线程是独立调度，部分线程可能已经跑到第2个if，还有部分线程停留在第1个if。<br>
+shfl_xor（warp内寄存器交换）读取别的lane寄存器时，对方线程可能还没更新寄存器，读出脏数据，结果随机错误。<br>
+解决方案是使用__syncwarp()做显式warp内同步，强制所有warp线程汇合，保证执行到这一行时，全部线程都完成前面操作。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">if</span> (lane &lt; <span class="pl-c1">16</span>) val += shfl_xor(val,<span class="pl-c1">16</span>);
+<span class="pl-en">__syncwarp</span>();
+<span class="pl-k">if</span> (lane &lt; <span class="pl-c1">8</span>)  val += shfl_xor(val,<span class="pl-c1">8</span>);
+<span class="pl-en">__syncwarp</span>();
+...</pre></div>
+</blockquote>
+<p>注意<g-emoji class="g-emoji" alias="warning">⚠️</g-emoji><br>
+线程束（warp）中参与当前指令执行的线程称为活动线程；不在当前指令执行路径上的线程则处于非活动状态（被禁用）。线程变为非活动线程存在多种原因：比warp内其他线程更早退出程序、选择了与warp当前正在执行的分支不同的分支路径，或是线程块总线程数不是warp大小整数倍时，块末尾多出的那些线程。<br>
+若一个warp执行非原子指令，且warp内多个线程向全局内存或共享内存的同一地址执行写操作：写入该地址的串行写操作次数会随设备计算能力不同而变化。但无论任何计算能力，最终由哪一个线程完成最后的写入，结果都是未定义的。<br>
+若一个warp执行原子指令，且warp内多个线程对全局内存的同一地址执行读-改-写（RMW）操作：每一次读-改-写操作都会完整执行，并且所有操作会被串行化；但这些操作的执行顺序是未定义的。</p>
+<h2>2.2 硬件多线程</h2>
+<p>当流式多处理器（SM）收到一个或多个待执行的线程块时，会将这些线程块切分为若干线程束（warp），每个warp由warp调度器负责调度执行。线程块切分为warp的方式固定不变：每个warp内的线程拥有连续递增的线程ID，第一个warp包含线程0。《线程层级》章节介绍了线程ID与线程块内线程索引之间的对应关系。</p>
+<p>一个线程块内的warp总数定义如下：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261006211236.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261006211236.png" alt="image.png" style="max-width: 100%;"></a></p>
+<p>T 为每个线程块内的线程数量，Wsize 是线程束大小，固定等于32，ceil(x, y) 表示将 x 向上取整至 y 的最近整数倍<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261006211249.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261006211249.png" alt="image.png" style="max-width: 100%;"></a><br>
+流式多处理器（SM）处理的每个线程束，其执行上下文（程序计数器、寄存器等）会在该warp的整个生命周期内保存在片上。因此，warp之间的切换没有开销。在每一个指令发射周期，warp调度器会挑选一个存在就绪线程、可以执行下一条指令的warp（即该warp内的活动线程），并向这些线程发射指令。</p>
+<p>每个SM拥有一组32位寄存器，这些寄存器在各个warp之间进行划分；同时SM配备共享内存，共享内存在线程块之间划分。对于给定的核函数，SM上能够驻留并并发处理的线程块与warp数量，取决于核函数占用的寄存器与共享内存大小，以及该SM可用的寄存器、共享内存总量。每个SM还存在可驻留线程块和warp的上限。这些限制，以及SM可用寄存器与共享内存容量，由设备的计算能力决定，详见《计算能力》章节。如果单个SM没有足够资源来至少处理一个线程块，核函数将会启动失败。一个线程块所分配的寄存器与共享内存总量，可以通过《占用率》章节中记载的多种方式确定。</p>
+<h2>2.3 异步执行特性</h2>
+<p>新一代NVIDIA GPU内置了异步执行能力，可在GPU内部实现数据搬运、计算与同步操作之间更多的重叠。借助这些能力，GPU代码中发起的部分操作，可以与同一个线程块内的其他GPU代码异步执行。不要将此种异步执行，与2.5节介绍的CUDA异步API相混淆：后者用于让GPU核函数启动或内存操作之间、或是与CPU之间异步运行。</p>
+<p>计算能力8.0（NVIDIA Ampere GPU架构）引入了硬件加速的全局内存到共享内存异步数据拷贝以及异步屏障（参见《NVIDIA A100 Tensor Core GPU架构》）。</p>
+<p>计算能力9.0（NVIDIA Hopper GPU架构）通过张量内存加速器（TMA）单元扩展了异步执行特性。TMA单元可在全局内存与共享内存之间双向传输大块数据与多维张量；同时还新增异步事务屏障以及异步矩阵乘累加运算（详情参见深度解读Hopper架构的技术博客）。</p>
+<p>CUDA提供可在设备代码中由线程调用的API，用于使用上述特性。异步编程模型定义了异步操作相对于CUDA线程的行为。</p>
+<p>异步操作由CUDA线程发起，但实际执行是异步的，如同由另一个线程执行，我们称这个“线程”为异步线程（async thread）。在规范编写的程序中，一个或多个CUDA线程会与该异步操作进行同步；发起异步操作的CUDA线程不一定需要参与同步。异步线程始终与发起该操作的CUDA线程绑定。</p>
+<p>异步操作依靠同步对象通知任务完成，同步对象可以是屏障（barrier）或者流水线（pipeline）。这类同步对象在《高级同步原语》章节详细说明，《异步数据拷贝》章节演示了它们在异步内存操作中的作用。</p>
+<blockquote>
+<p>CUDA线程：SM上跑通用代码的真实硬件线程；异步线程async thread：CUDA文档抽象名词，用来指代TMA/copy引擎后台执行异步拷贝/异步矩阵运算的硬件任务，不是warp线程，不能跑通用计算。</p>
+</blockquote>
+<h3>2.3.1 异步线程与异步代理</h3>
+<p>异步操作的内存访问方式可能与普通操作不同。为区分这些不同的内存访问方式，CUDA引入了异步线程（async thread）、通用代理（generic proxy）与异步代理（async proxy）概念。普通操作（加载与存储指令）经由通用代理执行。部分异步指令（例如 LDGSTS、STAS/REDAS）在模型上视作运行于通用代理中的异步线程。另一些异步指令（例如使用TMA的批量异步拷贝、部分张量核心指令 tcgen05.、wgmma.mma_async.）在模型上视作运行于异步代理中的异步线程。</p>
+<p>运行在通用代理中的异步线程：发起异步操作时，会关联一个异步线程，该异步线程与发起本次操作的CUDA线程相互独立。对同一地址，在异步操作之前执行的、经由通用代理的普通加载/存储操作，保证发生在该异步操作之前。但是，异步操作之后对同一地址执行的普通加载/存储，不保证维持顺序；在异步线程完成之前，可能产生数据竞争。</p>
+<p>运行在异步代理中的异步线程：发起异步操作时，会关联一个异步线程，该异步线程与发起本次操作的CUDA线程相互独立。对同一地址，无论是异步操作之前还是之后的普通加载/存储，均不保证内存顺序。需要使用代理栅栏（proxy fence）在不同代理之间做同步，保证内存序正确。《使用张量内存加速器（TMA）》章节演示了在TMA异步拷贝场景下，如何利用代理栅栏保证程序正确性。</p>
+<blockquote>
+<p>【⬆️详解】<br>
+CUDA引入proxy（代理）模型，本质是：GPU存在多条独立的内存访问硬件通路，不同通路有各自独立的内存顺序/可见性规则。<br>
+• generic proxy：通用代理，SM普通load/store默认走这条通路。<br>
+• async proxy：异步代理，TMA、wgmma.mma_async这类专用硬件引擎走这条独立通路。<br>
+异步操作会绑定一个抽象async thread，这个async thread跑在哪种proxy，决定了内存序规则。<br>
+① 运行在 Generic Proxy（通用代理）上的异步线程<br>
+指令例子：LDGSTS、STAS、REDAS<br>
+• 硬件通路：仍然走SM的通用访存通路，不是独立硬件引擎；只是操作本身被建模为async thread。<br>
+• 内存序规则：对同一个内存地址✅在发起异步操作之前的普通load/store（generic proxy）：保证排在异步操作前面执行，顺序不被重排。❌ 在发起异步操作之后的普通load/store：没有顺序保证，可能和异步操作乱序执行，产生数据竞争。<br>
+② 运行在 Async Proxy（异步代理）上的异步线程<br>
+指令例子：TMA批量异步拷贝、tcgen05.、wgmma.mma_async.（Hopper张量核心异步指令）<br>
+• 硬件通路：完全独立的硬件引擎（TMA单元、张量核心硬件），不和SM普通load/store共享访存流水线。<br>
+• 内存序规则：对同一个内存地址❌发起异步操作之前、之后的普通load/store，全都不保证内存顺序。✅ 想要保证可见性，必须显式插入 proxy fence（代理栅栏），打通 async proxy 和 generic proxy 两条通路。<br>
+示例场景（TMA拷贝全局内存到共享内存）：</p>
+<ol>
+<li>CUDA线程在generic proxy里写全局内存缓冲区；</li>
+<li>发起TMA异步拷贝（async proxy通路）；</li>
+<li>如果不加proxy fence：TMA硬件引擎可能读到旧数据，哪怕你在TMA启动之前已经写好了全局内存。哪怕你用barrier等待TMA任务完成，barrier只能确认拷贝硬件动作结束；barrier不会自动同步两个proxy之间的内存可见性。这是Hopper架构代码最容易踩的大坑。</li>
+</ol>
+</blockquote>
+<h1>三、线程作用域</h1>
+<p>CUDA线程构成一套线程层级结构，用好该层级结构，是编写正确且高性能CUDA核函数的关键。在这套层级结构中，内存操作的可见性与同步作用域可以是不同的。为了描述这种非一致特性，CUDA编程模型引入线程作用域（thread scope）的概念。线程作用域定义：哪些线程能够观察到某个线程的加载/存储操作，同时规定哪些线程之间可以借助原子操作、屏障等同步原语进行互相同步。每一个作用域在内存层级中都对应一个一致性点（point of coherency）。</p>
+<p>线程作用域在CUDA PTX中开放使用，同时也作为扩展功能在libcu++库中提供。下表列出可用的线程作用域：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261006211310.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261006211310.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h1>四、高级异步原语</h1>
+<p>本节介绍三类同步原语：<br>
+作用域原子操作（Scoped Atomics）：将C++内存序与CUDA线程作用域相结合，用以在线程块、集群、设备或系统作用域内安全地完成线程间通信（参见《线程作用域》章节）。<br>
+异步屏障（Asynchronous Barriers）：将同步拆分为到达阶段与等待阶段，可用于跟踪异步操作的执行进度。<br>
+流水线（Pipelines）：对任务进行分段处理，协调多缓冲区生产者-消费者模型；常用于将计算与异步数据拷贝进行重叠执行。</p>
+<h2>4.1 作用域原子操作</h2>
+<p>本节重点介绍支持C++标准原子内存语义的作用域原子操作，这类原子可通过libcu++库或编译器内置函数使用。作用域原子操作提供了在CUDA线程层级的合适粒度下实现高效同步的工具，能够让复杂并行算法同时保证正确性与性能。</p>
+<h3>4.1.1 线程作用域与内存序</h3>
+<p>作用域原子操作结合了两大核心概念：<br>
+线程作用域（Thread Scope）：定义哪些线程能够观察到该原子操作产生的效果<br>
+内存排序（Memory Ordering）：定义该原子操作相对于其他内存操作的顺序约束</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>cuda/atomic<span class="pl-pds">&gt;</span></span>
+__global__ <span class="pl-k">void</span> <span class="pl-en">block_scoped_counter</span>() {
+    <span class="pl-c"><span class="pl-c">//</span> Shared atomic counter visible only within this block</span>
+    __shared__ cuda::atomic&lt;<span class="pl-k">int</span>, cuda::thread_scope_block&gt; counter;
+    <span class="pl-c"><span class="pl-c">//</span> Initialize counter (only one thread should do this)</span>
+    <span class="pl-k">if</span> (threadIdx.<span class="pl-smi">x</span> == <span class="pl-c1">0</span>) {
+        counter.<span class="pl-c1">store</span>(<span class="pl-c1">0</span>, cuda::memory_order_relaxed);
+    }
+    <span class="pl-c1">__syncthreads</span>();
+    <span class="pl-c"><span class="pl-c">//</span> All threads in block atomically increment</span>
+    <span class="pl-k">int</span> old_value = counter.<span class="pl-c1">fetch_add</span>(<span class="pl-c1">1</span>, cuda::memory_order_relaxed);
+    <span class="pl-c"><span class="pl-c">//</span> Use old_value...</span>
+}</pre></div>
+<p>本示例实现了一个线程块作用域原子计数器，用以演示作用域原子操作的基础概念：<br>
+• 共享变量：使用__shared__内存，在块内所有线程之间共享唯一一个计数器。<br>
+• 原子类型声明：cuda::atomic&lt;int, cuda::thread_scope_block&gt; 创建一个在线程块范围内可见的原子整型变量。<br>
+• 单次初始化：仅由0号线程完成计数器初始化，避免初始化阶段产生数据竞争。<br>
+• 线程块同步：syncthreads() 保证所有线程在继续执行前，都能看到已经初始化完成的计数器。<br>
+• 原子自增：每个线程对计数器执行原子自增，并获取自增前的旧值。<br>
+此处选用cuda::memory_order_relaxed，是因为我们仅需要原子性（不可分割的读-改-写操作），而不需要不同内存地址之间的顺序约束。由于这是简单的计数操作，自增的先后顺序不会影响程序正确性。<br>
+对于生产者-消费者模型，则需要通过获取-释放（acquire-release）语义保证正确的内存顺序：</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__global__ <span class="pl-k">void</span> <span class="pl-en">producer_consumer</span>() {
+    __shared__ <span class="pl-k">int</span> data;
+    __shared__ cuda::atomic&lt;<span class="pl-k">bool</span>, cuda::thread_scope_block&gt; ready;
+    <span class="pl-k">if</span> (threadIdx.<span class="pl-smi">x</span> == <span class="pl-c1">0</span>) {
+        <span class="pl-c"><span class="pl-c">//</span> Producer: write data then signal ready</span>
+        data = <span class="pl-c1">42</span>;
+        ready.<span class="pl-c1">store</span>(<span class="pl-c1">true</span>, cuda::memory_order_release);  <span class="pl-c"><span class="pl-c">//</span> Release ensures data write is visible</span>
+    } <span class="pl-k">else</span> {
+        <span class="pl-c"><span class="pl-c">//</span> Consumer: wait for ready signal then read data</span>
+        <span class="pl-k">while</span> (!ready.<span class="pl-c1">load</span>(cuda::memory_order_acquire)) {  <span class="pl-c"><span class="pl-c">//</span> Acquire ensures data read sees the write</span>
+            <span class="pl-c"><span class="pl-c">//</span> spin wait</span>
+        }
+        <span class="pl-k">int</span> value = data;
+        <span class="pl-c"><span class="pl-c">//</span> Process value...</span>
+    }
+}</pre></div>
+<blockquote>
+<p>【cuda/cpp内存序介绍】<br>
+内存序本质：控制编译器 + GPU硬件能否对内存读写指令重排，以及内存写操作何时对其他线程可见。<br>
+只有原子变量（cuda::atomic / std::atomic）才可以指定内存序；普通__shared__/全局内存变量没有内存序。<br>
+CUDA libcu++ 完全复用 C++ 标准 5 种内存序，同时搭配 thread_scope（block/cluster/device/system）。</p>
+<ol>
+<li>memory_order_relaxed 松弛序<br>
+只保证一件事：原子操作本身不可分割（原子性）。<br>
+✅ 原子操作不会被其他线程的原子操作打断。<br>
+❌ 不提供任何内存顺序约束，不保证其他内存读写的可见性。<br>
+适用场景：单纯计数，只关心原子变量本身的值，原子操作和其他地址的数据没有依赖关系。<br>
+<g-emoji class="g-emoji" alias="warning">⚠️</g-emoji> 绝对不能用于生产者消费者！</li>
+</ol>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> 错误写法！</span>
+data = <span class="pl-c1">42</span>;
+ready.store(<span class="pl-c1">true</span>, relaxed); <span class="pl-c"><span class="pl-c">//</span> relaxed不能保证data写在ready前面</span></pre></div>
+<p>编译器/GPU硬件可能重排：先写ready，再写data。消费者读到ready=true的时候，data还没写完。<br>
+2. memory_order_release 释放（只用于原子store写操作）<br>
+写屏障语义：release store之前的所有内存读写，不能被重排到这个store之后。<br>
+通俗：在release原子写之前完成的所有普通写，都会“打包”跟着这个原子写对外可见。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">data = <span class="pl-c1">42</span>;                     <span class="pl-c"><span class="pl-c">//</span> 普通写</span>
+ready.store(<span class="pl-c1">true</span>, release);   <span class="pl-c"><span class="pl-c">//</span> release：保证data写一定在ready=true之前完成</span></pre></div>
+<p>data=42 不会被重排到ready.store后面。<br>
+3. memory_order_acquire 获取（只用于原子load读操作）<br>
+读屏障语义：acquire load之后的所有内存读写，不能被重排到这个load之前。通俗来说，只要读到acquire load的结果，那么这个load之后的代码，一定能看到release打包过来的数据。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">while</span> (!ready.load(acquire)) {} <span class="pl-c"><span class="pl-c">//</span> acquire</span>
+<span class="pl-k">int</span> val = data;                 <span class="pl-c"><span class="pl-c">//</span> 这行一定在load成功之后执行，能看到data=42</span></pre></div>
+<p>✅ Release-Acquire 配对（生产者消费者经典模型）<br>
+生产者：普通数据写入 → atomic.store(release)<br>
+消费者：atomic.load(acquire)成功 → 读取普通数据<br>
+规则：A线程release写，B线程acquire读到A写入的值，则A中release之前所有写，对B中acquire之后全部可见。这就是前面那段data + ready代码的原理。</p>
+</blockquote>
+<h3>4.1.2 性能考虑</h3>
+<p>尽可能使用最小范围的作用域：线程块作用域原子操作远快于系统作用域原子操作。<br>
+优先选用更弱的内存序：仅在保证程序正确性必需时，才使用更强的内存序。<br>
+考虑内存位置：共享内存原子操作比全局内存原子操作速度更快。</p>
+<h2>4.2 异步屏障</h2>
+<p>异步屏障与典型的单阶段屏障（syncthreads()）有所不同：线程通知自身已抵达屏障（到达操作），和等待其他线程抵达屏障（等待操作）这两个行为相互分离。这种分离机制允许线程执行与屏障无关的额外运算，更充分地利用等待时间，从而提升执行效率。异步屏障可用于实现CUDA线程间的生产者-消费者模型；也可让拷贝操作在完成时向屏障发送“到达”信号，以此在内存层次结构中实现异步数据拷贝。</p>
+<blockquote>
+<p>【⬆️讲解】</p>
+<ol>
+<li>syncthreads()：单阶段屏障<br>
+当block内所有线程执行到__syncthreads()这一行时：线程必须停在这里（原地阻塞）；等block里全部线程都抵达这一行；全部到齐之后，才统一放行，继续往下跑。<br>
+👉 到达arrive 和 等待wait是绑定在一起的同一个动作。线程到达屏障就必须原地等待，不能做别的计算。</li>
+<li>异步屏障 cuda::barrier：arrive 和 wait 分离<br>
+• arrive（到达登记）：线程调用arrive()，只是告诉屏障：我这边任务做完了。调用arrive之后，线程不会阻塞，可以继续执行后续计算！<br>
+• wait（等待）：线程后续在某个位置调用wait()，此时线程才会阻塞，直到屏障收集到预设数量的arrive信号。</li>
+</ol>
+</blockquote>
+<p>异步屏障可在计算能力7.0及以上的设备上使用。计算能力8.0及以上的设备为共享内存中的异步屏障提供硬件加速，并在同步粒度上实现重大改进：支持对线程块内任意CUDA线程子集进行硬件加速同步。更早的架构仅支持在整个线程束（syncwarp()）或整个线程块（syncthreads()）级别做硬件加速同步。</p>
+<p>CUDA编程模型通过cuda::std::barrier提供异步屏障，这是libcu++库中符合ISO C++标准的屏障。除实现标准std::barrier之外，该库还提供CUDA专属扩展，可选择屏障的线程作用域以提升性能，并暴露底层cuda::ptx接口。cuda::barrier能够与cuda::ptx互操作：通过友元函数cuda::device::barrier_native_handle()获取屏障的原生句柄，再将句柄传入cuda::ptx系列函数。CUDA还提供一套原语API，用于线程块作用域下共享内存中的异步屏障。</p>
+<blockquote>
+<p>① 高层API：cuda::std::barrier（libcu++）<br>
+• 兼容C++标准std::barrier，写法贴近C++，可读性好；<br>
+• CUDA扩展：可以指定thread_scope（block/cluster/device），缩小同步范围，提升性能。<br>
+② 底层PTX互操作<br>
+通过barrier_native_handle()拿到barrier底层原生句柄，传入cuda::ptx内置函数，直接操作PTX barrier指令。<br>
+适合极致性能调优，直接控制硬件原语，一般工程代码优先用高层cuda::std::barrier。</p>
+</blockquote>
+<p>下表概述了可在不同线程作用域执行同步的异步屏障。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261006211345.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261006211345.png" alt="image.png" style="max-width: 100%;"></a></p>
+<p>同步的时间分离（Temporal Splitting of Synchronization）<br>
+如果不使用支持到达-等待机制的异步屏障，在线程块内部实现同步，需要借助__syncthreads()；若使用协作组（Cooperative Groups），则通过block.sync()完成。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>cooperative_groups.h<span class="pl-pds">&gt;</span></span>
+__global__ <span class="pl-k">void</span> <span class="pl-en">simple_sync</span>(<span class="pl-k">int</span> iteration_count) {
+    <span class="pl-k">auto</span> block = <span class="pl-c1">cooperative_groups::this_thread_block</span>();
+    <span class="pl-k">for</span> (<span class="pl-k">int</span> i = <span class="pl-c1">0</span>; i &lt; iteration_count; ++i) {
+        <span class="pl-c"><span class="pl-c">/*</span> code before arrive <span class="pl-c">*/</span></span>
+         <span class="pl-c"><span class="pl-c">//</span> Wait for all threads to arrive here.</span>
+        block.<span class="pl-c1">sync</span>();
+        <span class="pl-c"><span class="pl-c">/*</span> code after wait <span class="pl-c">*/</span></span>
+    }
+}</pre></div>
+<p>线程会在同步点（block.sync()）处阻塞，直到所有线程都抵达该同步点。此外，同步点之前发生的内存更新，保证在同步点之后对块内所有线程可见。<br>
+该模式分为三个阶段：</p>
+<ol>
+<li>同步前代码：执行内存更新，这些更新将在同步之后被读取。</li>
+<li>同步点。</li>
+<li>同步后代码：可以看到同步点之前完成的内存更新。<br>
+如果改用异步屏障，则这种时间分离式同步模式如下。</li>
+</ol>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>cuda/barrier<span class="pl-pds">&gt;</span></span>
+#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>cooperative_groups.h<span class="pl-pds">&gt;</span></span>
+
+__device__ <span class="pl-k">void</span> <span class="pl-en">compute</span>(<span class="pl-k">float</span> *data, <span class="pl-k">int</span> iteration);
+__global__ <span class="pl-k">void</span> <span class="pl-en">split_arrive_wait</span>(<span class="pl-k">int</span> iteration_count, <span class="pl-k">float</span> *data)
+{
+  <span class="pl-k">using</span> <span class="pl-c1">barrier_t</span> = cuda::barrier&lt;cuda::thread_scope_block&gt;;
+  __shared__ <span class="pl-c1">barrier_t</span> bar;
+  <span class="pl-k">auto</span> block = <span class="pl-c1">cooperative_groups::this_thread_block</span>();
+  <span class="pl-k">if</span> (block.<span class="pl-c1">thread_rank</span>() == <span class="pl-c1">0</span>)
+  {
+    <span class="pl-c"><span class="pl-c">//</span> Initialize barrier with expected arrival count.</span>
+    <span class="pl-c1">init</span>(&amp;bar, block.<span class="pl-c1">size</span>());
+  }
+  block.<span class="pl-c1">sync</span>();
+  <span class="pl-k">for</span> (<span class="pl-k">int</span> i = <span class="pl-c1">0</span>; i &lt; iteration_count; ++i)
+  {
+    <span class="pl-c"><span class="pl-c">/*</span> code before arrive <span class="pl-c">*/</span></span>
+
+    <span class="pl-c"><span class="pl-c">//</span> This thread arrives. Arrival does not block a thread.</span>
+    <span class="pl-c1">barrier_t</span>::arrival_token token = bar.<span class="pl-c1">arrive</span>();
+    <span class="pl-c1">compute</span>(data, i);
+    <span class="pl-c"><span class="pl-c">//</span> Wait for all threads participating in the barrier to complete bar.arrive().</span>
+    bar.<span class="pl-c1">wait</span>(<span class="pl-c1">std::move</span>(token));
+    <span class="pl-c"><span class="pl-c">/*</span> code after wait <span class="pl-c">*/</span></span>
+  }
+}</pre></div>
+<p>在该模式下，同步点被拆分为到达点（bar.arrive()）与等待点（bar.wait(std::move(token))）。线程首次调用bar.arrive()时，就开始参与这个cuda::barrier。当线程调用bar.wait(std::move(token))，线程将被阻塞，直到所有参与线程完成指定次数的bar.arrive()调用；该次数是屏障初始化时传入的预期到达计数参数。<br>
+参与线程在调用bar.arrive()之前完成的内存更新，能够保证：参与线程在调用bar.wait(std::move(token))之后，可以看到这些内存更新。请注意：bar.arrive()调用不会阻塞线程，线程可以继续执行其他工作，只要这些工作不依赖其他参与线程在bar.arrive()之前产生的内存更新。<br>
+到达-等待模式分为五个阶段：</p>
+<ol>
+<li>到达点之前的代码：执行内存更新，这些更新将在等待操作之后被读取。</li>
+<li>到达点：附带隐式内存栅栏（等价于 cuda::atomic_thread_fence(cuda::memory_order_seq_cst, cuda::thread_scope_block)）。</li>
+<li>到达点与等待点之间的代码。</li>
+<li>等待点。</li>
+<li>等待点之后的代码：可以看到到达点之前完成的内存更新。<br>
+关于异步屏障使用的完整指南，请参阅《异步屏障》章节。</li>
+</ol>
+<blockquote>
+<p>【⬆️详解】<br>
+1.barrier 参与机制与 token（令牌）<br>
+线程第一次调用 bar.arrive()，就代表加入这个barrier的同步组。<br>
+arrive() 会返回一个 token（令牌），这个令牌必须通过 std::move 移动，传给 bar.wait()。<br>
+◦ 语义：这个token代表本次arrive对应的同步事件；<br>
+◦ 移动语义：token所有权转移，不能重复使用，防止错误调用。<br>
+barrier初始化时需要传入预期到达计数(expected arrival count)。<br>
+2.内存可见性规则<br>
+✅ 规则：参与线程在<strong>arrive()之前完成的内存写操作，在所有参与线程执行完wait()之后</strong>，保证全部可见。<br>
+❗ 不是arrive之后立刻可见；可见性保证生效的节点是 wait() 返回之后。<br>
+3.arrive() 不阻塞 + 中间代码的限制<br>
+bar.arrive() 调用完，线程不会停下阻塞，可以继续跑代码。arrive 和 wait 中间写的代码，不能依赖其他线程 arrive 之前写入的共享数据。<br>
+原因：此时barrier还没有集齐所有arrive，同步没有完成，其他线程的内存写还没有全局可见。<br>
+中间这段代码只能做独立计算，不读取本次同步依赖的共享数据。<br>
+这正是性能优化点：利用原本原地阻塞等待的时间，执行无关计算，实现计算与等待重叠。</p>
+</blockquote>
+<h2>4.3 流水线</h2>
+<p>CUDA编程模型提供流水线同步对象作为一种协同机制，用于将异步内存拷贝编排为多个阶段，便于实现双缓冲或多缓冲的生产者-消费者模式。流水线是一个拥有头部与尾部的双端队列，按照先进先出（FIFO）顺序处理任务。生产者线程向流水线头部提交任务，消费者线程从流水线尾部取出任务。</p>
+<p>流水线可通过 libcu++ 库中的 cuda::pipeline API 以及一套原语API对外提供能力。下表介绍这两套API的主要功能。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261006211408.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261006211408.png" alt="image.png" style="max-width: 100%;"></a><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261006211417.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261006211417.png" alt="image.png" style="max-width: 100%;"></a><br>
+cuda::pipeline API 接口更丰富，限制更少；而原语 API 仅支持跟踪从全局内存到共享内存的异步拷贝，且有特定的大小与对齐要求。原语 API 的功能等价于作用域为 cuda::thread_scope_thread 的 cuda::pipeline 对象。</p>
+<p>有关详细使用范式与示例，请参见《Pipelines》章节。</p>
+<h1>五、异步数据拷贝</h1>
+<p>在存储层次结构内实现高效的数据搬运，是GPU计算获得高性能的基础。传统同步内存操作会迫使线程在数据传输期间空闲等待。GPU本身依靠并行机制隐藏内存延迟：当内存操作执行时，流式多处理器（SM）会切换去执行另一个线程束。即便依靠并行机制实现了延迟隐藏，内存延迟依然可能成为瓶颈，限制内存带宽利用率与计算资源效率。为解决这类瓶颈，现代GPU架构提供硬件加速的异步数据拷贝机制，允许内存传输独立执行，同时线程继续执行其他任务。</p>
+<p>异步数据拷贝将启动内存传输与等待传输完成两个动作解耦，实现计算与数据搬运的重叠。如此一来，线程可以在内存延迟周期内执行有效任务，从而提升整体吞吐量与资源利用率。</p>
+<p>尽管本节所述的底层概念与原理和前面“异步执行”章节内容相近，但那一章介绍的是内核启动与内存传输（例如由cudaMemcpyAsync发起的传输）这类异步操作，属于应用程序不同组件之间的异步。本节所描述的异步，指在GPU的DRAM（即全局内存）与SM片上存储器（如共享内存、张量存储器）之间传输数据时，不会阻塞GPU线程。该异步发生在单次内核调用的执行过程内部。</p>
+<p>想要理解异步拷贝如何提升性能，可以先研究一种常见的GPU计算范式。CUDA应用经常采用拷贝-计算（copy and compute）范式，流程如下：<br>
+1.从全局内存读取数据；<br>
+2.将数据存入共享内存；<br>
+3.在共享内存的数据上执行计算，并可能将结果写回全局内存。<br>
+该范式中的拷贝阶段通常写作 <code class="notranslate">shared[local_idx] = global[global_idx]</code>。编译器会把这行全局内存到共享内存的拷贝，展开为两条操作：先从全局内存读入寄存器，再从寄存器写入共享内存。</p>
+<p>当该范式出现在迭代算法中时，每个线程块在执行完 <code class="notranslate">shared[local_idx] = global[global_idx]</code> 赋值操作后，都需要执行同步。目的是确保共享内存的所有写入操作全部完成，才可以进入计算阶段。在计算阶段结束后，线程块还需要再次同步，防止在所有线程完成计算前覆盖共享内存。下面的代码片段展示了该范式。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>cooperative_groups.h<span class="pl-pds">&gt;</span></span>
+
+__device__ <span class="pl-k">void</span> <span class="pl-en">compute</span>(<span class="pl-k">int</span>* global_out, <span class="pl-k">int</span> <span class="pl-k">const</span>* shared_in) {
+    <span class="pl-c"><span class="pl-c">//</span> Computes using all values of current batch from shared memory.</span>
+    <span class="pl-c"><span class="pl-c">//</span> Stores this thread's result back to global memory.</span>
+}
+
+__global__ <span class="pl-k">void</span> <span class="pl-en">without_async_copy</span>(<span class="pl-k">int</span>* global_out, <span class="pl-k">int</span> <span class="pl-k">const</span>* global_in, <span class="pl-c1">size_t</span> size, <span class="pl-c1">size_t</span> batch_sz) {
+  <span class="pl-k">auto</span> grid = <span class="pl-c1">cooperative_groups::this_grid</span>();
+  <span class="pl-k">auto</span> block = <span class="pl-c1">cooperative_groups::this_thread_block</span>();
+  <span class="pl-k">assert</span>(size == batch_sz * grid.<span class="pl-c1">size</span>()); <span class="pl-c"><span class="pl-c">//</span> Exposition: input size fits batch_sz * grid_size</span>
+
+  <span class="pl-k">extern</span> __shared__ <span class="pl-k">int</span> shared[]; <span class="pl-c"><span class="pl-c">//</span> block.size() * sizeof(int) bytes</span>
+
+  <span class="pl-c1">size_t</span> local_idx = block.<span class="pl-c1">thread_rank</span>();
+
+  <span class="pl-k">for</span> (<span class="pl-c1">size_t</span> batch = <span class="pl-c1">0</span>; batch &lt; batch_sz; ++batch) {
+    <span class="pl-c"><span class="pl-c">//</span> Compute the index of the current batch for this block in global memory.</span>
+    <span class="pl-c1">size_t</span> block_batch_idx = block.<span class="pl-c1">group_index</span>().<span class="pl-smi">x</span> * block.<span class="pl-c1">size</span>() + grid.<span class="pl-c1">size</span>() * batch;
+    <span class="pl-c1">size_t</span> global_idx = block_batch_idx + threadIdx.<span class="pl-smi">x</span>;
+    shared[local_idx] = global_in[global_idx];
+
+    <span class="pl-c"><span class="pl-c">//</span> Wait for all copies to complete.</span>
+    block.<span class="pl-c1">sync</span>();
+
+    <span class="pl-c"><span class="pl-c">//</span> Compute and write result to global memory.</span>
+    <span class="pl-c1">compute</span>(global_out + block_batch_idx, shared);
+
+    <span class="pl-c"><span class="pl-c">//</span> Wait for compute using shared memory to finish.</span>
+    block.<span class="pl-c1">sync</span>();
+  }
+}</pre></div>
+<blockquote>
+<p>【⬆️代码详解】<br>
+这是不使用异步拷贝的经典CUDA分块（tiled）拷贝计算内核，基于cooperative_groups（协同组），对应文档前面说的 copy and compute pattern，用来对比后面的TMA/pipeline异步版本。<br>
+具体来说，代码将全局内存global_in的数据分批次搬运到共享内存shared，在共享内存上做计算，最后写结果回全局内存。每一轮循环：拷贝 → 块同步 → 计算 → 块同步，一轮做完再进入下一批次。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__device__ <span class="pl-k">void</span> <span class="pl-en">compute</span>(<span class="pl-k">int</span>* global_out, <span class="pl-k">int</span> <span class="pl-k">const</span>* shared_in) {
+    <span class="pl-c"><span class="pl-c">//</span> Computes using all values of current batch from shared memory.</span>
+    <span class="pl-c"><span class="pl-c">//</span> Stores this thread's result back to global memory.</span>
+}</pre></div>
+<p>设备端函数：从共享内存shared_in读取当前批次数据做计算，结果写回全局内存global_out。这里只是函数声明，不关心具体计算逻辑。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">__global__ <span class="pl-k">void</span> <span class="pl-en">without_async_copy</span>(<span class="pl-k">int</span>* global_out, <span class="pl-k">int</span> <span class="pl-k">const</span>* global_in, <span class="pl-c1">size_t</span> size, <span class="pl-c1">size_t</span> batch_sz) {
+  <span class="pl-k">auto</span> grid = <span class="pl-c1">cooperative_groups::this_grid</span>();
+  <span class="pl-k">auto</span> block = <span class="pl-c1">cooperative_groups::this_thread_block</span>();
+  <span class="pl-k">assert</span>(size == batch_sz * grid.<span class="pl-c1">size</span>()); <span class="pl-c"><span class="pl-c">//</span> Exposition: input size fits batch_sz * grid_size</span></pre></div>
+<p>• this_grid()：当前网格（所有线程块）<br>
+• this_thread_block()：当前线程块<br>
+• assert：仅用于示例说明，保证输入总大小 = 批次数量 × grid线程块数量，属于演示用约束，实际代码一般删掉。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">  <span class="pl-c1">size_t</span> local_idx = block.thread_rank();</pre></div>
+<p>thread_rank()：线程在当前block内的索引，等价threadIdx.x。<br>
+随后循环遍历每一个批次（batch），每一轮处理一块数据。<br>
+1.计算当前线程在全局内存中的地址global_idx<br>
+2.<code class="notranslate">shared[local_idx] = global_in[global_idx];</code><br>
+这就是前面文档提到的普通全局→共享内存拷贝：编译器展开为：全局内存load进寄存器 → 寄存器store到共享内存。<br>
+剩下就是进行块同步-计算-在进行一次块同步</p>
+</blockquote>
+<p>借助异步数据拷贝，全局内存到共享内存的数据搬移可以异步执行，从而在等待数据传输完成期间，更高效地利用流式多处理器（SM）。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>cooperative_groups.h<span class="pl-pds">&gt;</span></span>
+#<span class="pl-k">include</span> <span class="pl-s"><span class="pl-pds">&lt;</span>cooperative_groups/memcpy_async.h<span class="pl-pds">&gt;</span></span>
+
+__device__ <span class="pl-k">void</span> <span class="pl-en">compute</span>(<span class="pl-k">int</span>* global_out, <span class="pl-k">int</span> <span class="pl-k">const</span>* shared_in) {
+    <span class="pl-c"><span class="pl-c">//</span> Computes using all values of current batch from shared memory.</span>
+    <span class="pl-c"><span class="pl-c">//</span> Stores this thread's result back to global memory.</span>
+}
+
+__global__ <span class="pl-k">void</span> <span class="pl-en">with_async_copy</span>(<span class="pl-k">int</span>* global_out, <span class="pl-k">int</span> <span class="pl-k">const</span>* global_in, <span class="pl-c1">size_t</span> size, <span class="pl-c1">size_t</span> batch_sz) {
+  <span class="pl-k">auto</span> grid = <span class="pl-c1">cooperative_groups::this_grid</span>();
+  <span class="pl-k">auto</span> block = <span class="pl-c1">cooperative_groups::this_thread_block</span>();
+  <span class="pl-k">assert</span>(size == batch_sz * grid.<span class="pl-c1">size</span>()); <span class="pl-c"><span class="pl-c">//</span> Exposition: input size fits batch_sz * grid_size</span>
+
+  <span class="pl-k">extern</span> __shared__ <span class="pl-k">int</span> shared[]; <span class="pl-c"><span class="pl-c">//</span> block.size() * sizeof(int) bytes</span>
+
+  <span class="pl-c1">size_t</span> local_idx = block.<span class="pl-c1">thread_rank</span>();
+
+  <span class="pl-k">for</span> (<span class="pl-c1">size_t</span> batch = <span class="pl-c1">0</span>; batch &lt; batch_sz; ++batch) {
+    <span class="pl-c"><span class="pl-c">//</span> Compute the index of the current batch for this block in global memory.</span>
+    <span class="pl-c1">size_t</span> block_batch_idx = block.<span class="pl-c1">group_index</span>().<span class="pl-smi">x</span> * block.<span class="pl-c1">size</span>() + grid.<span class="pl-c1">size</span>() * batch;
+
+    <span class="pl-c"><span class="pl-c">//</span> Whole thread-group cooperatively copies whole batch to shared memory.</span>
+    <span class="pl-c1">cooperative_groups::memcpy_async</span>(block, shared, global_in + block_batch_idx, block.<span class="pl-c1">size</span>());
+
+    <span class="pl-c"><span class="pl-c">//</span> Compute on different data while waiting.</span>
+
+    <span class="pl-c"><span class="pl-c">//</span> Wait for all copies to complete.</span>
+    <span class="pl-c1">cooperative_groups::wait</span>(block);
+
+    <span class="pl-c"><span class="pl-c">//</span> Compute and write result to global memory.</span>
+    <span class="pl-c1">compute</span>(global_out + block_batch_idx, shared);
+
+    <span class="pl-c"><span class="pl-c">//</span> Wait for compute using shared memory to finish.</span>
+    block.<span class="pl-c1">sync</span>();
+  }
+}</pre></div>
+<p>cooperative_groups::memcpy_async 函数将 block.size() 个元素从全局内存拷贝至共享内存。该操作的执行效果等价于由另一个线程完成拷贝；拷贝完成后，该线程会与当前线程调用的 cooperative_groups::wait 操作同步。在拷贝操作完成前，修改源全局内存数据，或是读写目标共享内存，都会引发数据竞争。</p>
+<p>本示例阐释了所有异步拷贝操作背后的核心思想：将内存传输发起动作与传输完成等待动作解耦，让线程在后台搬运数据期间执行其他任务。CUDA编程模型提供多套API来使用该能力：包括协同组与libcu++库中提供的memcpy_async系列函数，以及底层的cuda::ptx原语API。这些API拥有相近语义：它们把对象从源地址拷贝到目标地址，行为等价于另一个独立线程执行拷贝；拷贝完成后，可借助不同的完成机制进行同步。</p>
+<p>现代GPU架构提供多种用于异步数据搬移的硬件机制：<br>
+• LDGSTS（计算能力8.0及以上）：支持高效的小规模全局内存到共享内存的异步传输。<br>
+• 张量内存加速器（TMA，计算能力9.0及以上）：对上述能力进行扩展，提供针对大规模多维数据传输优化的批量异步拷贝操作。<br>
+• STAS指令（计算能力9.0及以上）：支持小规模从寄存器到集群内分布式共享内存的异步传输。</p>
+<p>这些机制拥有不同的数据通路、传输大小与对齐要求，开发者可根据自身特定的数据访问模式选择最合适的方案。下表概述了GPU内部异步拷贝所支持的数据通路。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261006211452.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261006211452.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h1>六、L1缓存与共享内存的权衡配置</h1>
+<p>正如L1数据缓存章节所述，SM上的L1缓存与共享内存复用同一份物理资源，该资源称为统一数据缓存（unified data cache）。在大多数架构上，如果内核很少使用甚至不使用共享内存，可将统一数据缓存配置为架构所允许的最大L1缓存容量。</p>
+<p>为共享内存预留的统一数据缓存空间可按单个内核进行配置。应用程序可以在内核启动前调用cudaFuncSetAttribute函数，设置预留份额（carveout），即期望分配的共享内存容量。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-en">cudaFuncSetAttribute</span>(kernel_name, cudaFuncAttributePreferredSharedMemoryCarveout, carveout);</pre></div>
+<p>应用程序可将预留份额设置为该架构最大共享内存容量的整数百分比。除百分比数值外，还提供三个便捷枚举值作为预留份额参数：<br>
+• cudaSharedmemCarveoutDefault：默认配置<br>
+• cudaSharedmemCarveoutMaxL1：最大化L1缓存<br>
+• cudaSharedmemCarveoutMaxShared：最大化共享内存<br>
+不同架构支持的最大共享内存容量与可用预留份额各不相同；详细信息请参见《各计算能力对应的共享内存容量》章节。</p>
+<p>当所选的整数百分比预留份额无法精确匹配硬件支持的共享内存容量时，系统会选用大于该值的下一档可用容量。例如，计算能力12.0的设备最大共享内存容量为100KB；若将预留份额设为50%，最终得到的共享内存是64KB而非50KB。原因是计算能力12.0设备支持的共享内存档位为：0、8、16、32、64、100KB。</p>
+<p>传给cudaFuncSetAttribute的函数必须使用__global__限定符声明。cudaFuncSetAttribute对驱动而言只是提示（hint）；如果内核执行有需要，驱动可以选择其他预留份额。</p>
+<p>还有另一项CUDA API：cudaFuncSetCacheConfig，应用程序同样可以使用它来调整内核的L1缓存与共享内存之间的资源分配比例。但该API会对内核启动时的共享内存/L1缓存配比设置硬性要求。因此，交替启动具有不同共享内存配置的内核时，会因共享内存的重新配置而产生不必要的启动串行化。<br>
+推荐使用cudaFuncSetAttribute，因为驱动可根据执行函数的需要，或是为了避免资源抖动，自行选用其他配置。</p>
+<p>若内核需要每个线程块的共享内存分配量超过48KB，则该内核具备架构相关性。这类内核必须使用动态共享内存，而非静态大小数组，并且需要通过cudaFuncSetAttribute显式启用，方式如下。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> Device code</span>
+__global__ <span class="pl-k">void</span> <span class="pl-en">MyKernel</span>(...)
+{
+  <span class="pl-k">extern</span> __shared__ <span class="pl-k">float</span> buffer[];
+  ...
+}
+
+<span class="pl-c"><span class="pl-c">//</span> Host code</span>
+<span class="pl-k">int</span> maxbytes = <span class="pl-c1">98304</span>; <span class="pl-c"><span class="pl-c">//</span> 96 KB</span>
+<span class="pl-en">cudaFuncSetAttribute</span>(MyKernel, cudaFuncAttributeMaxDynamicSharedMemorySize, maxbytes);
+MyKernel &lt;&lt;&lt;gridDim, blockDim, maxbytes&gt;&gt;&gt;(...);</pre></div>
+<blockquote>
+<p>【⬆️解释】<br>
+当单个线程块需要 &gt;48KB 的共享内存（Ampere/Hopper等架构默认静态shared上限是48KB），就不能用静态__shared__ float buf[xxx]，必须采用动态共享内存，并且主机端调用cudaFuncSetAttribute声明该内核允许使用更大的动态共享内存上限。<br>
+两个配套API：<br>
+1.cudaFuncAttributePreferredSharedMemoryCarveout：设置统一SRAM在Shared/L1之间的划分偏好（前面讲的carveout）<br>
+2.cudaFuncAttributeMaxDynamicSharedMemorySize：声明这个kernel最多可以使用多大的动态共享内存（本示例代码）</p>
+</blockquote></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
