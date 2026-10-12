@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="本指南前面章节已经介绍过CUDA运行时。">
+<meta property="og:title" content="CUDA官方文档学习11：CUDA驱动API">
+<meta property="og:description" content="本指南前面章节已经介绍过CUDA运行时。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/CUDA-guan-fang-wen-dang-xue-xi-11%EF%BC%9ACUDA-qu-dong-API.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>CUDA官方文档学习11：CUDA驱动API</title>
+<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">CUDA官方文档学习11：CUDA驱动API</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/86" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>本指南前面章节已经介绍过CUDA运行时。正如《CUDA运行时API与CUDA驱动API》章节所述，CUDA运行时构建于底层CUDA驱动API之上。本节介绍CUDA运行时API与驱动API之间的部分差异，以及二者混合使用的方法。大多数应用程序完全可以只使用CUDA运行时，并且发挥全部性能，无需调用CUDA驱动API。不过，部分新接口会率先在驱动API中推出，之后才会加入运行时API；还有一些高级接口，例如虚拟内存管理（Virtual Memory Management），仅在驱动API中对外暴露。<br>
+驱动API实现在CUDA动态库（Windows平台为cuda.dll，Linux平台为cuda.so）中，安装设备驱动时该库会被复制到系统内。驱动API所有入口函数均以cu作为前缀。<br>
+驱动API是基于句柄的命令式API：绝大多数对象通过不透明句柄引用，可将句柄传入函数以操作对应的对象。</p>
+<blockquote>
+<p>句柄是什么？<br>
+在CUDA驱动API中，句柄是一种不透明的凭证标识，由CUDA驱动内部维护，用来代表设备、上下文、流、模块等底层对象；开发者只需要拿到句柄并将其传入cu系列API函数，驱动内部通过句柄查表找到对应的底层对象执行操作，开发者无法直接访问、修改对象内部结构，这样驱动可以随意调整内部实现而不改变上层接口，同时对资源和权限进行管控。<br>
+但是为什么不能说句柄一定就是结构体指针？因为句柄只是抽象概念：它底层也可以实现成单纯的整数ID（就像Linux的fd），内核维护一张映射表，根据ID查找对象；只是CUDA驱动在实现的时候，选择了用未定义结构体的指针来实现；也就是说：结构体指针只是句柄的其中一种实现方案，不是句柄的本质。</p>
+</blockquote>
+<p>驱动API支持的对象汇总如表6所示。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261010102301.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261010102301.png" alt="image.png" style="max-width: 100%;"></a><br>
+在调用驱动 API 的任意函数之前，必须先通过<code class="notranslate">cuInit()</code>完成驱动 API 的初始化。 随后需要创建一个 CUDA 上下文，该上下文绑定到指定 GPU 设备，并且设置为当前宿主线程的上下文，详细说明见本文的「上下文（Context）」章节。<br>
+在 CUDA 上下文内部，由主机代码将核函数以 PTX 或者二进制目标文件的形式显式加载，详见本文「模块（Module）」章节。 因此，用 C++ 编写的核函数，必须单独编译为 PTX 或二进制目标文件。 核函数通过本文「核执行（Kernel Execution）」章节介绍的 API 入口来启动。<br>
+任何希望能够在未来新硬件架构上运行的应用程序，必须加载 PTX 代码，而非二进制代码。 原因是：二进制代码与硬件架构强绑定，无法兼容未来新架构；而 PTX 代码会在加载阶段，由设备驱动实时编译为二进制机器码。<br>
+下面是「核函数」章节中，使用驱动 API 编写的示例对应的主机端代码：</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">int</span> <span class="pl-en">main</span>()
+{
+    <span class="pl-k">int</span> N = ...;
+    <span class="pl-c1">size_t</span> size = N * <span class="pl-k">sizeof</span>(<span class="pl-k">float</span>);
+
+    <span class="pl-c"><span class="pl-c">//</span> Allocate input vectors h_A and h_B in host memory</span>
+    <span class="pl-k">float</span>* h_A = (<span class="pl-k">float</span>*)<span class="pl-c1">malloc</span>(size);
+    <span class="pl-k">float</span>* h_B = (<span class="pl-k">float</span>*)<span class="pl-c1">malloc</span>(size);
+
+    <span class="pl-c"><span class="pl-c">//</span> Initialize input vectors</span>
+    ...
+
+    <span class="pl-c"><span class="pl-c">//</span> Initialize</span>
+    <span class="pl-c1">cuInit</span>(<span class="pl-c1">0</span>);
+
+    <span class="pl-c"><span class="pl-c">//</span> Get number of devices supporting CUDA</span>
+    <span class="pl-k">int</span> deviceCount = <span class="pl-c1">0</span>;
+    <span class="pl-c1">cuDeviceGetCount</span>(&amp;deviceCount);
+    <span class="pl-k">if</span> (deviceCount == <span class="pl-c1">0</span>) {
+        <span class="pl-c1">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>There is no device supporting CUDA.<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>);
+        <span class="pl-c1">exit</span> (<span class="pl-c1">0</span>);
+    }
+
+    <span class="pl-c"><span class="pl-c">//</span> Get handle for device 0</span>
+    CUdevice cuDevice;
+    <span class="pl-c1">cuDeviceGet</span>(&amp;cuDevice, <span class="pl-c1">0</span>);
+
+    <span class="pl-c"><span class="pl-c">//</span> Create context</span>
+    CUcontext cuContext;
+    <span class="pl-c1">cuCtxCreate</span>(&amp;cuContext, <span class="pl-c1">0</span>, cuDevice);
+
+    <span class="pl-c"><span class="pl-c">//</span> Create module from binary file</span>
+    CUmodule cuModule;
+    <span class="pl-c1">cuModuleLoad</span>(&amp;cuModule, <span class="pl-s"><span class="pl-pds">"</span>VecAdd.ptx<span class="pl-pds">"</span></span>);
+
+    <span class="pl-c"><span class="pl-c">//</span> Allocate vectors in device memory</span>
+    CUdeviceptr d_A;
+    <span class="pl-c1">cuMemAlloc</span>(&amp;d_A, size);
+    CUdeviceptr d_B;
+    <span class="pl-c1">cuMemAlloc</span>(&amp;d_B, size);
+    CUdeviceptr d_C;
+    <span class="pl-c1">cuMemAlloc</span>(&amp;d_C, size);
+
+    <span class="pl-c"><span class="pl-c">//</span> Copy vectors from host memory to device memory</span>
+    <span class="pl-c1">cuMemcpyHtoD</span>(d_A, h_A, size);
+    <span class="pl-c1">cuMemcpyHtoD</span>(d_B, h_B, size);
+
+    <span class="pl-c"><span class="pl-c">//</span> Get function handle from module</span>
+    CUfunction vecAdd;
+    <span class="pl-c1">cuModuleGetFunction</span>(&amp;vecAdd, cuModule, <span class="pl-s"><span class="pl-pds">"</span>VecAdd<span class="pl-pds">"</span></span>);
+
+    <span class="pl-c"><span class="pl-c">//</span> Invoke kernel</span>
+    <span class="pl-k">int</span> threadsPerBlock = <span class="pl-c1">256</span>;
+    <span class="pl-k">int</span> blocksPerGrid =
+            (N + threadsPerBlock - <span class="pl-c1">1</span>) / threadsPerBlock;
+    <span class="pl-k">void</span>* args[] = { &amp;d_A, &amp;d_B, &amp;d_C, &amp;N };
+    <span class="pl-c1">cuLaunchKernel</span>(vecAdd,
+                   blocksPerGrid, <span class="pl-c1">1</span>, <span class="pl-c1">1</span>, threadsPerBlock, <span class="pl-c1">1</span>, <span class="pl-c1">1</span>,
+                   <span class="pl-c1">0</span>, <span class="pl-c1">0</span>, args, <span class="pl-c1">0</span>);
+
+    ...
+}</pre></div>
+<h1>一、上下文（Context）</h1>
+<p>CUDA 上下文可以类比为 CPU 进程。驱动 API 中所有的资源与操作都被封装在 CUDA 上下文内部；当上下文销毁时，系统会自动清理这些资源。除模块、纹理或表面引用这类对象之外，每个上下文拥有独立的地址空间。因此，来自不同上下文的<code class="notranslate">CUdeviceptr</code>会指向不同的内存位置。</p>
+<blockquote>
+<p>CUDA Context、GPU、CUDA驱动、CPU完整关系梳理：<br>
+<strong>核心结论</strong>：CUDA Context是CPU线程操作某一块GPU时，在GPU上建立的一套独立运行环境<br>
+<strong>CPU</strong>：跑宿主线程；线程可以调用CUDA Driver API（cuXXX）、每个CPU线程单独维护自己的上下文栈，记录哪个 Context 是本线程的<code class="notranslate">current</code>当前上下文；注意：上下文对象不属于线程，只是线程可以把它 “激活” 变成自己的当前上下文。一个 Context 可以被多个 CPU 线程轮流激活使用，但同一个 CPU 线程同一时刻只能激活 1 个 Context。<br>
+<strong>GPU</strong>：设备硬件，可以同时存在多个独立CUDA Context；每个 Context 拥有独立 GPU 虚拟地址空间（GPU VA）；每个 Context 持有自己的资源：显存分配记录、加载的 PTX 模块、kernel 状态、纹理 / 表面对象、事件、流（stream）；GPU 硬件的 SM、L2、显存硬件被多个 Context分时复用；<br>
+<strong>CUDA驱动</strong>：介于 CPU 用户态程序和 GPU 硬件之间，负责：1.响应<code class="notranslate">cuInit</code>/<code class="notranslate">cuCtxCreate</code>这类用户态 API；2.在 GPU 上创建、销毁、切换 Context；3.管理 GPU 虚拟地址映射、显存管理、kernel JIT 编译、任务调度；4.处理上下文切换：当 CPU 线程切换 current context，驱动完成 GPU 侧环境切换。<br>
+<strong>CUDA上下文</strong>：可以类比GPU上的进程，属于GPU侧的运行环境，封装了这一套环境下所有 GPU 资源；销毁 Context 时，驱动自动回收该 Context 持有的全部显存、模块等资源。<br>
+上下文切换：</p>
+<ul>
+<li><strong>CPU 上下文切换</strong>：操作系统切换 CPU 进程 / 线程（OS 内核，CPU 侧）</li>
+<li><strong>CUDA 上下文切换</strong>：CUDA 驱动切换 GPU 上的 CUDA Context</li>
+</ul>
+</blockquote>
+<p>一个宿主线程（CPU端线程）同一时刻<strong>只能有一个设备上下文处于当前（current）状态</strong>。通过<code class="notranslate">cuCtxCreate()</code>创建上下文时，该上下文会自动设为调用该函数的宿主线程的当前上下文。如果线程没有绑定有效的当前上下文，那么所有依赖上下文执行的 CUDA 函数（绝大多数不涉及设备枚举、上下文管理的函数）都会返回<code class="notranslate">CUDA_ERROR_INVALID_CONTEXT</code>错误。</p>
+<p>每个宿主线程维护一个<strong>当前上下文栈</strong>。<code class="notranslate">cuCtxCreate()</code>会将新建上下文压入栈顶。可调用<code class="notranslate">cuCtxPopCurrent()</code>将上下文从宿主线程剥离；此时该上下文变为 “浮动状态（floating）”，可以被压入任意宿主线程，作为它的当前上下文。<code class="notranslate">cuCtxPopCurrent()</code>同时会恢复栈中之前的当前上下文（如果存在）。</p>
+<p>每个上下文还维护一个<strong>引用计数（usage count）</strong>。<code class="notranslate">cuCtxCreate()</code>创建上下文时，引用计数初始化为 1。<code class="notranslate">cuCtxAttach()</code>增加引用计数，<code class="notranslate">cuCtxDetach()</code>减少引用计数。当调用<code class="notranslate">cuCtxDetach()</code>或<code class="notranslate">cuCtxDestroy()</code>后，引用计数降为 0 时，上下文才会被销毁。</p>
+<blockquote>
+<p>cuCtxPopCurrent()将上下文从宿主线程剥离之后不会降低引用次数吗，那此时上下文是被谁引用？<br>
+<code class="notranslate">cuCtxPopCurrent()</code><strong>不会降低引用计数</strong>，它只把上下文从当前线程的上下文栈剥离，变成浮动上下文。 这个 context 的引用，<strong>保存在你代码持有的 CUcontext 句柄上</strong>；只要你保留这个句柄，引用计数保持不变，上下文继续存活，等待被其他线程<code class="notranslate">cuCtxPushCurrent</code>重新激活。只有<code class="notranslate">cuCtxDetach</code>或者<code class="notranslate">cuCtxDestroy</code>才会减少引用计数。</p>
+</blockquote>
+<p>驱动 API 可与 Runtime API 互操作。可以通过<code class="notranslate">cuDevicePrimaryCtxRetain()</code>，在驱动 API 侧访问由 Runtime 管理的<strong>主上下文（primary context）</strong>（参考文档链接）。</p>
+<blockquote>
+<p>主上下文是什么，驱动与Runtime管理的上下文区别是什么？<br>
+主上下文（Primary Context）是 CUDA Runtime API 为进程内每一块 GPU 自动懒创建的标准 CUDA 上下文，当进程首次调用<code class="notranslate">cudaXXX</code>类 Runtime 接口时自动生成，同一进程内单块 GPU 仅有一个主上下文，Runtime 自动维护它的上下文栈与生命周期，开发者几乎感知不到 current 上下文、引用计数等底层细节；主上下文本质仍是普通 CUDA Context，具备独立 GPU 虚拟地址空间与引用计数，可通过 Driver API 的<code class="notranslate">cuDevicePrimaryCtxRetain</code>获取其句柄（调用会使引用计数 + 1，用完需调用<code class="notranslate">cuDevicePrimaryCtxRelease</code>释放引用），实现 Runtime 与 Driver API 互操作；而 Driver API 通过<code class="notranslate">cuCtxCreate</code>显式创建的自定义上下文，需要开发者手动管理上下文栈（<code class="notranslate">cuCtxPushCurrent</code>/<code class="notranslate">cuCtxPopCurrent</code>仅切换线程激活状态，不增减引用计数）、引用计数与生命周期，句柄持有引用，引用计数归 CUcontext 对象本身而非宿主线程；主上下文与自定义上下文在 GPU 硬件层面无差异，地址空间互相隔离，同一进程内可同时存在主上下文和自定义上下文，来回切换会触发 CUDA 上下文切换并带来性能开销；多进程共享同一块 GPU 时，每个进程会拥有各自独立的主上下文，驱动对多个上下文做时分复用，仅在不同上下文任务交替执行时触发上下文切换。</p>
+</blockquote>
+<p>引用计数机制用于支持多方第三方代码在同一个上下文内协同工作。举例：如果加载了三个库，共用同一个上下文，每个库都会调用<code class="notranslate">cuCtxAttach()</code>增加引用计数，使用完毕后调用<code class="notranslate">cuCtxDetach()</code>减少引用计数。对于大多数库，要求应用程序在加载、初始化库之前就已经创建好上下文；这样应用程序可以基于自身策略创建上下文，库直接在传入的上下文上执行操作。 如果库想要<strong>自行创建上下文</strong>（调用方客户端可能已经创建、也可能未创建上下文，库在后台独立管理），则使用<code class="notranslate">cuCtxPushCurrent()</code>与<code class="notranslate">cuCtxPopCurrent()</code>，如下图所示。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261010114205.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261010114205.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h1>二、模块（Module）</h1>
+<p><strong>模块（Module）</strong> 是可动态加载的设备代码与数据包，类似于 Windows 中的 dll，由 nvcc 编译输出（参考文档：<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/intro-to-cuda-cpp.html#compilation-with-nvcc" rel="nofollow">https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/intro-to-cuda-cpp.html#compilation-with-nvcc</a>）。所有符号（包括函数、全局变量、纹理引用或表面引用）的名称均在<strong>模块作用域</strong>内维护，由此，由不同独立第三方编写的模块可以在<strong>同一个 CUDA 上下文中</strong>实现互操作。 下面这段代码示例用于加载一个模块，并获取某个核函数（kernel）的句柄：</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-c"><span class="pl-c">//</span> `CUmodule` 是CUDA 模块的句柄类型，`cuModule` 变量只是一个句柄，代表加载到当前 CUDA 上下文里的整套设备代码包；它会绑定到当前宿主线程对应的当前 CUDA 上下文！ 这个模块只能在加载它的这个 Context 中使用；切换到别的 CUDA 上下文，这个 CUmodule 句柄直接无效。</span>
+CUmodule cuModule;
+
+<span class="pl-c"><span class="pl-c">//</span> 从磁盘读取ptx文件，加载设备代码到当前激活的CUDA上下文。</span>
+<span class="pl-c"><span class="pl-c">//</span>`"myModule.ptx"`：nvcc 编译输出的 PTX 中间汇编代码（虚拟 ISA，JIT 会在 GPU 硬件上即时编译成硬件可执行指令）；也可以传入`.cubin`（已编译好的二进制）</span>
+<span class="pl-c"><span class="pl-c">//</span> 底层行为：1.读取 ptx 文件到内存；2.在当前线程的 current CUDA Context内做JIT编译（PTX → GPU 硬件指令）；3.在该 Context 内创建 Module 对象；4.将模块句柄写入变量`cuModule`；</span>
+<span class="pl-en">cuModuleLoad</span>(&amp;cuModule, <span class="pl-s"><span class="pl-pds">"</span>myModule.ptx<span class="pl-pds">"</span></span>);
+
+<span class="pl-c"><span class="pl-c">//</span> `CUfunction`：核函数句柄类型，用来代表模块内部的一个GPU kernel函数。</span>
+CUfunction myKernel;
+<span class="pl-c"><span class="pl-c">//</span> 在已经加载好的 Module 里，按符号名字查找 kernel，拿到 kernel 句柄</span>
+<span class="pl-en">cuModuleGetFunction</span>(&amp;myKernel, cuModule, <span class="pl-s"><span class="pl-pds">"</span>MyKernel<span class="pl-pds">"</span></span>);</pre></div>
+<blockquote>
+<p><strong>当前CUDA上下文</strong></p>
+<ol>
+<li>对单条宿主线程：同一时刻，线程的current当前CUDA上下文最多只有 1 个。线程有一个上下文栈，栈顶就是当前<code class="notranslate">current</code>上下文；你可以 push 多个压进栈里，但只有栈顶那一个是激活的 current。push 新的，栈顶切换；pop 弹出栈顶，回到上一层栈顶。</li>
+<li>对整张物理 GPU 硬件：同一时刻，GPU 上可以存在多个 CUDA Context 对象（已经创建、引用计数 &gt; 0），但GPU 硬件当前正在激活执行任务的 Context 最多只能有 1 个（原生 CUDA 非抢占式 kernel 调度）。</li>
+</ol>
+</blockquote>
+<p>以下代码示例从 PTX 代码编译并加载一个新模块，同时解析编译报错信息。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">define</span> <span class="pl-en">BUFFER_SIZE</span> <span class="pl-c1">8192</span>
+CUmodule cuModule;
+CUjit_option options[<span class="pl-c1">3</span>];
+<span class="pl-k">void</span>* values[<span class="pl-c1">3</span>];
+<span class="pl-k">char</span>* PTXCode = <span class="pl-s"><span class="pl-pds">"</span>some PTX code<span class="pl-pds">"</span></span>;
+<span class="pl-k">char</span> error_log[<span class="pl-c1">BUFFER_SIZE</span>];
+<span class="pl-k">int</span> err;
+options[<span class="pl-c1">0</span>] = <span class="pl-c1">CU_JIT_ERROR_LOG_BUFFER</span>;
+values[<span class="pl-c1">0</span>]  = (<span class="pl-k">void</span>*)error_log;
+options[<span class="pl-c1">1</span>] = <span class="pl-c1">CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES</span>;
+values[<span class="pl-c1">1</span>]  = (<span class="pl-k">void</span>*)<span class="pl-c1">BUFFER_SIZE</span>;
+options[<span class="pl-c1">2</span>] = <span class="pl-c1">CU_JIT_TARGET_FROM_CUCONTEXT</span>;
+values[<span class="pl-c1">2</span>]  = <span class="pl-c1">0</span>;
+err = cuModuleLoadDataEx(&amp;cuModule, PTXCode, <span class="pl-c1">3</span>, options, values);
+<span class="pl-k">if</span> (err != <span class="pl-c1">CUDA_SUCCESS</span>)
+    <span class="pl-en">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Link error:<span class="pl-cce">\n</span>%s<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>, error_log);</pre></div>
+<p>以下代码示例基于多段 PTX 代码完成编译、链接并加载新模块，同时解析链接错误与编译错误。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">define</span> <span class="pl-en">BUFFER_SIZE</span> <span class="pl-c1">8192</span>
+CUmodule cuModule;
+CUjit_option options[<span class="pl-c1">6</span>];
+<span class="pl-k">void</span>* values[<span class="pl-c1">6</span>];
+<span class="pl-k">float</span> walltime;
+<span class="pl-k">char</span> error_log[<span class="pl-c1">BUFFER_SIZE</span>], info_log[<span class="pl-c1">BUFFER_SIZE</span>];
+<span class="pl-k">char</span>* PTXCode0 = <span class="pl-s"><span class="pl-pds">"</span>some PTX code<span class="pl-pds">"</span></span>;
+<span class="pl-k">char</span>* PTXCode1 = <span class="pl-s"><span class="pl-pds">"</span>some other PTX code<span class="pl-pds">"</span></span>;
+CUlinkState linkState;
+<span class="pl-k">int</span> err;
+<span class="pl-k">void</span>* cubin;
+<span class="pl-c1">size_t</span> cubinSize;
+options[<span class="pl-c1">0</span>] = <span class="pl-c1">CU_JIT_WALL_TIME</span>;
+values[<span class="pl-c1">0</span>] = (<span class="pl-k">void</span>*)&amp;walltime;
+options[<span class="pl-c1">1</span>] = <span class="pl-c1">CU_JIT_INFO_LOG_BUFFER</span>;
+values[<span class="pl-c1">1</span>] = (<span class="pl-k">void</span>*)info_log;
+options[<span class="pl-c1">2</span>] = <span class="pl-c1">CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES</span>;
+values[<span class="pl-c1">2</span>] = (<span class="pl-k">void</span>*)<span class="pl-c1">BUFFER_SIZE</span>;
+options[<span class="pl-c1">3</span>] = <span class="pl-c1">CU_JIT_ERROR_LOG_BUFFER</span>;
+values[<span class="pl-c1">3</span>] = (<span class="pl-k">void</span>*)error_log;
+options[<span class="pl-c1">4</span>] = <span class="pl-c1">CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES</span>;
+values[<span class="pl-c1">4</span>] = (<span class="pl-k">void</span>*)<span class="pl-c1">BUFFER_SIZE</span>;
+options[<span class="pl-c1">5</span>] = <span class="pl-c1">CU_JIT_LOG_VERBOSE</span>;
+values[<span class="pl-c1">5</span>] = (<span class="pl-k">void</span>*)<span class="pl-c1">1</span>;
+<span class="pl-en">cuLinkCreate</span>(<span class="pl-c1">6</span>, options, values, &amp;linkState);
+err = cuLinkAddData(linkState, <span class="pl-c1">CU_JIT_INPUT_PTX</span>,
+                    (<span class="pl-k">void</span>*)PTXCode0, strlen(PTXCode0) + <span class="pl-c1">1</span>, <span class="pl-c1">0</span>, <span class="pl-c1">0</span>, <span class="pl-c1">0</span>, <span class="pl-c1">0</span>);
+<span class="pl-k">if</span> (err != <span class="pl-c1">CUDA_SUCCESS</span>)
+    <span class="pl-en">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Link error:<span class="pl-cce">\n</span>%s<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>, error_log);
+err = cuLinkAddData(linkState, <span class="pl-c1">CU_JIT_INPUT_PTX</span>,
+                    (<span class="pl-k">void</span>*)PTXCode1, strlen(PTXCode1) + <span class="pl-c1">1</span>, <span class="pl-c1">0</span>, <span class="pl-c1">0</span>, <span class="pl-c1">0</span>, <span class="pl-c1">0</span>);
+<span class="pl-k">if</span> (err != <span class="pl-c1">CUDA_SUCCESS</span>)
+    <span class="pl-en">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Link error:<span class="pl-cce">\n</span>%s<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>, error_log);
+<span class="pl-en">cuLinkComplete</span>(linkState, &amp;cubin, &amp;cubinSize);
+<span class="pl-en">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Link completed in %fms. Linker Output:<span class="pl-cce">\n</span>%s<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>, walltime, info_log);
+<span class="pl-en">cuModuleLoadData</span>(cuModule, cubin);
+<span class="pl-en">cuLinkDestroy</span>(linkState);</pre></div>
+<p>可利用多线程对模块链接 / 加载流程的部分环节进行加速，加载 cubin 文件时同样适用。以下代码示例使用<code class="notranslate">CU_JIT_BINARY_LOADER_THREAD_COUNT</code>来加快模块加载速度。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">define</span> <span class="pl-en">BUFFER_SIZE</span> <span class="pl-c1">8192</span>
+CUmodule cuModule;
+CUjit_option options[<span class="pl-c1">3</span>];
+<span class="pl-k">void</span>* values[<span class="pl-c1">3</span>];
+<span class="pl-k">char</span>* cubinCode = <span class="pl-s"><span class="pl-pds">"</span>some cubin code<span class="pl-pds">"</span></span>;
+<span class="pl-k">char</span> error_log[<span class="pl-c1">BUFFER_SIZE</span>];
+<span class="pl-k">int</span> err;
+options[<span class="pl-c1">0</span>] = <span class="pl-c1">CU_JIT_ERROR_LOG_BUFFER</span>;
+values[<span class="pl-c1">0</span>]  = (<span class="pl-k">void</span>*)error_log;
+options[<span class="pl-c1">1</span>] = <span class="pl-c1">CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES</span>;
+values[<span class="pl-c1">1</span>]  = (<span class="pl-k">void</span>*)<span class="pl-c1">BUFFER_SIZE</span>;
+options[<span class="pl-c1">2</span>] = <span class="pl-c1">CU_JIT_BINARY_LOADER_THREAD_COUNT</span>;
+values[<span class="pl-c1">2</span>]  = <span class="pl-c1">0</span>; <span class="pl-c"><span class="pl-c">//</span> Use as many threads as CPUs on the machine</span>
+err = cuModuleLoadDataEx(&amp;cuModule, cubinCode, <span class="pl-c1">3</span>, options, values);
+<span class="pl-k">if</span> (err != <span class="pl-c1">CUDA_SUCCESS</span>)
+    <span class="pl-en">printf</span>(<span class="pl-s"><span class="pl-pds">"</span>Link error:<span class="pl-cce">\n</span>%s<span class="pl-cce">\n</span><span class="pl-pds">"</span></span>, error_log);</pre></div>
+<h1>三、内核执行（Kernel Execution）</h1>
+<p><code class="notranslate">cuLaunchKernel()</code> 根据给定的执行配置启动一个核函数。</p>
+<p>参数有两种传递方式： 一种是<strong>指针数组</strong>（<code class="notranslate">cuLaunchKernel()</code> 的倒数第二个入参）：数组中第<code class="notranslate">n</code>个指针对应第<code class="notranslate">n</code>个参数，指向一块内存区域，参数将从该内存拷贝； 另一种是通过<strong>扩展选项</strong>（<code class="notranslate">cuLaunchKernel()</code> 的最后一个入参）传入。</p>
+<p>若采用扩展选项传参（即<code class="notranslate">CU_LAUNCH_PARAM_BUFFER_POINTER</code>选项），需要传入指向<strong>单个缓冲区</strong>的指针；要求缓冲区内部各个参数之间的偏移量必须符合设备代码中各参数类型的对齐要求。</p>
+<p>设备代码中内置向量类型的对齐要求，可查阅文档：<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cpp-language-extensions.html#vector-types-alignment-requirements-in-device-code" rel="nofollow">https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cpp-language-extensions.html#vector-types-alignment-requirements-in-device-code</a>。其余所有基础类型，其设备端对齐要求与主机端一致，因此可通过<code class="notranslate">__alignof()</code>获取。 唯一例外场景：主机编译器将<code class="notranslate">double</code>、<code class="notranslate">long long</code>（64 位系统下的<code class="notranslate">long</code>）按单字边界对齐，而非双字边界（例如使用 gcc 编译标识<code class="notranslate">-mno-align-double</code>）；<strong>设备代码中这些类型永远按双字边界对齐</strong>。</p>
+<p><code class="notranslate">CUdeviceptr</code>本质是整数，但它代表指针，因此对齐要求等于<code class="notranslate">__alignof(void*)</code>。</p>
+<p>下面的代码示例使用宏<code class="notranslate">ALIGN_UP()</code>调整每个参数的偏移量以满足对齐要求，并用另一个宏<code class="notranslate">ADD_TO_PARAM_BUFFER()</code>把各个参数添加到参数缓冲区，该缓冲区最终传给<code class="notranslate">CU_LAUNCH_PARAM_BUFFER_POINTER</code>选项。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">#<span class="pl-k">define</span> <span class="pl-en">ALIGN_UP</span>(<span class="pl-v">offset, alignment</span>) \
+      (offset) = ((offset) + (alignment) - <span class="pl-c1">1</span>) &amp; ~((alignment) - <span class="pl-c1">1</span>)
+
+<span class="pl-k">char</span> paramBuffer[<span class="pl-c1">1024</span>];
+<span class="pl-c1">size_t</span> paramBufferSize = <span class="pl-c1">0</span>;
+
+#<span class="pl-k">define</span> <span class="pl-en">ADD_TO_PARAM_BUFFER</span>(<span class="pl-v">value, alignment</span>)                   \
+    <span class="pl-k">do</span> {                                                        \
+        paramBufferSize = <span class="pl-c1">ALIGN_UP</span>(paramBufferSize, alignment); \
+        <span class="pl-c1">memcpy</span>(paramBuffer + paramBufferSize,                   \
+               &amp;(value), <span class="pl-k">sizeof</span>(value));                        \
+        paramBufferSize += <span class="pl-k">sizeof</span>(value);                       \
+    } <span class="pl-k">while</span> (<span class="pl-c1">0</span>)
+
+<span class="pl-k">int</span> i;
+<span class="pl-c1">ADD_TO_PARAM_BUFFER</span>(i, __alignof(i));
+float4 f4;
+<span class="pl-c1">ADD_TO_PARAM_BUFFER</span>(f4, <span class="pl-c1">16</span>); <span class="pl-c"><span class="pl-c">//</span> float4's alignment is 16</span>
+<span class="pl-k">char</span> c;
+<span class="pl-c1">ADD_TO_PARAM_BUFFER</span>(c, __alignof(c));
+<span class="pl-k">float</span> f;
+<span class="pl-c1">ADD_TO_PARAM_BUFFER</span>(f, __alignof(f));
+CUdeviceptr devPtr;
+<span class="pl-c1">ADD_TO_PARAM_BUFFER</span>(devPtr, __alignof(devPtr));
+float2 f2;
+<span class="pl-c1">ADD_TO_PARAM_BUFFER</span>(f2, <span class="pl-c1">8</span>); <span class="pl-c"><span class="pl-c">//</span> float2's alignment is 8</span>
+
+<span class="pl-k">void</span>* extra[] = {
+    <span class="pl-c1">CU_LAUNCH_PARAM_BUFFER_POINTER</span>, paramBuffer,
+    <span class="pl-c1">CU_LAUNCH_PARAM_BUFFER_SIZE</span>,    &amp;paramBufferSize,
+    <span class="pl-c1">CU_LAUNCH_PARAM_END</span>
+};
+<span class="pl-en">cuLaunchKernel</span>(cuFunction,
+               blockWidth, blockHeight, blockDepth,
+               gridWidth, gridHeight, gridDepth,
+               <span class="pl-c1">0</span>, <span class="pl-c1">0</span>, <span class="pl-c1">0</span>, extra);</pre></div>
+<p>结构体的对齐要求等于其各个成员对齐要求中的最大值。因此，如果结构体包含内置向量类型、<code class="notranslate">CUdeviceptr</code>，或是对齐规则存在差异的<code class="notranslate">double</code>与<code class="notranslate">long long</code>，该结构体在设备代码和主机代码中的对齐要求就可能不一致；这类结构体的填充（padding）布局也会有所区别。</p>
+<p>例如下面这个结构体：在主机代码中完全没有填充字节，但在设备代码里，会在成员<code class="notranslate">f</code>之后插入 12 字节的填充。原因是成员<code class="notranslate">f4</code>的对齐要求为 16 字节。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate"><span class="pl-k">typedef</span> <span class="pl-k">struct</span> {
+    <span class="pl-k">float</span>  f;
+    float4 f4;
+} myStruct;</pre></div>
+<h1>四、Runtime API 与 Driver API 的互操作</h1>
+<p>应用程序可以混用运行时 API 代码与驱动 API 代码。</p>
+<p>如果通过驱动 API 创建一个上下文并将其设为当前上下文，后续的运行时 API 调用将使用该上下文，而不会新建上下文。</p>
+<p>若运行时已完成初始化，可使用<code class="notranslate">cuCtxGetCurrent()</code>获取初始化阶段创建的上下文；该上下文可用于后续的驱动 API 调用。</p>
+<p>由运行时隐式创建的上下文称为<strong>主上下文</strong>（参见文档：<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/intro-to-cuda-cpp.html#intro-cpp-runtime-initialization" rel="nofollow">https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/intro-to-cuda-cpp.html#intro-cpp-runtime-initialization</a>）。可通过这组接口从驱动 API 侧管理主上下文：<a href="https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__PRIMARY__CTX.html" rel="nofollow">https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__PRIMARY__CTX.html</a>。</p>
+<p>设备内存可使用两套 API 中的任意一套完成分配与释放。<code class="notranslate">CUdeviceptr</code>可转换为普通指针，反之亦然。以下代码展示 CUDA Runtime API 和 Driver API 设备地址互转：两套 API 分配出来的GPU 显存地址本身是同一个数值，只是用了不同类型包装，在同一个 CUDA 上下文内可以互相强制类型转换。</p>
+<div class="highlight highlight-source-c++"><pre class="notranslate">CUdeviceptr devPtr;
+<span class="pl-k">float</span>* d_data;
+
+<span class="pl-c"><span class="pl-c">//</span> Allocation using driver API</span>
+<span class="pl-en">cuMemAlloc</span>(&amp;devPtr, size);
+d_data = (<span class="pl-k">float</span>*)devPtr;
+
+<span class="pl-c"><span class="pl-c">//</span> Allocation using runtime API</span>
+<span class="pl-en">cudaMalloc</span>(&amp;d_data, size);
+devPtr = (CUdeviceptr)d_data;</pre></div>
+<p>具体而言，这意味着使用驱动 API 编写的应用程序可以调用基于运行时 API 开发的库（例如 cuFFT、cuBLAS 等）。</p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
