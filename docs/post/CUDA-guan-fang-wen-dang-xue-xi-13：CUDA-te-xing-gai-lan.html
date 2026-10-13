@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="本编程指南的第 1‑3 章已经对 CUDA 与 GPU 编程进行了介绍（对应“CUDA官方文档学习1-12”），通过理论概念与简单代码示例讲解了各类基础主题。">
+<meta property="og:title" content="CUDA官方文档学习13：CUDA特性概览">
+<meta property="og:description" content="本编程指南的第 1‑3 章已经对 CUDA 与 GPU 编程进行了介绍（对应“CUDA官方文档学习1-12”），通过理论概念与简单代码示例讲解了各类基础主题。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/CUDA-guan-fang-wen-dang-xue-xi-13%EF%BC%9ACUDA-te-xing-gai-lan.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>CUDA官方文档学习13：CUDA特性概览</title>
+
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">CUDA官方文档学习13：CUDA特性概览</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/88" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>本编程指南的第 1‑3 章已经对 CUDA 与 GPU 编程进行了介绍（对应“CUDA官方文档学习1-12”），通过理论概念与简单代码示例讲解了各类基础主题。本指南第 4 部分中介绍各项 CUDA 具体特性的章节（对应“CUDA官方文档学习13+”），要求读者已经掌握之前章节所涵盖的相关概念。</p>
+<p>CUDA 拥有大量适用于不同问题场景的特性，并非所有特性都适用于每一种业务场景。本章将对这些特性逐一进行介绍，说明其设计用途以及能够解决的问题。特性按照其所要解决问题的类型做了粗略分类。部分特性（例如 CUDA 图）可归属于多个类别。</p>
+<p>更多完整细节可参见：<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/part4.html#cuda-features" rel="nofollow">https://docs.nvidia.com/cuda/cuda-programming-guide/part4.html#cuda-features</a></p>
+<h1>一、提升核函数性能</h1>
+<p>本节所列的全部特性，旨在帮助核函数开发者最大化核程序的执行性能。</p>
+<h2>1.1 异步屏障</h2>
+<p>异步屏障在《高级核编程》章节中首次引入，它支持对线程间同步进行更精细的控制。异步屏障将<strong>抵达（arrive）</strong> 与<strong>等待（wait）</strong> 两个屏障操作相互拆分开。这使得应用程序在等待其他线程抵达屏障的同时，可以执行那些不依赖该屏障结果的计算任务。</p>
+<p>异步屏障可配置为不同的<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/03-advanced/advanced-kernel-programming.html#advanced-kernels-thread-scopes" rel="nofollow">线程作用域（thread scopes）</a>。 异步屏障的完整详细说明参见：<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/async-barriers.html#asynchronous-barriers" rel="nofollow">https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/async-barriers.html#asynchronous-barriers</a></p>
+<h2>1.2 异步数据拷贝与张量内存加速器（TMA）</h2>
+<p>在内核代码语境下，<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/async-copies.html#async-copies" rel="nofollow">异步数据拷贝</a>指的是：在执行计算的同时，完成共享内存与 GPU 显存之间的数据搬移。注意不要把它和 CPU‑GPU 之间的异步内存拷贝相混淆。该特性需要依托异步屏障来实现。</p>
+<p>异步数据拷贝的完整使用说明参见文档： <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/async-copies.html#async-copies" rel="nofollow">https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/async-copies.html#async-copies</a></p>
+<h2>1.3 流水线</h2>
+<p><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/pipelines.html#pipelines" rel="nofollow">流水线</a>是一种用于任务分段调度、协调多缓冲区生产者‑消费者模式的机制，常被用来实现计算与<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/async-copies.html#async-copies" rel="nofollow">异步拷贝操作</a>的执行重叠。</p>
+<p>关于在 CUDA 中使用流水线的完整说明与代码示例，请参见文档： <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/pipelines.html#pipelines" rel="nofollow">https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/pipelines.html#pipelines</a></p>
+<h2>1.4 基于集群发射控制的工作窃取</h2>
+<p><strong>工作窃取</strong>是一种用于在负载不均衡场景下维持硬件利用率的技术：已经完成自身任务的工作单元，可以从其他工作单元那里 “窃取” 任务来执行。</p>
+<p>集群发射控制是算力 10.0（Blackwell 架构）引入的特性，允许内核直接控制正在运行的线程块调度，以此实时适配不均衡的负载。 一个线程块可以取消另一个尚未开始执行的线程块或者线程块集群的发射，接管被取消块的索引，并立刻执行窃取过来的任务。</p>
+<p>这套工作窃取执行流程能够让流式多处理器（SM）保持忙碌，在数据不规则或者运行时耗时波动的场景下减少空闲时间；实现更细粒度的负载均衡，而不完全依赖硬件调度器。</p>
+<p>该特性的完整使用说明参见文档：<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/cluster-launch-control.html#cluster-launch-control" rel="nofollow">https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/cluster-launch-control.html#cluster-launch-control</a></p>
+<h1>二、降低延迟</h1>
+<p>本节介绍的各类特性拥有共同目标：削减某一类延迟，但不同特性所针对的延迟类型各有区别。总体而言，这些特性主要聚焦于内核发射层级及之上的延迟，内核内部的 GPU 显存访问延迟不在本节的讨论范畴之内。</p>
+<h2>2.1 绿色上下文（Green Contexts）</h2>
+<p>绿色上下文，也称作执行上下文（execution contexts），是一项 CUDA 特性。该特性允许程序创建一类 CUDA 上下文，限定其内提交的任务仅能在 GPU 的一部分流式多处理器（SM）上执行。</p>
+<p>默认情况下，内核启动产生的线程块会被调度到 GPU 内任意满足该内核资源需求的 SM 上。会影响线程块可在哪些 SM 上执行的因素非常多，包括（但不限于）：共享内存占用、寄存器占用、线程块集群的使用，以及线程块内的总线程数。</p>
+<p>借助执行上下文，可以将内核提交到专门创建的上下文当中，进一步限制可供该内核使用的 SM 数量。关键特性：当程序创建一个绿色上下文并分配了一组 SM 之后，GPU 上的其他上下文（包括 CUDA 运行时默认使用的主上下文）不会再把线程块调度到分配给该绿色上下文的这些 SM 上。由此，这些 SM 可以预留给高优先级、对延迟敏感的工作负载使用。</p>
+<h2>2.2 局部域（Locality Domains）</h2>
+<p><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/locality-domains.html#locality-domains" rel="nofollow">局部域</a>是 GPU 显存与流式多处理器（SM）的一个子集。对于具备多个局部域的 GPU，将内存分配在某个指定局部域中，再通过绿色上下文执行内核，且该绿色上下文仅使用同一局部域内的 SM，这种做法可以带来性能收益。</p>
+<p>局部域属于性能优化特性：即便不对内存、计算资源做局部绑定，CUDA 代码依旧可以正确执行。</p>
+<p><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html#programming-model-locality-domains" rel="nofollow">《CUDA 编程指南》编程模型章节</a>介绍了局部域的基础概念；下面的文档链接给出完整说明，包含如何查询 GPU 的局部域数量、如何把内存分配到指定局部域、如何创建仅包含该局部域内 SM 的绿色上下文：<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html#programming-model-locality-domains" rel="nofollow">https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html#programming-model-locality-domains</a></p>
+<h2>2.3 流序内存分配（Stream-Ordered Memory Allocation）</h2>
+<p><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#stream-ordered-memory-allocator" rel="nofollow">流序内存分配器</a>允许程序将 GPU 内存的分配与释放操作编排到 <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/asynchronous-execution.html#cuda-streams" rel="nofollow">CUDA 流</a>中执行。 <code class="notranslate">cudaMalloc</code>与<code class="notranslate">cudaFree</code>会立即执行；与之不同，<code class="notranslate">cudaMallocAsync</code>和<code class="notranslate">cudaFreeAsync</code>是将内存分配或释放操作插入到 CUDA 流队列。<br>
+该页面包含这些 API 的全部详细说明：<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#stream-ordered-memory-allocator" rel="nofollow">https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html#stream-ordered-memory-allocator</a></p>
+<h2>2.4 CUDA图</h2>
+<p><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/cuda-graphs.html#cuda-graphs" rel="nofollow">CUDA图</a>允许应用程序指定一系列 CUDA 操作（例如内核启动、内存拷贝）以及这些操作之间的依赖关系，从而让这些操作可以在 GPU 上高效执行。使用<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/asynchronous-execution.html#cuda-streams" rel="nofollow">CUDA流</a>也可以实现类似的行为；实际上，创建 CUDA 图的其中一种机制叫做<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/cuda-graphs.html#cuda-graphs-creating-a-graph-using-stream-capture" rel="nofollow">流捕获（Stream Capture）</a>，它可以将流上执行的操作记录到一张 CUDA 图当中。CUDA 图也可以通过<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/cuda-graphs.html#cuda-graphs-creating-a-graph-using-graph-apis" rel="nofollow">图 API</a>进行创建。</p>
+<p>图一旦创建完成，就可以完成实例化，并且被反复执行。这对于描述需要重复执行的工作负载十分有用。CUDA 图能够带来一定性能收益：一方面它可以降低调用 CUDA 操作带来的 CPU 提交开销；另一方面，当完整工作负载提前全部指定后，还可以启用一些仅在此条件下可用的优化手段。</p>
+<p>CUDA 编程指南的<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/cuda-graphs.html#cuda-graphs" rel="nofollow"> CUDA Graph 章节</a>对 CUDA 图的用法进行了完整说明并附带示例代码。</p>
+<h2>2.5 可编程依赖启动</h2>
+<p><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/programmatic-dependent-launch.html#programmatic-dependent-launch-and-synchronization" rel="nofollow">可编程依赖启动</a>是一项 CUDA 特性：允许存在依赖关系的内核（即需要使用前一个内核输出结果的内核），在其所依赖的主内核尚未执行完毕时就开始运行。该依赖内核可以执行初始化代码以及与主内核无关的计算任务，直到它需要读取主内核的数据时再发生阻塞。主内核可以发出信号，通知依赖内核所需的数据已经准备就绪，随后依赖内核便可恢复继续执行。</p>
+<p>该机制能够让两个内核的执行过程产生部分重叠，有助于维持较高的 GPU 利用率，同时缩短关键数据通路的延迟。CUDA 编程指南的<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/programmatic-dependent-launch.html#programmatic-dependent-launch-and-synchronization" rel="nofollow">可编程依赖启动章节</a>对该特性做了详细阐述。</p>
+<h2>2.6 延迟加载</h2>
+<p><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/lazy-loading.html#lazy-loading" rel="nofollow">延迟加载</a>是一项用于控制应用程序启动阶段 JIT 编译器工作方式的特性。 如果应用程序存在大量内核需要从 PTX 即时编译为 cubin，若在程序启动阶段就对全部内核执行 JIT 编译，则会出现启动时间过长的问题。 默认行为是：模块直到真正被需要时才会完成编译。 该行为可以通过 <a href="https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/environment-variables.html#cuda-environment-variables" rel="nofollow">CUDA 环境变量</a>进行修改，具体说明参见<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/lazy-loading.html#lazy-loading" rel="nofollow">延迟加载</a>章节文档。</p>
+<h1>三、功能特性</h1>
+<p>本节所描述的各项特性拥有一个共同点：用于启用更多附加能力与功能。</p>
+<h2>3.1 扩展GPU内存（EGM）</h2>
+<p><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/extended-gpu-memory.html#extended-gpu-memory" rel="nofollow">扩展 GPU 内存（EGM）</a>是仅在 NVLink‑C2C 互连系统上可用的一项特性，它允许 GPU 高效访问系统内的全部内存。扩展 GPU 内存相关内容可参见官方文档：<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/extended-gpu-memory.html#extended-gpu-memory" rel="nofollow">https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/extended-gpu-memory.html#extended-gpu-memory</a></p>
+<h2>3.2 动态并行</h2>
+<p>CUDA 应用程序最常见的方式是从 CPU 侧代码发起内核启动。也可以在 GPU 上正在运行的内核内部发起新的内核调用，该特性称为<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/dynamic-parallelism.html#cuda-dynamic-parallelism" rel="nofollow">CUDA 动态并行</a>。<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/dynamic-parallelism.html#cuda-dynamic-parallelism" rel="nofollow">CUDA 动态并行文档</a>详细介绍了如何在 GPU 设备代码中发起新的 GPU 内核启动。</p>
+<h1>四、CUDA互操作性</h1>
+<h2>4.1 CUDA与其他API的互操作性</h2>
+<p>除 CUDA 之外，还有其他可在 GPU 上执行代码的机制。GPU 最初设计用于加速计算机图形任务，图形领域拥有 Direct3D、Vulkan 等一套专属 API。应用程序可能希望使用图形 API 完成 3D 渲染，同时借助 CUDA 执行计算任务。CUDA 提供了相应机制，可以在 CUDA 上下文与各类 3D 图形 API 的 GPU 上下文之间交换 GPU 上存储的数据。例如，应用可以用 CUDA 完成仿真计算，再使用 3D API 对计算结果做可视化；实现方式是让部分缓冲区同时对 CUDA 和图形 API 具备读、写访问权限。</p>
+<p>这套用于和图形 API 共享缓冲区的机制，同样也可以用于通信组件之间的缓冲区共享，支持多节点环境下高速的 GPU‑to‑GPU 直接通信。</p>
+<p><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/graphics-interop.html#cuda-interoperability" rel="nofollow">CUDA 互操作文档</a>阐述了 CUDA 如何与其他 GPU API 协同工作，以及怎样在 CUDA 与其他 API 之间共享数据，并给出了多种不同 API 的具体示例。</p>
+<h2>4.2 进程间通信</h2>
+<p>在大规模计算场景中，经常会联合使用多块 GPU，以此获得更大的内存容量与更多计算资源来共同处理同一计算任务。在集群计算术语里，单台服务器也称作一个<strong>节点（node）</strong>，可以在单个主机进程内使用多块 GPU，相关内容可参考<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/03-advanced/multi-gpu-systems.html#multi-gpu-introduction" rel="nofollow">多 GPU 系统介绍文档</a>。</p>
+<p>同时也经常会使用分布在单台或多台服务器上的多个独立主机进程。当多个进程协同工作时，进程之间的数据交互就称为<strong>进程间通信（IPC）</strong>。CUDA 进程间通信（CUDA IPC）提供了在不同进程之间共享 GPU 缓冲区的机制。<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/inter-process-communication.html#interprocess-communication" rel="nofollow">CUDA IPC 文档</a>介绍并演示了如何借助 CUDA IPC 在不同主机进程之间完成协同工作与数据通信。</p>
+<h1>五、细粒度控制</h1>
+<h2>5.1 虚拟内存管理</h2>
+<p>正如<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/understanding-memory.html#memory-unified-virtual-address-space" rel="nofollow">统一虚拟地址空间章节</a>所述，系统内的全部 GPU 以及 CPU 内存共享同一个统一虚拟地址空间。绝大多数应用程序可以直接使用 CUDA 提供的默认内存管理机制，无需修改其行为。但对于有特殊需求的开发者，<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/understanding-memory.html#memory-unified-virtual-address-space" rel="nofollow"><strong>CUDA 驱动 API</strong></a>提供了对该虚拟地址空间布局的高级精细化控制能力。该特性主要适用于需要管控缓冲区在单节点内部以及跨多节点场景下的 GPU 之间共享行为。</p>
+<p><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/virtual-memory-management.html#virtual-memory-management" rel="nofollow">虚拟内存管理章节</a>详细介绍了 CUDA 驱动 API 所提供的各项控制能力、工作原理，以及开发者在哪些场景下可以从中获益。</p>
+<h2>5.2 计算架构传输</h2>
+<p><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/compute-fabric-transport.html#compute-fabric-transport" rel="nofollow">计算架构传输文档</a>介绍了一套<strong>以资源为中心</strong>的模型，用于在 NVLink 互联架构上实现由 GPU 发起的数据搬运。该模型中，远端目标通过<strong>逻辑端点 ID（logical endpoint id）+ 偏移量</strong>进行寻址，而非依靠已映射的虚拟地址。该特性面向通信原码库的开发人员；对于普通应用，如果业务通信模式能够匹配，应优先选用<a href="https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/deviceapi.html" rel="nofollow"> NCCL 设备端 API</a> 或者 <a href="https://docs.nvidia.com/nvshmem/api/latest/index.html" rel="nofollow">NVSHMEM 库。</a></p>
+<h2>5.3 驱动入口点访问</h2>
+<p><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/driver-entry-point-access.html#driver-entry-point-access" rel="nofollow">驱动入口点访问</a>是 CUDA 11.3 起提供的能力：可以获取 CUDA 驱动 API 与 CUDA 运行时 API 的函数指针。开发者还可以获取驱动函数特定变体版本的函数指针，并且能够调用 CUDA Toolkit 版本中并未提供、但由更高版本驱动所实现的驱动函数。<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/driver-entry-point-access.html#driver-entry-point-access" rel="nofollow">驱动入口点访问章节</a>详细讲解该功能。</p>
+<h2>5.4 错误日志管理</h2>
+<p><a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/error-log-management.html#error-log-management" rel="nofollow">错误日志管理</a>提供用于处理、记录 CUDA API 报错的工具。只需要设置环境变量<code class="notranslate">CUDA_LOG_FILE</code>，就可以将 CUDA 错误直接输出到标准错误 (stderr)、标准输出 (stdout) 或者指定文件。错误日志管理还支持应用注册回调函数，当 CUDA 遇到错误时会触发该回调。<a href="https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/error-log-management.html#error-log-management" rel="nofollow">错误日志管理章节</a>给出该功能的更多细节。</p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
