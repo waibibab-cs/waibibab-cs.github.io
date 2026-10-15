@@ -1,0 +1,1886 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="本文基于的vllm commit hash为：`c16bb6068f70878fb8a2f7c4d6cda95cd03a778b`
+# day7
+InputProcessor把人类可读的 prompt（字符串 / 消息列表 / 多模态）变成引擎能处理的整数 token 序列，同时把采样参数补全、校验，最终打包成一个 `EngineCoreRequest`。">
+<meta property="og:title" content="从零开始学VLLM（day7-day8）">
+<meta property="og:description" content="本文基于的vllm commit hash为：`c16bb6068f70878fb8a2f7c4d6cda95cd03a778b`
+# day7
+InputProcessor把人类可读的 prompt（字符串 / 消息列表 / 多模态）变成引擎能处理的整数 token 序列，同时把采样参数补全、校验，最终打包成一个 `EngineCoreRequest`。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/cong-ling-kai-shi-xue-VLLM%EF%BC%88day7-day8%EF%BC%89.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>从零开始学VLLM（day7-day8）</title>
+<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">从零开始学VLLM（day7-day8）</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/89" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>本文基于的vllm commit hash为：<code class="notranslate">c16bb6068f70878fb8a2f7c4d6cda95cd03a778b</code></p>
+<h1>day7</h1>
+<p>InputProcessor把人类可读的 prompt（字符串 / 消息列表 / 多模态）变成引擎能处理的整数 token 序列，同时把采样参数补全、校验，最终打包成一个 <code class="notranslate">EngineCoreRequest</code>。</p>
+<ul>
+<li>主要源码在：<code class="notranslate">vllm/v1/engine/input_processor.py</code>（约 600 行）</li>
+<li>渲染（实际 tokenize 的地方）：<code class="notranslate">vllm/renderers/</code> 下的 <code class="notranslate">renderer.render_cmpl(...)</code></li>
+</ul>
+<h2>input_processor.py</h2>
+<p><strong>路径</strong>：/home/dongmingzhe/vllm/vllm/v1/engine/input_processor.py<br>
+<strong>简介</strong>：它把用户提交的原始请求（文本、token id、多模态数据等加上 SamplingParams）翻译成引擎内部统一的 EngineCoreRequest——中间做参数校验（采样参数与模型支持的任务、LoRA、输入长度、多模态输入合法性），给请求分配唯一的内部 request_id，补全默认值（如 max_tokens），并登记多模态数据的缓存信息。除了 process_inputs 这个主流程，文件里还有几个校验辅助方法（<code class="notranslate">_validate_params、_validate_lora、_validate_prompt_len</code> 等），职责就是保证交给 EngineCore 的请求一定是合法、完整、可直接调度的。<br>
+<strong>本小节阅读的内容</strong>：</p>
+<ul>
+<li>重点看<code class="notranslate">process_inputs</code>这个函数</li>
+<li>略看InputProcessor类的构造函数</li>
+</ul>
+<h3>InputProcessor类</h3>
+<p><strong>作用</strong>：<code class="notranslate">InputProcessor</code> 是用户输入进入 vLLM 核心引擎前的“转换器和检查员”：它把文本、token、多模态输入及采样/池化参数整理成统一的 <code class="notranslate">EngineCoreRequest</code>。它会校验模型任务、参数、LoRA、输入长度和 token 范围，并补全默认生成配置、整理多模态特征，同时为请求生成唯一的内部 ID。它只负责准备合法、标准化的请求，不负责调度请求或执行 GPU 推理。</p>
+<h4>构造函数</h4>
+<h5>part1.参数列表</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-k">class</span> <span class="pl-v">InputProcessor</span>:
+    <span class="pl-k">def</span> <span class="pl-en">__init__</span>(
+        <span class="pl-s1">self</span>,
+        <span class="pl-s1">vllm_config</span>: <span class="pl-smi">VllmConfig</span>,
+        <span class="pl-s1">renderer</span>: <span class="pl-v">BaseRenderer</span> <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+        <span class="pl-c1">*</span>,
+        <span class="pl-s1">mm_registry</span>: <span class="pl-smi">MultiModalRegistry</span> <span class="pl-c1">=</span> <span class="pl-c1">MULTIMODAL_REGISTRY</span>,
+    ) <span class="pl-c1">-&gt;</span> <span class="pl-c1">None</span>:</pre></div>
+<p>这是 <code class="notranslate">InputProcessor</code> 的构造函数，创建对象时自动执行，主要接收三个参数：</p>
+<ul>
+<li><code class="notranslate">vllm_config</code>：vLLM 的总配置，包含模型、缓存、调度器和 LoRA 等配置。</li>
+<li><code class="notranslate">renderer</code>：输入渲染器，负责把文本或聊天输入整理成引擎需要的格式；没有传入时会自动创建。</li>
+<li><code class="notranslate">mm_registry</code>：多模态能力注册表，用于判断当前模型是否支持图片、视频等输入。<br>
+其中 <code class="notranslate">*</code> 表示 <code class="notranslate">mm_registry</code> 必须使用参数名传入。</li>
+</ul>
+<h5>part2.保存各类引擎配置</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">vllm_config</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">model_config</span> <span class="pl-c1">=</span> <span class="pl-s1">model_config</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">model_config</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">cache_config</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">cache_config</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">lora_config</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">lora_config</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">scheduler_config</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">scheduler_config</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">speculative_config</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">speculative_config</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">structured_outputs_config</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">structured_outputs_config</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">observability_config</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">observability_config</span></pre></div>
+<p>这一部分从总配置中取出后续经常使用的子配置，并保存为成员变量。<br>
+这样后续处理请求时，不需要反复从 <code class="notranslate">vllm_config</code> 中查找。</p>
+<h5>part3.准备生成参数的校验与默认配置</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-c"># Load the custom logits processor classes once; the returned callable</span>
+<span class="pl-c"># runs their validate_params hooks per request at admission.</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">validate_logits_processors_params</span> <span class="pl-c1">=</span> (
+	<span class="pl-s1">self</span>.<span class="pl-c1">_build_logits_processors_params_validator</span>()
+)
+
+<span class="pl-s1">self</span>.<span class="pl-c1">generation_config_fields</span> <span class="pl-c1">=</span> <span class="pl-s1">model_config</span>.<span class="pl-c1">try_get_generation_config</span>()</pre></div>
+<p>这一部分提前准备与文本生成有关的规则：</p>
+<ul>
+<li><code class="notranslate">validate_logits_processors_params</code>：用于检查每个请求中的自定义 logits 处理参数是否合法。</li>
+<li><code class="notranslate">generation_config_fields</code>：从模型配置中读取默认生成设置，例如默认的停止 token 等。<br>
+这些规则会在真正接收请求时使用，而不是在构造函数中立即校验某个请求。</li>
+</ul>
+<h5>part4.准备渲染器</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">renderer</span> <span class="pl-c1">=</span> <span class="pl-s1">renderer</span> <span class="pl-c1">or</span> <span class="pl-en">renderer_from_config</span>(<span class="pl-s1">vllm_config</span>)</pre></div>
+<p><code class="notranslate">renderer</code> 负责把用户输入整理为 vLLM 引擎能够处理的内部格式。<br>
+这里有两种情况：</p>
+<ul>
+<li>调用者传入了 <code class="notranslate">renderer</code>：直接使用。</li>
+<li>没有传入：根据 <code class="notranslate">vllm_config</code> 自动创建。</li>
+</ul>
+<h5>part5.初始化多模态输入能力</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">supports_mm_inputs</span> <span class="pl-c1">=</span> <span class="pl-s1">mm_registry</span>.<span class="pl-c1">supports_multimodal_inputs</span>(<span class="pl-s1">model_config</span>)
+<span class="pl-s1">self</span>.<span class="pl-c1">mm_encoder_cache_size</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">skip_prompt_length_check</span> <span class="pl-c1">=</span> <span class="pl-c1">False</span>
+
+<span class="pl-k">if</span> <span class="pl-s1">self</span>.<span class="pl-c1">supports_mm_inputs</span>:
+    <span class="pl-s1">mm_budget</span> <span class="pl-c1">=</span> <span class="pl-en">MultiModalBudget</span>(<span class="pl-s1">vllm_config</span>, <span class="pl-s1">mm_registry</span>)
+    <span class="pl-s1">self</span>.<span class="pl-c1">mm_encoder_cache_size</span> <span class="pl-c1">=</span> <span class="pl-s1">mm_budget</span>.<span class="pl-c1">encoder_cache_size</span>
+    <span class="pl-s1">self</span>.<span class="pl-c1">skip_prompt_length_check</span> <span class="pl-c1">=</span> (
+        <span class="pl-s1">mm_budget</span>.<span class="pl-c1">processor</span>.<span class="pl-c1">info</span>.<span class="pl-c1">skip_prompt_length_check</span>
+    )
+    <span class="pl-s1">mm_budget</span>.<span class="pl-c1">reset_cache</span>()</pre></div>
+<p>这一部分判断当前模型是否支持图片、视频等多模态输入。<br>
+如果支持，就进一步计算：</p>
+<ul>
+<li>多模态编码结果可以使用多少缓存空间。</li>
+<li>某些多模态输入是否需要跳过普通的长度检查。<br>
+如果不支持，就保留前面设置的默认值。</li>
+</ul>
+<h5>part6.创建异步输入处理接口</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">process_inputs_async</span> <span class="pl-c1">=</span> <span class="pl-en">make_async</span>(
+    <span class="pl-s1">self</span>.<span class="pl-c1">process_inputs</span>,
+    <span class="pl-s1">executor</span><span class="pl-c1">=</span><span class="pl-s1">self</span>.<span class="pl-c1">renderer</span>.<span class="pl-c1">_executor</span>,
+)</pre></div>
+<p>文本分词和图片处理可能比较耗时，并且会阻塞当前线程。因此这里把同步的 <code class="notranslate">process_inputs()</code> 包装成异步版本 <code class="notranslate">process_inputs_async()</code>。<br>
+异步调用者可以在线程池中执行输入处理，避免阻塞整个服务的事件循环。</p>
+<h4>process_inputs函数</h4>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-k">def</span> <span class="pl-en">process_inputs</span>(
+	<span class="pl-s1">self</span>,
+	<span class="pl-s1">request_id</span>: <span class="pl-smi">str</span>,
+	<span class="pl-s1">prompt</span>: <span class="pl-v">PromptType</span> <span class="pl-c1">|</span> <span class="pl-v">EngineInput</span>,
+	<span class="pl-s1">params</span>: <span class="pl-v">SamplingParams</span> <span class="pl-c1">|</span> <span class="pl-v">PoolingParams</span>,
+	<span class="pl-s1">supported_tasks</span>: <span class="pl-s1">tuple</span>[<span class="pl-smi">SupportedTask</span>, ...],
+	<span class="pl-s1">arrival_time</span>: <span class="pl-s1">float</span> <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+	<span class="pl-s1">lora_request</span>: <span class="pl-v">LoRARequest</span> <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+	<span class="pl-s1">tokenization_kwargs</span>: <span class="pl-s1">dict</span>[<span class="pl-smi">str</span>, <span class="pl-smi">Any</span>] <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+	<span class="pl-s1">trace_headers</span>: <span class="pl-v">Mapping</span>[<span class="pl-smi">str</span>, <span class="pl-smi">str</span>] <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+	<span class="pl-s1">priority</span>: <span class="pl-smi">int</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>,
+	<span class="pl-s1">data_parallel_rank</span>: <span class="pl-s1">int</span> <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+	<span class="pl-s1">resumable</span>: <span class="pl-smi">bool</span> <span class="pl-c1">=</span> <span class="pl-c1">False</span>,
+	<span class="pl-s1">session_id</span>: <span class="pl-s1">str</span> <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+) <span class="pl-c1">-&gt;</span> <span class="pl-smi">EngineCoreRequest</span>:
+	<span class="pl-s1">self</span>.<span class="pl-c1">_validate_params</span>(<span class="pl-s1">params</span>, <span class="pl-s1">supported_tasks</span>)
+	<span class="pl-s1">self</span>.<span class="pl-c1">_validate_lora</span>(<span class="pl-s1">lora_request</span>)
+
+	<span class="pl-s1">parallel_config</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">vllm_config</span>.<span class="pl-c1">parallel_config</span>
+	<span class="pl-s1">dp_size</span> <span class="pl-c1">=</span> <span class="pl-s1">parallel_config</span>.<span class="pl-c1">data_parallel_size</span>
+	<span class="pl-s1">dp_local_size</span> <span class="pl-c1">=</span> <span class="pl-s1">parallel_config</span>.<span class="pl-c1">data_parallel_size_local</span>
+	<span class="pl-s1">num_ranks</span> <span class="pl-c1">=</span> <span class="pl-s1">dp_local_size</span> <span class="pl-k">if</span> <span class="pl-s1">parallel_config</span>.<span class="pl-c1">local_engines_only</span> <span class="pl-k">else</span> <span class="pl-s1">dp_size</span>
+	<span class="pl-k">if</span> <span class="pl-s1">data_parallel_rank</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span> <span class="pl-c1">and</span> <span class="pl-c1">not</span> (<span class="pl-c1">0</span> <span class="pl-c1">&lt;=</span> <span class="pl-s1">data_parallel_rank</span> <span class="pl-c1">&lt;</span> <span class="pl-s1">num_ranks</span>):
+		<span class="pl-k">raise</span> <span class="pl-en">VLLMValidationError</span>(
+			<span class="pl-s">f"data_parallel_rank <span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">data_parallel_rank</span><span class="pl-kos">}</span></span> "</span>
+			<span class="pl-s">f"is out of range [0, <span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">num_ranks</span><span class="pl-kos">}</span></span>)."</span>
+		)
+
+	<span class="pl-k">if</span> <span class="pl-en">isinstance</span>(<span class="pl-s1">prompt</span>, <span class="pl-s1">dict</span>) <span class="pl-c1">and</span> <span class="pl-s">"type"</span> <span class="pl-c1">in</span> <span class="pl-s1">prompt</span>:
+		<span class="pl-k">if</span> <span class="pl-s1">arrival_time</span> <span class="pl-c1">is</span> <span class="pl-c1">None</span>:
+			<span class="pl-s1">arrival_time</span> <span class="pl-c1">=</span> <span class="pl-s1">prompt</span>.<span class="pl-c1">get</span>(<span class="pl-s">"arrival_time"</span>, <span class="pl-s1">time</span>.<span class="pl-c1">time</span>())  <span class="pl-c"># type: ignore[assignment]</span>
+
+		<span class="pl-s1">engine_input</span>: <span class="pl-smi">EngineInput</span> <span class="pl-c1">=</span> <span class="pl-s1">prompt</span>  <span class="pl-c"># type: ignore[assignment]</span>
+	<span class="pl-k">else</span>:
+		<span class="pl-s1">logger</span>.<span class="pl-c1">warning_once</span>(
+			<span class="pl-s">"Passing raw prompts to InputProcessor is deprecated "</span>
+			<span class="pl-s">"and will be removed in the future. You should instead pass "</span>
+			<span class="pl-s">"the outputs of Renderer.render_cmpl() or Renderer.render_chat()."</span>
+		)
+
+		<span class="pl-k">if</span> <span class="pl-s1">arrival_time</span> <span class="pl-c1">is</span> <span class="pl-c1">None</span>:
+			<span class="pl-s1">arrival_time</span> <span class="pl-c1">=</span> <span class="pl-s1">time</span>.<span class="pl-c1">time</span>()
+
+		<span class="pl-s1">renderer</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">renderer</span>
+		<span class="pl-s1">model_config</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">model_config</span>
+
+		<span class="pl-s1">parsed_prompt</span> <span class="pl-c1">=</span> <span class="pl-en">parse_model_prompt</span>(<span class="pl-s1">model_config</span>, <span class="pl-s1">prompt</span>)
+		<span class="pl-s1">tok_params</span> <span class="pl-c1">=</span> <span class="pl-s1">renderer</span>.<span class="pl-c1">default_cmpl_tok_params</span>.<span class="pl-c1">with_kwargs</span>(
+			<span class="pl-c1">**</span>(<span class="pl-s1">tokenization_kwargs</span> <span class="pl-c1">or</span> {})
+		)
+
+		(<span class="pl-s1">engine_input</span>,) <span class="pl-c1">=</span> <span class="pl-s1">renderer</span>.<span class="pl-c1">render_cmpl</span>(
+			[<span class="pl-s1">parsed_prompt</span>],
+			<span class="pl-s1">tok_params</span>,
+		)
+
+	<span class="pl-s1">current_platform</span>.<span class="pl-c1">validate_request</span>(<span class="pl-s1">engine_input</span>, <span class="pl-s1">params</span>)
+
+	<span class="pl-s1">encoder_input</span>, <span class="pl-s1">decoder_input</span> <span class="pl-c1">=</span> <span class="pl-en">split_enc_dec_input</span>(<span class="pl-s1">engine_input</span>)
+	<span class="pl-s1">self</span>.<span class="pl-c1">_validate_model_inputs</span>(<span class="pl-s1">encoder_input</span>, <span class="pl-s1">decoder_input</span>)
+
+	<span class="pl-c"># Mypy can be conservative for TypedDict unions; normalize access.</span>
+	<span class="pl-k">if</span> <span class="pl-s1">decoder_input</span>[<span class="pl-s">"type"</span>] <span class="pl-c1">==</span> <span class="pl-s">"embeds"</span>:
+		<span class="pl-s1">prompt_embeds</span> <span class="pl-c1">=</span> <span class="pl-s1">decoder_input</span>[<span class="pl-s">"prompt_embeds"</span>]
+		<span class="pl-s1">prompt_token_ids</span> <span class="pl-c1">=</span> <span class="pl-s1">decoder_input</span>.<span class="pl-c1">get</span>(<span class="pl-s">"prompt_token_ids"</span>)
+		<span class="pl-s1">prompt_is_token_ids</span> <span class="pl-c1">=</span> <span class="pl-s1">decoder_input</span>.<span class="pl-c1">get</span>(<span class="pl-s">"is_token_ids"</span>)
+	<span class="pl-k">else</span>:
+		<span class="pl-s1">prompt_token_ids</span> <span class="pl-c1">=</span> <span class="pl-s1">decoder_input</span>[<span class="pl-s">"prompt_token_ids"</span>]
+		<span class="pl-s1">prompt_embeds</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>
+		<span class="pl-s1">prompt_is_token_ids</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>
+
+	<span class="pl-s1">sampling_params</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>
+	<span class="pl-s1">pooling_params</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>
+	<span class="pl-k">if</span> <span class="pl-en">isinstance</span>(<span class="pl-s1">params</span>, <span class="pl-v">SamplingParams</span>):
+		<span class="pl-c"># TODO: can we avoid cloning here in multiproc case?</span>
+		<span class="pl-s1">sampling_params</span> <span class="pl-c1">=</span> <span class="pl-s1">params</span>.<span class="pl-c1">clone</span>()
+		<span class="pl-s1">prompt_len</span> <span class="pl-c1">=</span> <span class="pl-en">length_from_prompt_token_ids_or_embeds</span>(
+			<span class="pl-s1">prompt_token_ids</span>, <span class="pl-s1">prompt_embeds</span>
+		)
+		<span class="pl-k">if</span> <span class="pl-c1">not</span> <span class="pl-c1">0</span> <span class="pl-c1">&lt;=</span> <span class="pl-s1">sampling_params</span>.<span class="pl-c1">routed_experts_prompt_start</span> <span class="pl-c1">&lt;=</span> <span class="pl-s1">prompt_len</span>:
+			<span class="pl-k">raise</span> <span class="pl-en">VLLMValidationError</span>(
+				<span class="pl-s">f"routed_experts_prompt_start must be between 0 and "</span>
+				<span class="pl-s">f"the prompt length (<span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">prompt_len</span><span class="pl-kos">}</span></span>), inclusive."</span>,
+				<span class="pl-s1">parameter</span><span class="pl-c1">=</span><span class="pl-s">"routed_experts_prompt_start"</span>,
+				<span class="pl-s1">value</span><span class="pl-c1">=</span><span class="pl-s1">sampling_params</span>.<span class="pl-c1">routed_experts_prompt_start</span>,
+			)
+		<span class="pl-c"># If unset max tokens, then generate up to the max_model_len.</span>
+		<span class="pl-k">if</span> <span class="pl-s1">sampling_params</span>.<span class="pl-c1">max_tokens</span> <span class="pl-c1">is</span> <span class="pl-c1">None</span>:
+			<span class="pl-s1">sampling_params</span>.<span class="pl-c1">max_tokens</span> <span class="pl-c1">=</span> (
+				<span class="pl-s1">self</span>.<span class="pl-c1">model_config</span>.<span class="pl-c1">max_model_len</span> <span class="pl-c1">-</span> <span class="pl-s1">prompt_len</span>
+			)
+
+		<span class="pl-s1">sampling_params</span>.<span class="pl-c1">update_from_generation_config</span>(
+			<span class="pl-s1">self</span>.<span class="pl-c1">generation_config_fields</span>,
+			<span class="pl-s1">self</span>.<span class="pl-c1">renderer</span>.<span class="pl-c1">get_eos_token_id</span>(),
+		)
+		<span class="pl-k">if</span> <span class="pl-s1">self</span>.<span class="pl-c1">tokenizer</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+			<span class="pl-s1">sampling_params</span>.<span class="pl-c1">update_from_tokenizer</span>(<span class="pl-s1">self</span>.<span class="pl-c1">tokenizer</span>)
+		<span class="pl-k">if</span> <span class="pl-s1">sampling_params</span>.<span class="pl-c1">trace_decode_token_ids</span>:
+			<span class="pl-s1">self</span>.<span class="pl-c1">_normalize_trace_replay_params</span>(<span class="pl-s1">sampling_params</span>, <span class="pl-s1">prompt_len</span>)
+	<span class="pl-k">else</span>:
+		<span class="pl-s1">pooling_params</span> <span class="pl-c1">=</span> <span class="pl-s1">params</span>.<span class="pl-c1">clone</span>()
+
+	<span class="pl-c"># Multimodal related.</span>
+	<span class="pl-s1">mm_features</span>: <span class="pl-s1">list</span>[<span class="pl-smi">MultiModalFeatureSpec</span>] <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>
+
+	<span class="pl-k">if</span> <span class="pl-s1">decoder_input</span>[<span class="pl-s">"type"</span>] <span class="pl-c1">==</span> <span class="pl-s">"multimodal"</span>:
+		<span class="pl-s1">decoder_mm_inputs</span> <span class="pl-c1">=</span> <span class="pl-s1">decoder_input</span>[<span class="pl-s">"mm_kwargs"</span>]
+		<span class="pl-s1">decoder_mm_positions</span> <span class="pl-c1">=</span> <span class="pl-s1">decoder_input</span>[<span class="pl-s">"mm_placeholders"</span>]
+		<span class="pl-s1">decoder_mm_hashes</span> <span class="pl-c1">=</span> <span class="pl-s1">decoder_input</span>[<span class="pl-s">"mm_hashes"</span>]
+
+		<span class="pl-k">if</span> <span class="pl-c1">not</span> <span class="pl-en">all</span>(
+			<span class="pl-en">isinstance</span>(<span class="pl-s1">leaf</span>, <span class="pl-s1">str</span>) <span class="pl-k">for</span> <span class="pl-s1">leaf</span> <span class="pl-c1">in</span> <span class="pl-en">json_iter_leaves</span>(<span class="pl-s1">decoder_mm_hashes</span>)
+		):
+			<span class="pl-k">raise</span> <span class="pl-en">ValueError</span>(
+				<span class="pl-s">f"mm_hashes must contain only strings, got: <span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">decoder_mm_hashes</span><span class="pl-kos">}</span></span>. "</span>
+				<span class="pl-s">"This is likely due to an incorrect custom implementation of "</span>
+				<span class="pl-s">"MultiModalProcessor.apply method."</span>
+			)
+
+		<span class="pl-c"># Merge and flatten multimodal placeholders, hashes and inputs</span>
+		<span class="pl-c"># from dictionaries to lists, and sort them by each item's position</span>
+		<span class="pl-c"># in the input sequence.</span>
+		<span class="pl-s1">sorted_mm_idxs</span> <span class="pl-c1">=</span> <span class="pl-en">argsort_mm_positions</span>(<span class="pl-s1">decoder_mm_positions</span>)
+
+		<span class="pl-s1">mm_features</span> <span class="pl-c1">=</span> []
+		<span class="pl-k">for</span> <span class="pl-s1">modality</span>, <span class="pl-s1">idx</span> <span class="pl-c1">in</span> <span class="pl-s1">sorted_mm_idxs</span>:
+			<span class="pl-s1">base_mm_hash</span> <span class="pl-c1">=</span> <span class="pl-s1">decoder_mm_hashes</span>[<span class="pl-s1">modality</span>][<span class="pl-s1">idx</span>]
+			<span class="pl-s1">mm_features</span>.<span class="pl-c1">append</span>(
+				<span class="pl-en">MultiModalFeatureSpec</span>(
+					<span class="pl-s1">data</span><span class="pl-c1">=</span><span class="pl-s1">decoder_mm_inputs</span>[<span class="pl-s1">modality</span>][<span class="pl-s1">idx</span>],
+					<span class="pl-s1">modality</span><span class="pl-c1">=</span><span class="pl-s1">modality</span>,
+					<span class="pl-s1">identifier</span><span class="pl-c1">=</span><span class="pl-s1">self</span>.<span class="pl-c1">_get_mm_identifier</span>(
+						<span class="pl-s1">base_mm_hash</span>,
+						<span class="pl-s1">lora_request</span>,
+					),
+					<span class="pl-s1">mm_position</span><span class="pl-c1">=</span><span class="pl-s1">decoder_mm_positions</span>[<span class="pl-s1">modality</span>][<span class="pl-s1">idx</span>],
+					<span class="pl-s1">mm_hash</span><span class="pl-c1">=</span><span class="pl-s1">base_mm_hash</span>,
+				)
+			)
+
+	<span class="pl-k">return</span> <span class="pl-en">EngineCoreRequest</span>(
+		<span class="pl-s1">request_id</span><span class="pl-c1">=</span><span class="pl-s1">request_id</span>,
+		<span class="pl-s1">prompt_token_ids</span><span class="pl-c1">=</span><span class="pl-s1">prompt_token_ids</span>,
+		<span class="pl-s1">prompt_embeds</span><span class="pl-c1">=</span><span class="pl-s1">prompt_embeds</span>,
+		<span class="pl-s1">prompt_is_token_ids</span><span class="pl-c1">=</span><span class="pl-s1">prompt_is_token_ids</span>,
+		<span class="pl-s1">mm_features</span><span class="pl-c1">=</span><span class="pl-s1">mm_features</span>,
+		<span class="pl-s1">sampling_params</span><span class="pl-c1">=</span><span class="pl-s1">sampling_params</span>,
+		<span class="pl-s1">pooling_params</span><span class="pl-c1">=</span><span class="pl-s1">pooling_params</span>,
+		<span class="pl-s1">arrival_time</span><span class="pl-c1">=</span><span class="pl-s1">arrival_time</span>,
+		<span class="pl-s1">lora_request</span><span class="pl-c1">=</span><span class="pl-s1">lora_request</span>,
+		<span class="pl-s1">cache_salt</span><span class="pl-c1">=</span><span class="pl-s1">decoder_input</span>.<span class="pl-c1">get</span>(<span class="pl-s">"cache_salt"</span>),
+		<span class="pl-s1">priority</span><span class="pl-c1">=</span><span class="pl-s1">priority</span>,
+		<span class="pl-s1">data_parallel_rank</span><span class="pl-c1">=</span><span class="pl-s1">data_parallel_rank</span>,
+		<span class="pl-s1">trace_headers</span><span class="pl-c1">=</span><span class="pl-s1">trace_headers</span>,
+		<span class="pl-s1">resumable</span><span class="pl-c1">=</span><span class="pl-s1">resumable</span>,
+		<span class="pl-s1">session_id</span><span class="pl-c1">=</span><span class="pl-s1">session_id</span>,
+	)</pre></div>
+<ol>
+<li><strong>主要作用</strong><br>
+把用户输入、生成参数和请求元数据进行校验与标准化，最终组装成底层引擎统一使用的 <code class="notranslate">EngineCoreRequest</code>。它是请求进入调度器前的“输入检查与打包站”，不负责调度和 GPU 推理。</li>
+<li><strong>输入（参数）</strong>
+<ul>
+<li><code class="notranslate">request_id</code>：请求编号。</li>
+<li><code class="notranslate">prompt</code>：原始 <code class="notranslate">PromptType</code> 或处理过的 <code class="notranslate">EngineInput</code>。</li>
+<li><code class="notranslate">params</code>：生成任务使用的 <code class="notranslate">SamplingParams</code>，或向量任务使用的 <code class="notranslate">PoolingParams</code></li>
+<li><code class="notranslate">supported_tasks</code>：当前模型支持的任务类型。</li>
+<li><code class="notranslate">arrival_time</code>：请求到达时间。</li>
+<li><code class="notranslate">lora_request</code>：可选的 LoRA 配置。</li>
+<li><code class="notranslate">tokenization_kwargs</code>：额外的分词参数。</li>
+<li><code class="notranslate">trace_headers</code>：链路追踪信息。</li>
+<li><code class="notranslate">priority</code>：请求优先级。</li>
+<li><code class="notranslate">data_parallel_rank</code>：指定的数据并行引擎编号。</li>
+<li><code class="notranslate">resumable</code>、<code class="notranslate">session_id</code>：可恢复请求和会话相关信息。</li>
+</ul>
+</li>
+<li><strong>输出（改变了什么值）</strong><br>
+返回一个 <code class="notranslate">EngineCoreRequest</code>，其中包含标准化后的 token、prompt embedding、多模态特征、生成或池化参数以及请求元数据。函数不会把请求加入 Scheduler，也不会修改模型权重；它主要创建参数副本并补充默认值，但在 <code class="notranslate">PoolingParams.task</code> 为空时可能为原参数设置默认任务。</li>
+<li><strong>术语解释</strong>
+<ul>
+<li><code class="notranslate">PromptType</code>：面向用户的输入形式，可以是文本、token ID 或多模态输入。</li>
+<li><code class="notranslate">EngineInput</code>：Renderer 生成的标准输入格式，其中已经整理好 token、多模态内容和相关位置。当前代码更推荐调用者先生成 <code class="notranslate">EngineInput</code>，直接传原始 prompt 的方式已经被标记为将来废弃。</li>
+<li>Renderer：把原始文本或其他输入转换成 <code class="notranslate">EngineInput</code> 的组件。传入原始 prompt 时，<code class="notranslate">process_inputs()</code> 会临时调用它完成处理。</li>
+<li><code class="notranslate">PoolingParams</code>：embedding、分类等非生成任务使用的参数，通常控制如何从模型输出中提取向量或分类结果。</li>
+<li>默认生成参数：如果没有设置 <code class="notranslate">max_tokens</code>，函数会根据模型最大上下文长度和 prompt 长度计算可生成的最大 token 数，并补充模型 generation config 和 tokenizer 提供的默认设置。</li>
+<li>encoder 输入：编码器—解码器模型中交给 encoder 处理的部分，例如翻译模型的原始句子。</li>
+<li>decoder 输入：交给 decoder 处理的输入。对于普通自回归大模型，主要输入通常就在这一侧。</li>
+<li><code class="notranslate">prompt_token_ids</code>：prompt 分词后得到的整数 ID 序列，是模型实际读取的文本表示。</li>
+<li><code class="notranslate">prompt_embeds</code>：已经计算好的输入向量。使用这种输入时，可以不再通过普通 embedding 层查询 token 向量。</li>
+<li>多模态哈希：用于识别重复多模态内容，例如相同图片，以便后续复用缓存；使用特殊 LoRA 配置时，LoRA 信息也可能参与生成该标识。</li>
+<li>LoRA：一种轻量模型适配技术。传入 <code class="notranslate">lora_request</code> 时，函数会检查引擎是否已经启用 LoRA。</li>
+<li><code class="notranslate">priority</code>：请求优先级。当前函数只负责把它写入请求，真正如何按优先级调度由 Scheduler 决定。</li>
+<li><code class="notranslate">trace_headers</code>：保存链路追踪数据，用于分析一个请求经过各组件时的耗时。</li>
+<li><code class="notranslate">session_id</code>：表示请求所属的会话，便于把相关请求关联起来。</li>
+<li><code class="notranslate">EngineCoreRequest</code>：前端与 EngineCore 之间使用的标准请求对象，将 prompt、参数、LoRA、多模态特征和调度元数据集中保存起来。</li>
+<li><code class="notranslate">request_id</code>：此时仍是调用者提供的外部 ID。内部随机 ID 并不是在 <code class="notranslate">process_inputs()</code> 中生成，而是随后由 <code class="notranslate">assign_request_id()</code> 添加。</li>
+<li>Scheduler：vLLM 的调度器，负责决定每一轮运行哪些请求。<code class="notranslate">process_inputs()</code> 只生成请求对象，不会直接调用 Scheduler。</li>
+</ul>
+</li>
+<li>核心流程</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">第一步：校验请求参数
+    ├─ 检查 SamplingParams 或 PoolingParams
+    ├─ 检查模型是否支持该任务
+    └─ 检查 LoRA 和 data_parallel_rank
+
+第二步：统一输入格式
+    ├─ 已经是 EngineInput：直接使用
+    └─ 原始 PromptType：通过 Renderer 转换
+
+第三步：校验模型输入
+    ├─ 执行当前硬件平台的请求检查
+    ├─ 拆分 encoder 和 decoder 输入
+    ├─ 检查 prompt 长度
+    └─ 检查 token ID 是否越界
+
+第四步：整理模型输入
+    ├─ 提取 prompt_token_ids
+    └─ 或提取 prompt_embeds
+
+第五步：处理任务参数
+    ├─ 复制 SamplingParams 或 PoolingParams
+    ├─ 补充 max_tokens
+    └─ 补充模型和 tokenizer 的默认生成配置
+
+第六步：整理多模态特征
+    ├─ 收集图片、视频等处理结果
+    ├─ 生成缓存标识
+    └─ 按输入位置排序
+
+第七步：构造并返回 EngineCoreRequest
+</code></pre>
+<p>最终的EngineCoreRequest大概长什么样？</p>
+<pre lang="text" class="notranslate"><code class="notranslate">EngineCoreRequest(
+    request_id      = "0-a3f9b21c",
+    prompt_token_ids= [104198, 100644, 100431, ...],   # ★ 这就是 tokenize 的结果
+    sampling_params = SamplingParams(temperature=0.0, max_tokens=64),
+    mm_features     = [],          # 多模态特征，空
+    arrival_time    = 1726900000.0,
+    ...
+)
+</code></pre>
+<ol start="6">
+<li><strong>在整个项目中的定位</strong><br>
+<code class="notranslate">process_inputs()</code> 位于用户 API 与底层 EngineCore 之间，是请求正式进入调度系统前的标准化入口：</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">LLM.generate() / LLM.chat()
+              ↓
+OfflineInferenceMixin
+整理 prompt 和调用参数
+              ↓
+LLMEngine.add_request()
+              ↓
+InputProcessor.process_inputs()       ← 当前函数
+校验并生成 EngineCoreRequest
+              ↓
+InputProcessor.assign_request_id()
+生成唯一的内部请求 ID
+              ↓
+OutputProcessor.add_request()
+登记用于接收输出的 RequestState
+              ↓
+EngineCoreClient.add_request()
+              ↓
+EngineCore.add_request()
+              ↓
+Scheduler.add_request()
+请求进入 waiting 队列
+              ↓
+LLMEngine.step()
+调度 → 模型计算 → 输出处理
+</code></pre>
+<h2>阶段性自检</h2>
+<p><strong>1.tokenize 具体发生在哪个函数的哪一行？用的是哪个库？</strong><br>
+<code class="notranslate">input_processor.py</code> 本身不直接调用 tokenizer；当传入原始文本时，<code class="notranslate">process_inputs()</code> 在 <a href="/home/dongmingzhe/vllm/vllm/v1/engine/input_processor.py:358">input_processor.py (line 358)</a> 调用 <code class="notranslate">renderer.render_cmpl()</code>。<br>
+实际分词调用链是：</p>
+<pre class="notranslate"><code class="notranslate">process_inputs()
+→ BaseRenderer.render_cmpl()          base.py:1167
+→ tokenize_prompts()                  base.py:720
+→ _tokenize_singleton_prompt()        base.py:604
+→ _tokenize_prompt()                  base.py:560
+→ tokenizer(prompt["prompt"], ...)    base.py:570  ← 真正 tokenize
+</code></pre>
+<p>真正执行分词的是 <a href="/home/dongmingzhe/vllm/vllm/renderers/base.py:570">base.py (line 570)</a>。默认通常使用 Hugging Face <code class="notranslate">transformers</code> 库加载的 tokenizer；快速 tokenizer 底层会使用 Hugging Face <code class="notranslate">tokenizers</code> 库。<br>
+注意：如果传入的已经是 <code class="notranslate">EngineInput</code> 或 <code class="notranslate">prompt_token_ids</code>，这里不会再次 tokenize；标准离线流程通常也会在进入 <code class="notranslate">process_inputs()</code> 之前由 Renderer 完成分词。</p>
+<p><strong>2.<code class="notranslate">EngineCoreRequest</code> 里有没有原始文本？如果没有，那"原始 prompt"在什么时候还会被用到？（提示：想想 <code class="notranslate">RequestOutput.prompt</code>）</strong><br>
+<code class="notranslate">EngineCoreRequest</code> 中没有原始文本，只保留 <code class="notranslate">prompt_token_ids</code>、embedding、多模态特征和请求参数等引擎计算所需数据。<br>
+原始 prompt 会在 <code class="notranslate">LLMEngine.add_request()</code> 中单独提取，并传给 <code class="notranslate">OutputProcessor.add_request()</code> 保存到 <code class="notranslate">RequestState</code>；生成最终结果时，再用于填写 <code class="notranslate">RequestOutput.prompt</code>，方便用户看到输入原文。</p>
+<p><strong>3.还是根据上述文件，回答问题： <code class="notranslate">params.max_tokens is None</code> 时补成 <code class="notranslate">max_model_len - prompt_len</code>，这个设计合理吗？如果 prompt 特别长会怎样？注意控制回答字数，直击核心但又不能遗漏重要内容。</strong><br>
+这个设计合理：当用户没有指定 <code class="notranslate">max_tokens</code> 时，就把模型上下文窗口中除 prompt 外的剩余空间全部作为最大生成长度，保证“输入 token + 输出 token”不超过 <code class="notranslate">max_model_len</code>。<br>
+如果 prompt 特别长：</p>
+<ul>
+<li><code class="notranslate">prompt_len &gt; max_model_len</code>：直接报错。</li>
+<li><code class="notranslate">prompt_len == max_model_len</code>：生成任务会报错，因为连 1 个输出 token 的空间都没有。</li>
+<li><code class="notranslate">prompt_len</code> 接近上限：只能生成很少的 token，例如只剩 10 个位置就最多生成 10 个。<br>
+但 prompt 较短时，这个默认值可能很大，带来较长耗时，因此实际使用通常建议明确设置 <code class="notranslate">max_tokens</code>。</li>
+</ul>
+<p><strong>4.内部 <code class="notranslate">request_id</code> 加了随机后缀，那 <code class="notranslate">OutputProcessor</code> 怎么知道该把输出还给哪个用户请求？</strong><br>
+<code class="notranslate">assign_request_id()</code> 不会丢掉原始 ID，而是：</p>
+<pre class="notranslate"><code class="notranslate">external_req_id = 原始用户 ID，例如 "0"
+request_id      = 内部唯一 ID，例如 "0-a1b2c3d4"
+</code></pre>
+<p><code class="notranslate">OutputProcessor</code> 创建 <code class="notranslate">RequestState</code> 时会同时保存两者，并维护“外部 ID → 内部 ID”的映射。EngineCore 返回内部 ID 后，<code class="notranslate">OutputProcessor</code> 用它找到对应状态；构造最终 <code class="notranslate">RequestOutput</code> 时，再把 <code class="notranslate">external_req_id</code> 填入 <code class="notranslate">RequestOutput.request_id</code> 返回给用户。</p>
+<p><strong>5.如果你直接传 <code class="notranslate">prompt_token_ids</code> 而不是字符串，能跳过 tokenize 吗？这有什么用？</strong><br>
+可以。传入 <code class="notranslate">prompt_token_ids</code> 后，Renderer 会识别输入已经完成分词，跳过 tokenizer，<code class="notranslate">InputProcessor</code> 只检查 token 数量和 ID 是否越界。<br>
+用途主要是：</p>
+<ul>
+<li>减少 CPU 分词开销，提高批量推理吞吐量。</li>
+<li>使用外部或自定义 tokenizer。</li>
+<li>精确控制特殊 token 和输入序列。</li>
+<li>配合 <code class="notranslate">skip_tokenizer_init=True</code>，避免加载 tokenizer。<br>
+注意 token ID 必须与模型词表一致，特殊 token 也要自行处理；如果没有同时提供原始文本，最终 <code class="notranslate">RequestOutput.prompt</code> 可能是 <code class="notranslate">None</code>。</li>
+</ul>
+<h1>day8-InprocClient与EngineCore</h1>
+<p>相关角色的核心职责：</p>
+<ul>
+<li><strong><code class="notranslate">EngineCoreClient</code></strong>：抽象出"怎么把请求送进去、怎么把结果取出来"，屏蔽单进程/多进程差异（见core_client.py）</li>
+<li><strong><code class="notranslate">EngineCore</code></strong>：★ <strong>真正的引擎内循环</strong>，持有 <code class="notranslate">Scheduler</code> 和 <code class="notranslate">ModelExecutor</code>，实现"调度 → 执行 → 回写"这三步（见core.py）</li>
+</ul>
+<h2>core_client.py</h2>
+<p><strong>路径</strong>：/home/dongmingzhe/vllm/vllm/v1/engine/core_client.py<br>
+<strong>简介</strong>：<code class="notranslate">core_client.py</code> 的核心作用是：在上层 <code class="notranslate">LLMEngine</code>/<code class="notranslate">AsyncLLM</code> 和底层 <code class="notranslate">EngineCore</code> 之间提供统一通信接口，负责发送请求、接收输出及执行缓存、LoRA、休眠等控制操作，并隐藏“同进程还是多进程、同步还是异步”的差异。示意图如下：</p>
+<pre lang="text" class="notranslate"><code class="notranslate">LLMEngine / AsyncLLM
+        ↓
+EngineCoreClient
+        ↓
+EngineCore
+调度 → 模型执行 → 输出回传
+</code></pre>
+<p>该文件主要包含了9个类：</p>
+<ul>
+<li><code class="notranslate">EngineCoreClient</code>：抽象基类，定义添加请求、获取输出、取消请求等统一接口，并根据配置创建合适的客户端。<strong>只规定接口，不直接通信</strong>。</li>
+<li><code class="notranslate">InprocClient</code>：在当前进程中直接创建并调用 <code class="notranslate">EngineCore</code>。<strong>无进程通信，结构简单，适合关闭多进程模式的离线推理</strong>。</li>
+<li><code class="notranslate">BackgroundResources</code>：管理并清理后台进程、ZMQ socket 和异步任务。<strong>辅助资源管理类，不处理推理请求</strong>。</li>
+<li><code class="notranslate">ElasticScalingCache</code>：暂存弹性扩缩容过程中的 EngineCore 信息和通知状态。<strong>辅助状态类，主要用于弹性专家并行</strong>。</li>
+<li><code class="notranslate">MPClient</code>：多进程客户端的公共基类，负责启动或连接 EngineCore 进程、ZMQ 通信、序列化和生命周期管理。<strong>不直接面向用户，由同步或异步子类继承</strong>。</li>
+<li><code class="notranslate">SyncMPClient</code>：同步多进程客户端，发送请求后以阻塞方式取得结果。<strong>主要供同步 <code class="notranslate">LLM</code> 使用，后台线程接收输出</strong>。</li>
+<li><code class="notranslate">AsyncMPClient</code>：异步多进程客户端，通过 <code class="notranslate">asyncio</code> 队列和任务收发数据。<strong>主要供在线异步 <code class="notranslate">AsyncLLM</code> 使用，不阻塞事件循环</strong>。</li>
+<li><code class="notranslate">DPAsyncMPClient</code>：支持多个数据并行 EngineCore 的异步客户端，并协调各引擎运行状态。<strong>默认假设请求已由外部负载均衡器分配</strong>。</li>
+<li><code class="notranslate">DPLBAsyncMPClient</code>：在 <code class="notranslate">DPAsyncMPClient</code> 基础上增加内部负载均衡。<strong>根据等待请求数、运行请求数和 KV Cache 使用率选择较空闲的 EngineCore</strong>。<br>
+总结如下：</li>
+</ul>
+<pre lang="text" class="notranslate"><code class="notranslate">InprocClient
+└─ 同进程，直接调用 EngineCore
+
+MPClient
+├─ SyncMPClient
+│  └─ 多进程 + 同步，供 LLM 使用
+└─ AsyncMPClient
+   ├─ 普通异步客户端
+   └─ DPAsyncMPClient
+      ├─ 外部负责数据并行负载均衡
+      └─ DPLBAsyncMPClient
+         └─ 客户端内部负责负载均衡
+</code></pre>
+<p><strong>本小节阅读的内容</strong>：</p>
+<ul>
+<li>看<code class="notranslate">EngineCoreClient</code>这个整体IDE抽象基类</li>
+<li>重点看离线默认使用的<code class="notranslate">InprocClient</code>类以及相关函数</li>
+<li>其他类暂时不看</li>
+</ul>
+<h3>EngineCoreClient类</h3>
+<p><strong>作用</strong>：<code class="notranslate">EngineCoreClient</code> 是上层 <code class="notranslate">LLMEngine</code> 与底层 <code class="notranslate">EngineCore</code> 之间的统一通信接口，负责提交和取消请求、获取推理输出，以及转发缓存管理、LoRA、休眠等控制命令；它通过不同子类屏蔽同进程/多进程、同步/异步等运行方式的差异。</p>
+<h4>make_client函数</h4>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-en">@<span class="pl-s1">staticmethod</span></span>
+<span class="pl-k">def</span> <span class="pl-en">make_client</span>(
+	<span class="pl-s1">multiprocess_mode</span>: <span class="pl-smi">bool</span>,
+	<span class="pl-s1">asyncio_mode</span>: <span class="pl-smi">bool</span>,
+	<span class="pl-s1">vllm_config</span>: <span class="pl-smi">VllmConfig</span>,
+	<span class="pl-s1">executor_class</span>: <span class="pl-s1">type</span>[<span class="pl-v">Executor</span>],
+	<span class="pl-s1">log_stats</span>: <span class="pl-smi">bool</span>,
+	<span class="pl-s1">renderer</span>: <span class="pl-v">BaseRenderer</span> <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+) <span class="pl-c1">-&gt;</span> <span class="pl-s">"EngineCoreClient"</span>:
+	<span class="pl-c"># renderer is passed through to the multiprocess clients, which start</span>
+	<span class="pl-c"># the frontend MM warmup (renderer.start_mm_warmup_in_background) once</span>
+	<span class="pl-c"># the engine-core processes have been forked, so warmup overlaps</span>
+	<span class="pl-c"># engine-core load without a live thread at fork() time. In-process</span>
+	<span class="pl-c"># clients do not take a renderer: the engine core is built in this</span>
+	<span class="pl-c"># process, so there is no other process to overlap with and the MM</span>
+	<span class="pl-c"># warmup runs synchronously inside renderer.warmup() instead.</span>
+	<span class="pl-c"># TODO: support this for debugging purposes.</span>
+	<span class="pl-k">if</span> <span class="pl-s1">asyncio_mode</span> <span class="pl-c1">and</span> <span class="pl-c1">not</span> <span class="pl-s1">multiprocess_mode</span>:
+		<span class="pl-k">raise</span> <span class="pl-en">NotImplementedError</span>(
+			<span class="pl-s">"Running EngineCore in asyncio without multiprocessing "</span>
+			<span class="pl-s">"is not currently supported."</span>
+		)
+
+	<span class="pl-k">if</span> <span class="pl-s1">multiprocess_mode</span> <span class="pl-c1">and</span> <span class="pl-s1">asyncio_mode</span>:
+		<span class="pl-k">return</span> <span class="pl-v">EngineCoreClient</span>.<span class="pl-c1">make_async_mp_client</span>(
+			<span class="pl-s1">vllm_config</span>,
+			<span class="pl-s1">executor_class</span>,
+			<span class="pl-s1">log_stats</span>,
+			<span class="pl-s1">renderer</span><span class="pl-c1">=</span><span class="pl-s1">renderer</span>,
+		)
+
+	<span class="pl-k">if</span> <span class="pl-s1">multiprocess_mode</span> <span class="pl-c1">and</span> <span class="pl-c1">not</span> <span class="pl-s1">asyncio_mode</span>:
+		<span class="pl-k">return</span> <span class="pl-en">SyncMPClient</span>(
+			<span class="pl-s1">vllm_config</span>,
+			<span class="pl-s1">executor_class</span>,
+			<span class="pl-s1">log_stats</span>,
+			<span class="pl-s1">renderer</span><span class="pl-c1">=</span><span class="pl-s1">renderer</span>,
+		)
+
+	<span class="pl-k">return</span> <span class="pl-en">InprocClient</span>(<span class="pl-s1">vllm_config</span>, <span class="pl-s1">executor_class</span>, <span class="pl-s1">log_stats</span>)</pre></div>
+<ol>
+<li>
+<p><strong>主要作用</strong><br>
+<code class="notranslate">make_client()</code> 是一个“客户端工厂”：根据是否启用多进程和异步模式，自动创建合适的 <code class="notranslate">EngineCoreClient</code> 子类，让上层代码不必自己判断该使用 <code class="notranslate">InprocClient</code>、<code class="notranslate">SyncMPClient</code> 还是异步多进程客户端。</p>
+</li>
+<li>
+<p><strong>输入（参数）</strong></p>
+<ul>
+<li><code class="notranslate">multiprocess_mode</code>：是否让 <code class="notranslate">EngineCore</code> 运行在独立进程中。</li>
+<li><code class="notranslate">asyncio_mode</code>：是否使用异步调用方式。</li>
+<li><code class="notranslate">vllm_config</code>：vLLM 的完整配置。</li>
+<li><code class="notranslate">executor_class</code>：执行模型计算的 Executor 类型。</li>
+<li><code class="notranslate">log_stats</code>：是否记录运行统计信息。</li>
+<li><code class="notranslate">renderer</code>：可选的输入渲染器，主要用于多进程模式下的多模态预热。</li>
+</ul>
+</li>
+<li>
+<p><strong>输出（改变了什么值）</strong><br>
+返回一个具体的 <code class="notranslate">EngineCoreClient</code> 子类实例；函数不会修改传入参数，但创建客户端时可能同时创建 <code class="notranslate">EngineCore</code>，或者启动后台 EngineCore 进程并建立通信资源。不支持“异步但不开多进程”的组合，此时会抛出 <code class="notranslate">NotImplementedError</code>。</p>
+</li>
+<li>
+<p><strong>术语解释</strong></p>
+<ul>
+<li>工厂方法：根据配置决定创建哪个具体类的方法。调用者只需调用 <code class="notranslate">make_client()</code>，不需要直接写复杂的分支判断。</li>
+<li><code class="notranslate">@staticmethod</code>：表示该方法属于类，但不依赖某个 <code class="notranslate">EngineCoreClient</code> 对象，因此没有 <code class="notranslate">self</code> 参数，可以直接通过 <code class="notranslate">EngineCoreClient.make_client()</code> 调用。</li>
+<li><code class="notranslate">EngineCoreClient</code>：上层引擎与底层 <code class="notranslate">EngineCore</code> 之间的统一通信接口，屏蔽同步、异步和多进程等运行方式的差异。</li>
+<li><code class="notranslate">multiprocess_mode</code>：决定 <code class="notranslate">EngineCore</code> 是否运行在独立进程中。开启后，客户端需要通过进程间通信发送请求和接收输出。</li>
+<li><code class="notranslate">asyncio_mode</code>：决定上层是否使用 Python <code class="notranslate">asyncio</code> 异步接口。异步调用可以在等待结果时处理其他请求，适合在线服务。</li>
+<li><code class="notranslate">InprocClient</code>：当多进程和异步模式都关闭时使用。它在当前进程中直接创建并调用 <code class="notranslate">EngineCore</code>，不需要进程间通信。</li>
+<li><code class="notranslate">SyncMPClient</code>：当开启多进程但关闭异步模式时使用。它通过 ZMQ 与后台 EngineCore 进程通信，并以同步方式向上层提供结果。</li>
+<li>异步多进程客户端：当多进程和异步模式同时开启时，通过 <code class="notranslate">make_async_mp_client()</code> 进一步选择。</li>
+<li><code class="notranslate">make_async_mp_client()</code>：异步客户端的二级工厂。单个数据并行引擎时返回 <code class="notranslate">AsyncMPClient</code>；多个数据并行引擎时，根据负载均衡配置返回 <code class="notranslate">DPAsyncMPClient</code> 或 <code class="notranslate">DPLBAsyncMPClient</code>。</li>
+<li><code class="notranslate">VllmConfig</code>：包含模型、缓存、调度、并行和多模态等配置，客户端及 EngineCore 初始化时都会使用。</li>
+<li><code class="notranslate">executor_class</code>：负责真正执行模型计算的 Executor 类型。它决定 EngineCore 通过什么执行器调用 worker 和模型。</li>
+<li><code class="notranslate">log_stats</code>：控制是否收集和记录吞吐量、延迟、KV Cache 使用率等运行指标。</li>
+<li><code class="notranslate">renderer</code>：把文本、聊天消息和多模态输入转换为引擎输入的组件。在多进程模式下，它还用于启动前端多模态预热。</li>
+<li>多模态预热：提前初始化图片、视频等输入的处理组件，减少第一次多模态请求的等待时间。</li>
+<li><code class="notranslate">fork</code>：创建子进程的一种方式。代码会等 EngineCore 子进程创建完成后再启动前端多模态预热线程，避免带着活跃线程执行 <code class="notranslate">fork</code> 所产生的问题。</li>
+<li>预热与加载重叠：多进程模式下，多模态预热可以和 EngineCore 加载模型同时进行，从而减少整体启动时间。</li>
+<li><code class="notranslate">NotImplementedError</code>：表示这种运行组合在当前版本中尚未实现。</li>
+</ul>
+</li>
+<li>
+<p>核心流程</p>
+</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">开始
+  ↓
+asyncio=True 且 multiprocess=False？
+  ├─ 是 → 抛出 NotImplementedError
+  └─ 否
+       ↓
+multiprocess=True 且 asyncio=True？
+  ├─ 是 → make_async_mp_client()
+  │        ├─ 普通异步 → AsyncMPClient
+  │        └─ 数据并行 → DPAsyncMPClient / DPLBAsyncMPClient
+  └─ 否
+       ↓
+multiprocess=True 且 asyncio=False？
+  ├─ 是 → SyncMPClient
+  └─ 否 → InprocClient
+</code></pre>
+<ol start="6">
+<li><strong>在整个项目中的定位</strong><br>
+它位于 <code class="notranslate">LLMEngine</code>/<code class="notranslate">AsyncLLM</code> 初始化和 <code class="notranslate">EngineCore</code> 创建之间，负责选择双方采用哪种连接方式：</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">LLM 或在线服务创建引擎
+            ↓
+LLMEngine / AsyncLLM 初始化
+            ↓
+EngineCoreClient.make_client()        ← 当前函数
+            ↓
+     根据运行模式选择
+      ├─ InprocClient
+      │      ↓ 直接调用
+      │   EngineCore
+      │
+      ├─ SyncMPClient
+      │      ↓ ZMQ 同步通信
+      │   EngineCoreProc
+      │
+      └─ AsyncMPClient及其DP子类
+             ↓ ZMQ 异步通信
+          EngineCoreProc
+            ↓
+Scheduler → Executor → Worker → 模型
+</code></pre>
+<p>后续上层统一通过返回的客户端调用：</p>
+<pre class="notranslate"><code class="notranslate">add_request()     提交请求
+get_output()      获取结果
+abort_requests()  取消请求
+</code></pre>
+<p>因此，这个函数本身不处理推理请求，而是在引擎启动阶段决定“上层以后通过哪种方式与 EngineCore 通信”。</p>
+<h3>InprocClient类</h3>
+<p><strong>作用</strong>：<code class="notranslate">InprocClient</code> 是 <code class="notranslate">LLMEngine</code> 与同一进程内 <code class="notranslate">EngineCore</code> 之间的轻量客户端：它不使用 ZMQ 或后台 EngineCore 进程，而是直接向 <code class="notranslate">EngineCore</code> 添加、取消请求，并通过调用 <code class="notranslate">step_fn()</code> 推动一轮调度和模型计算来获取输出；同时，它将缓存管理、休眠唤醒、LoRA、性能分析和权重版本等控制操作直接转发给 <code class="notranslate">EngineCore</code>，主要用于关闭多进程模式的同步离线推理。</p>
+<h4>构造函数</h4>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-k">class</span> <span class="pl-v">InprocClient</span>(<span class="pl-v">EngineCoreClient</span>):
+    <span class="pl-s">"""InprocClient: client for in-process EngineCore. Intended</span>
+<span class="pl-s">    for use in LLMEngine for V0-style add_request() and step()</span>
+<span class="pl-s">        EngineCore setup in this process (no busy loop).</span>
+<span class="pl-s"></span>
+<span class="pl-s">        * pushes EngineCoreRequest directly into the EngineCore</span>
+<span class="pl-s">        * pulls EngineCoreOutputs by stepping the EngineCore</span>
+<span class="pl-s">    """</span>
+
+    <span class="pl-c"># Takes no renderer: this class has no _start_mm_warmup (only MPClient</span>
+    <span class="pl-c"># does), so a renderer would never be used here. EngineCore is built in</span>
+    <span class="pl-c"># this process and MM warmup runs synchronously inside renderer.warmup().</span>
+    <span class="pl-k">def</span> <span class="pl-en">__init__</span>(
+        <span class="pl-s1">self</span>,
+        <span class="pl-s1">vllm_config</span>: <span class="pl-smi">VllmConfig</span>,
+        <span class="pl-s1">executor_class</span>: <span class="pl-s1">type</span>[<span class="pl-v">Executor</span>],
+        <span class="pl-s1">log_stats</span>: <span class="pl-smi">bool</span>,
+        <span class="pl-c1">*</span>,
+        <span class="pl-s1">executor_fail_callback</span>: <span class="pl-v">Callable</span> <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+    ):
+        <span class="pl-s1">self</span>.<span class="pl-c1">engine_core</span> <span class="pl-c1">=</span> <span class="pl-en">EngineCore</span>(
+            <span class="pl-s1">vllm_config</span>,
+            <span class="pl-s1">executor_class</span>,
+            <span class="pl-s1">log_stats</span>,
+            <span class="pl-s1">executor_fail_callback</span><span class="pl-c1">=</span><span class="pl-s1">executor_fail_callback</span>,
+        )</pre></div>
+<p>这个构造函数接收 vLLM 总配置 <code class="notranslate">vllm_config</code>、模型执行器类型 <code class="notranslate">executor_class</code>、是否记录统计信息 <code class="notranslate">log_stats</code>，以及可选的执行器失败回调 <code class="notranslate">executor_fail_callback</code>，然后直接在当前进程中创建一个 <code class="notranslate">EngineCore</code> 并保存到 <code class="notranslate">self.engine_core</code>。</p>
+<pre lang="text" class="notranslate"><code class="notranslate">创建 InprocClient
+      ↓
+同进程创建 EngineCore
+      ↓
+初始化调度器和模型执行器等核心组件
+      ↓
+后续直接调用 self.engine_core
+</code></pre>
+<p>它不创建独立 EngineCore 进程，也不建立 ZMQ 通信；<code class="notranslate">renderer</code> 不作为参数传入，因为进程内模式的多模态预热由外部同步完成。构造函数本身没有返回值，但会让 <code class="notranslate">InprocClient</code> 获得可直接操作的底层推理核心。</p>
+<h4>get_out函数</h4>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-k">def</span> <span class="pl-en">get_output</span>(<span class="pl-s1">self</span>) <span class="pl-c1">-&gt;</span> <span class="pl-smi">EngineCoreOutputs</span>:
+	<span class="pl-s1">outputs</span>, <span class="pl-s1">model_executed</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">engine_core</span>.<span class="pl-c1">step_fn</span>()
+	<span class="pl-s1">self</span>.<span class="pl-c1">engine_core</span>.<span class="pl-c1">post_step</span>(<span class="pl-s1">model_executed</span><span class="pl-c1">=</span><span class="pl-s1">model_executed</span>)
+	<span class="pl-k">return</span> <span class="pl-s1">outputs</span> <span class="pl-c1">and</span> <span class="pl-s1">outputs</span>.<span class="pl-c1">get</span>(<span class="pl-c1">0</span>) <span class="pl-c1">or</span> <span class="pl-en">EngineCoreOutputs</span>()</pre></div>
+<ol>
+<li>
+<p><strong>主要作用</strong><br>
+<code class="notranslate">get_output()</code> 直接驱动同进程的 <code class="notranslate">EngineCore</code> 完成一轮“调度 → 模型计算 → 状态更新”，执行必要的轮后处理，然后取出属于当前客户端的结果。</p>
+</li>
+<li>
+<p><strong>输入（参数）</strong><br>
+没有需要用户传入的参数；<code class="notranslate">self</code> 表示当前 <code class="notranslate">InprocClient</code>，通过其中的 <code class="notranslate">self.engine_core</code> 操作底层推理核心。</p>
+</li>
+<li>
+<p><strong>输出（改变了什么值）</strong><br>
+返回一个 <code class="notranslate">EngineCoreOutputs</code>；如果本轮没有可返回结果，就返回空的 <code class="notranslate">EngineCoreOutputs()</code>。执行过程中会推进请求的计算进度、生成新 token，并可能改变调度器和 KV Cache 状态，但不会修改模型权重。</p>
+</li>
+<li>
+<p><strong>术语解释</strong></p>
+</li>
+</ol>
+<ul>
+<li>一轮执行：表示一次引擎迭代，而不是把所有请求完整运行结束。一轮可以并行处理多个请求当前需要计算的一批 token。</li>
+<li><code class="notranslate">step_fn</code>：<code class="notranslate">EngineCore</code> 初始化时选择的执行函数。普通模式下指向 <code class="notranslate">EngineCore.step()</code>；启用 batch queue 时指向 <code class="notranslate">step_with_batch_queue()</code>。</li>
+<li><code class="notranslate">EngineCore.step()</code>：一次执行调度、模型计算和结果回写的核心方法，主要过程是：</li>
+</ul>
+<pre lang="text" class="notranslate"><code class="notranslate">Scheduler.schedule()
+        ↓
+ModelExecutor.execute_model()
+        ↓
+Scheduler.update_from_output()
+</code></pre>
+<ul>
+<li><code class="notranslate">outputs</code>：<code class="notranslate">step_fn()</code> 返回的结果字典。字典按客户端编号保存输出；同进程模式通常只有编号<code class="notranslate">0</code>。</li>
+<li><code class="notranslate">model_executed</code>：布尔值，表示本轮是否真的安排了 token 并执行了模型计算。没有请求或没有可调度 token 时可能为 <code class="notranslate">False</code>。</li>
+<li><code class="notranslate">post_step()</code>：一轮模型计算后的补充处理。当前主要用于获取投机解码产生的草稿 token，并把它们更新到 Scheduler，供下一轮使用。</li>
+<li>投机解码：先由较快的草稿模型预测多个候选 token，再让主模型验证，从而减少主模型的生成轮数。</li>
+<li><code class="notranslate">outputs.get(0)</code>：从结果字典中取得客户端编号 <code class="notranslate">0</code> 的输出。<code class="notranslate">InprocClient</code> 只有一个本地客户端，所以读取这一项。</li>
+<li><code class="notranslate">outputs and outputs.get(0) or EngineCoreOutputs()</code>：Python 的简写逻辑：</li>
+</ul>
+<pre lang="text" class="notranslate"><code class="notranslate">outputs 非空且存在编号 0
+    → 返回 outputs[0]
+outputs 为空或没有编号 0
+    → 返回空 EngineCoreOutputs()
+</code></pre>
+<ul>
+<li><code class="notranslate">EngineCoreOutputs</code>：一轮 EngineCore 的批量输出，可能包含多个请求的新 token、完成状态、调度统计和时间戳。</li>
+<li>空的 <code class="notranslate">EngineCoreOutputs()</code>：表示这一轮没有用户侧输出，并不一定代表发生错误，也不一定代表所有请求都已完成。</li>
+<li>请求计算进度：Scheduler 会更新每个请求已经计算的 token 数，并把未完成请求留给后续轮次继续处理。</li>
+<li>KV Cache 状态：调度过程中可能为请求分配、复用或释放 KV Cache block；这些变化由 Scheduler 和 KVCacheManager 完成。</li>
+<li>阻塞行为：在同步的 <code class="notranslate">InprocClient</code> 中，<code class="notranslate">get_output()</code> 会等待本轮模型计算和结果处理完成后再返回，但不会等待所有请求全部完成。</li>
+</ul>
+<ol start="5">
+<li>核心流程</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">调用 self.engine_core.step_fn()
+        ↓
+调度并执行本轮模型计算
+        ↓
+得到 outputs 和 model_executed
+        ↓
+调用 post_step(model_executed)
+完成投机解码等轮后处理
+        ↓
+从 outputs 中取客户端 0 的结果
+        ↓
+有结果 → 返回对应 EngineCoreOutputs
+无结果 → 返回空 EngineCoreOutputs
+</code></pre>
+<ol start="6">
+<li><strong>在整个项目中的定位</strong><br>
+它是同步离线推理主循环与 <code class="notranslate">EngineCore</code> 之间的关键连接点：</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">OfflineInferenceMixin._run_engine()
+        ↓ 循环调用
+LLMEngine.step()
+        ↓
+InprocClient.get_output()             ← 当前函数
+        ↓
+EngineCore.step_fn()
+        ├─ Scheduler.schedule()
+        ├─ ModelExecutor.execute_model()
+        └─ Scheduler.update_from_output()
+        ↓
+EngineCore.post_step()
+        ↓
+返回 EngineCoreOutputs
+        ↓
+LLMEngine.step()
+        ↓
+OutputProcessor.process_outputs()
+反分词并组装 RequestOutput
+        ↓
+返回给 _run_engine()
+</code></pre>
+<p><code class="notranslate">InprocClient.get_output()</code> 与多进程客户端的区别是：它直接调用当前进程中的 <code class="notranslate">EngineCore</code>；<code class="notranslate">SyncMPClient.get_output()</code> 则从后台进程的输出队列中读取结果。</p>
+<h2>core.py</h2>
+<p><strong>路径</strong>：/home/dongmingzhe/vllm/vllm/v1/engine/core.py<br>
+<strong>简介</strong>：<code class="notranslate">core.py</code> 是 vLLM V1 推理引擎的核心文件：它负责初始化模型执行器、创建 KV Cache 和调度器，并实现每一轮“调度请求 → 执行模型 → 回写结果”的内部循环；同时提供后台进程、ZMQ 通信、数据并行和 Ray 部署等封装。<br>
+该文件主要包含了7个类：</p>
+<ul>
+<li><code class="notranslate">EngineCore</code>：最核心的引擎类，管理 Scheduler、ModelExecutor 和 KV Cache；负责添加/取消请求，并通过 <code class="notranslate">step()</code> 完成一轮调度、模型计算和结果更新</li>
+<li><code class="notranslate">EngineShutdownState</code>：枚举后台引擎的生命周期状态：运行中、已请求关闭、正在关闭</li>
+<li><code class="notranslate">EngineCoreProc</code>：<code class="notranslate">EngineCore</code> 的多进程封装，让 EngineCore 在后台进程的 busy loop 中运行，并通过 ZMQ 与前端收发请求和结果</li>
+<li><code class="notranslate">DPEngineCoreProc</code>：数据并行 MoE 场景使用的后台 EngineCore，负责多个 DP rank 之间的同步、运行波次、暂停恢复和弹性专家并行扩缩容</li>
+<li><code class="notranslate">EngineCoreActorMixin</code>：Ray Actor 的公共辅助类，负责 GPU 可见性、通信地址、初始化等待和 Actor 运行生命周期</li>
+<li><code class="notranslate">DPMoEEngineCoreActor</code>：将 <code class="notranslate">EngineCoreActorMixin</code> 与 <code class="notranslate">DPEngineCoreProc</code> 组合起来，用于 Ray 部署下的数据并行 MoE 模型</li>
+<li><code class="notranslate">EngineCoreActor</code>：将 <code class="notranslate">EngineCoreActorMixin</code> 与普通 <code class="notranslate">EngineCoreProc</code> 组合起来，用于 Ray 部署下的非 MoE 或非数据并行场景<br>
+类之间的关系可以简化为：</li>
+</ul>
+<pre lang="text" class="notranslate"><code class="notranslate">EngineCore
+├─ EngineCoreProc
+│  ├─ DPEngineCoreProc
+│  │  └─ DPMoEEngineCoreActor（再混入 EngineCoreActorMixin）
+│  └─ EngineCoreActor（再混入 EngineCoreActorMixin）
+│
+├─ Scheduler
+├─ ModelExecutor
+└─ KV Cache
+</code></pre>
+<h3>EngineCore类</h3>
+<p><strong>作用</strong>：<code class="notranslate">EngineCore</code> 是 vLLM V1 推理引擎的核心内循环：它在初始化时创建模型执行器、KV Cache 和调度器，接收并管理推理请求，并通过 <code class="notranslate">step()</code> 反复完成“调度请求 → 执行模型 → 更新请求状态和释放资源”的过程；它只处理 token、缓存和调度等核心逻辑，不直接负责用户输入预处理、文本反分词或网络通信。</p>
+<h4>构造函数</h4>
+<h5>part1.参数列表</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-k">class</span> <span class="pl-v">EngineCore</span>:
+    <span class="pl-s">"""Inner loop of vLLM's Engine."""</span>
+
+    <span class="pl-k">def</span> <span class="pl-en">__init__</span>(
+        <span class="pl-s1">self</span>,
+        <span class="pl-s1">vllm_config</span>: <span class="pl-smi">VllmConfig</span>,
+        <span class="pl-s1">executor_class</span>: <span class="pl-s1">type</span>[<span class="pl-v">Executor</span>],
+        <span class="pl-s1">log_stats</span>: <span class="pl-smi">bool</span>,
+        <span class="pl-s1">executor_fail_callback</span>: <span class="pl-v">Callable</span> <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+        <span class="pl-s1">include_finished_set</span>: <span class="pl-smi">bool</span> <span class="pl-c1">=</span> <span class="pl-c1">False</span>,
+    ):</pre></div>
+<p>这是 <code class="notranslate">EngineCore</code> 的构造函数，创建对象时自动执行。<br>
+主要参数：</p>
+<ul>
+<li><code class="notranslate">vllm_config</code>：模型、缓存、调度和并行等总配置。</li>
+<li><code class="notranslate">executor_class</code>：模型执行器类型，负责真正调用 worker 和模型。</li>
+<li><code class="notranslate">log_stats</code>：是否记录性能统计。</li>
+<li><code class="notranslate">executor_fail_callback</code>：模型执行器出错时的回调函数。</li>
+<li><code class="notranslate">include_finished_set</code>：调度器输出中是否包含已完成请求集合。</li>
+</ul>
+<h5>part2.加载插件并保存基础状态</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-c"># plugins need to be loaded at the engine/scheduler level too</span>
+<span class="pl-k">from</span> <span class="pl-s1">vllm</span>.<span class="pl-s1">plugins</span> <span class="pl-k">import</span> <span class="pl-s1">load_general_plugins</span>
+<span class="pl-en">load_general_plugins</span>()
+<span class="pl-s1">self</span>.<span class="pl-c1">vllm_config</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>
+<span class="pl-k">if</span> <span class="pl-c1">not</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">parallel_config</span>.<span class="pl-c1">data_parallel_rank_local</span>:
+	<span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(
+		<span class="pl-s">"Initializing a V1 LLM engine (v%s) with config: %s"</span>,
+		<span class="pl-c1">VLLM_VERSION</span>,
+		<span class="pl-s1">vllm_config</span>,
+	)
+<span class="pl-s1">self</span>.<span class="pl-c1">log_stats</span> <span class="pl-c1">=</span> <span class="pl-s1">log_stats</span>
+<span class="pl-c"># Opaque weight version supplied by the caller.</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">_weight_version</span> <span class="pl-c1">=</span> <span class="pl-s">"default"</span></pre></div>
+<p>这一部分完成基础准备：</p>
+<ul>
+<li>加载 vLLM 插件。</li>
+<li>保存总配置和统计开关。</li>
+<li>将初始模型权重版本标记为 <code class="notranslate">"default"</code>。</li>
+<li>输出一次 V1 引擎初始化日志。</li>
+</ul>
+<h5>part3.创建模型执行器</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-c"># Setup Model.</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">model_executor</span> <span class="pl-c1">=</span> <span class="pl-en">executor_class</span>(<span class="pl-s1">vllm_config</span>)
+<span class="pl-s1">self</span>.<span class="pl-c1">_pooler_config_logged</span> <span class="pl-c1">=</span> <span class="pl-c1">False</span>
+<span class="pl-k">if</span> <span class="pl-s1">executor_fail_callback</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+	<span class="pl-s1">self</span>.<span class="pl-c1">model_executor</span>.<span class="pl-c1">register_failure_callback</span>(<span class="pl-s1">executor_fail_callback</span>)</pre></div>
+<p><code class="notranslate">model_executor</code> 负责模型加载和 GPU 计算，是 <code class="notranslate">EngineCore</code> 执行模型的入口。<br>
+如果提供了失败回调，执行器发生严重错误时会通知上层。</p>
+<h5>part4.初始化 KV Cache 和结构化输出</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">available_gpu_memory_for_kv_cache</span> <span class="pl-c1">=</span> <span class="pl-c1">-</span><span class="pl-c1">1</span>
+
+<span class="pl-k">if</span> <span class="pl-s1">envs</span>.<span class="pl-c1">VLLM_ELASTIC_EP_SCALE_UP_LAUNCH</span>:
+	<span class="pl-s1">self</span>.<span class="pl-c1">_eep_scale_up_before_kv_init</span>()
+
+<span class="pl-c"># Setup KV Caches and update CacheConfig after profiling.</span>
+<span class="pl-s1">kv_cache_config</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">_initialize_kv_caches</span>(<span class="pl-s1">vllm_config</span>)
+<span class="pl-s1">self</span>.<span class="pl-c1">structured_output_manager</span> <span class="pl-c1">=</span> <span class="pl-en">StructuredOutputManager</span>(<span class="pl-s1">vllm_config</span>)</pre></div>
+<p><code class="notranslate">_initialize_kv_caches()</code> 会：</p>
+<ul>
+<li>分析模型需要什么样的 KV Cache。</li>
+<li>测量可用 GPU 显存。</li>
+<li>计算可以创建多少个 KV Cache block。</li>
+<li>创建实际的 KV Cache。<br>
+<code class="notranslate">StructuredOutputManager</code> 用于支持 JSON、语法约束等结构化生成。</li>
+</ul>
+<h5>part5.创建调度器</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-c"># Setup scheduler.</span>
+<span class="pl-v">Scheduler</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">scheduler_config</span>.<span class="pl-c1">get_scheduler_cls</span>()
+
+<span class="pl-k">if</span> <span class="pl-en">len</span>(<span class="pl-s1">kv_cache_config</span>.<span class="pl-c1">kv_cache_groups</span>) <span class="pl-c1">==</span> <span class="pl-c1">0</span>:  <span class="pl-c"># noqa: SIM102</span>
+	<span class="pl-c"># Encoder models without KV cache don't support</span>
+	<span class="pl-c"># chunked prefill. But do SSM models?</span>
+	<span class="pl-k">if</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">scheduler_config</span>.<span class="pl-c1">enable_chunked_prefill</span>:
+		<span class="pl-s1">logger</span>.<span class="pl-c1">warning</span>(<span class="pl-s">"Disabling chunked prefill for model without KVCache"</span>)
+		<span class="pl-s1">vllm_config</span>.<span class="pl-c1">scheduler_config</span>.<span class="pl-c1">enable_chunked_prefill</span> <span class="pl-c1">=</span> <span class="pl-c1">False</span>
+
+<span class="pl-s1">scheduler_block_size</span>, <span class="pl-s1">hash_block_size</span> <span class="pl-c1">=</span> <span class="pl-en">resolve_kv_cache_block_sizes</span>(
+	<span class="pl-s1">kv_cache_config</span>, <span class="pl-s1">vllm_config</span>
+)
+
+<span class="pl-s1">self</span>.<span class="pl-c1">scheduler</span>: <span class="pl-smi">SchedulerInterface</span> <span class="pl-c1">=</span> <span class="pl-en">Scheduler</span>(
+	<span class="pl-s1">vllm_config</span><span class="pl-c1">=</span><span class="pl-s1">vllm_config</span>,
+	<span class="pl-s1">kv_cache_config</span><span class="pl-c1">=</span><span class="pl-s1">kv_cache_config</span>,
+	<span class="pl-s1">structured_output_manager</span><span class="pl-c1">=</span><span class="pl-s1">self</span>.<span class="pl-c1">structured_output_manager</span>,
+	<span class="pl-s1">include_finished_set</span><span class="pl-c1">=</span><span class="pl-s1">include_finished_set</span>,
+	<span class="pl-s1">log_stats</span><span class="pl-c1">=</span><span class="pl-s1">self</span>.<span class="pl-c1">log_stats</span>,
+	<span class="pl-s1">block_size</span><span class="pl-c1">=</span><span class="pl-s1">scheduler_block_size</span>,
+	<span class="pl-s1">hash_block_size</span><span class="pl-c1">=</span><span class="pl-s1">hash_block_size</span>,
+)</pre></div>
+<p>这一部分根据配置选择 Scheduler 类型，并将 KV Cache 配置交给它。<br>
+Scheduler 后续负责：</p>
+<pre lang="text" class="notranslate"><code class="notranslate">选择本轮请求
+→ 分配 KV Cache block
+→ 控制 token 预算
+→ 检查请求结束
+→ 回收资源
+</code></pre>
+<p>如果模型根本不使用 KV Cache，代码还会关闭不适用的分块预填充功能。</p>
+<h5>part6.初始化投机解码和数据连接器</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">use_spec_decode</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">speculative_config</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">check_for_draft_tokens</span> <span class="pl-c1">=</span> (
+	<span class="pl-s1">self</span>.<span class="pl-c1">use_spec_decode</span> <span class="pl-c1">or</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">model_config</span>.<span class="pl-c1">is_diffusion</span>
+)
+<span class="pl-k">if</span> <span class="pl-s1">self</span>.<span class="pl-c1">scheduler</span>.<span class="pl-c1">connector</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:  <span class="pl-c"># type: ignore</span>
+	<span class="pl-s1">self</span>.<span class="pl-c1">model_executor</span>.<span class="pl-c1">init_kv_output_aggregator</span>(<span class="pl-s1">self</span>.<span class="pl-c1">scheduler</span>.<span class="pl-c1">connector</span>)  <span class="pl-c"># type: ignore</span>
+<span class="pl-k">if</span> <span class="pl-s1">self</span>.<span class="pl-c1">scheduler</span>.<span class="pl-c1">ec_connector</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:  <span class="pl-c"># type: ignore</span>
+	<span class="pl-s1">self</span>.<span class="pl-c1">model_executor</span>.<span class="pl-c1">init_ec_output_aggregator</span>()</pre></div>
+<p>这一部分初始化可选的高级功能：</p>
+<ul>
+<li>判断是否使用投机解码。</li>
+<li>决定是否需要读取草稿 token。</li>
+<li>连接 Scheduler 与模型执行器之间的 KV/编码缓存传输组件。<br>
+入门阶段知道这些属于扩展功能即可。</li>
+</ul>
+<h5>part7.初始化多模态缓存和连接器握手</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">mm_receiver_cache</span> <span class="pl-c1">=</span> <span class="pl-s1">mm_registry</span>.<span class="pl-c1">engine_receiver_cache_from_config</span>(
+	<span class="pl-s1">vllm_config</span>
+)
+
+<span class="pl-c"># If a KV connector is initialized for scheduler, we want to collect</span>
+<span class="pl-c"># handshake metadata from all workers so the connector in the scheduler</span>
+<span class="pl-c"># will have the full context</span>
+<span class="pl-s1">kv_connector</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">scheduler</span>.<span class="pl-c1">get_kv_connector</span>()
+<span class="pl-k">if</span> <span class="pl-s1">kv_connector</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+	<span class="pl-c"># Collect and store KV connector xfer metadata from workers</span>
+	<span class="pl-c"># (after KV cache registration)</span>
+	<span class="pl-s1">xfer_handshake_metadata</span> <span class="pl-c1">=</span> (
+		<span class="pl-s1">self</span>.<span class="pl-c1">model_executor</span>.<span class="pl-c1">get_kv_connector_handshake_metadata</span>()
+	)
+
+	<span class="pl-k">if</span> <span class="pl-s1">xfer_handshake_metadata</span>:
+		<span class="pl-c"># xfer_handshake_metadata is list of dicts from workers</span>
+		<span class="pl-c"># Each dict already has structure {(pp_rank, tp_rank): metadata}</span>
+		<span class="pl-c"># Merge all worker dicts into a single dict</span>
+		<span class="pl-s1">content</span>: <span class="pl-s1">dict</span>[<span class="pl-s1">tuple</span>[<span class="pl-smi">int</span>, <span class="pl-smi">int</span>], <span class="pl-smi">Any</span>] <span class="pl-c1">=</span> {}
+		<span class="pl-k">for</span> <span class="pl-s1">worker_dict</span> <span class="pl-c1">in</span> <span class="pl-s1">xfer_handshake_metadata</span>:
+			<span class="pl-k">if</span> <span class="pl-s1">worker_dict</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+				<span class="pl-s1">content</span>.<span class="pl-c1">update</span>(<span class="pl-s1">worker_dict</span>)
+		<span class="pl-s1">kv_connector</span>.<span class="pl-c1">set_xfer_handshake_metadata_pp_aware</span>(<span class="pl-s1">content</span>)</pre></div>
+<p>这里主要准备两类跨组件数据：</p>
+<ul>
+<li>多模态缓存：保存图片等多模态输入的处理结果。</li>
+<li>KV connector 元数据：让不同 worker 或推理阶段知道如何传输 KV Cache。<br>
+普通单机文本推理通常不需要深入这一部分。</li>
+</ul>
+<h5>part8.配置批次队列和请求类型</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-c"># Setup batch queue for pipeline parallelism.</span>
+<span class="pl-c"># Batch queue for scheduled batches. This enables us to asynchronously</span>
+<span class="pl-c"># schedule and execute batches, and is required by pipeline parallelism</span>
+<span class="pl-c"># to eliminate pipeline bubbles.</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">batch_queue_size</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">max_concurrent_batches</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">batch_queue</span>: (
+	<span class="pl-s1">deque</span>[<span class="pl-s1">tuple</span>[<span class="pl-v">Future</span>[<span class="pl-v">ModelRunnerOutput</span>], <span class="pl-v">SchedulerOutput</span>, <span class="pl-v">Future</span>[<span class="pl-v">Any</span>]]] <span class="pl-c1">|</span> <span class="pl-c1">None</span>
+) <span class="pl-c1">=</span> <span class="pl-c1">None</span>
+<span class="pl-k">if</span> <span class="pl-s1">self</span>.<span class="pl-c1">batch_queue_size</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">1</span>:
+	<span class="pl-s1">logger</span>.<span class="pl-c1">debug</span>(<span class="pl-s">"Batch queue is enabled with size %d"</span>, <span class="pl-s1">self</span>.<span class="pl-c1">batch_queue_size</span>)
+	<span class="pl-s1">self</span>.<span class="pl-c1">batch_queue</span> <span class="pl-c1">=</span> <span class="pl-en">deque</span>(<span class="pl-s1">maxlen</span><span class="pl-c1">=</span><span class="pl-s1">self</span>.<span class="pl-c1">batch_queue_size</span>)
+
+<span class="pl-s1">self</span>.<span class="pl-c1">is_ec_consumer</span> <span class="pl-c1">=</span> (
+	<span class="pl-s1">vllm_config</span>.<span class="pl-c1">ec_transfer_config</span> <span class="pl-c1">is</span> <span class="pl-c1">None</span>
+	<span class="pl-c1">or</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">ec_transfer_config</span>.<span class="pl-c1">is_ec_consumer</span>
+)
+<span class="pl-s1">self</span>.<span class="pl-c1">is_pooling_model</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">model_config</span>.<span class="pl-c1">runner_type</span> <span class="pl-c1">==</span> <span class="pl-s">"pooling"</span></pre></div>
+<p>如果允许同时处理多个 batch，就创建 <code class="notranslate">batch_queue</code>。它主要用于流水线并行，让调度和模型执行重叠，减少 GPU 等待。<br>
+同时记录当前引擎是否：</p>
+<ul>
+<li>接收编码缓存数据。</li>
+<li>运行 embedding、pooling 等非文本生成模型。</li>
+</ul>
+<h5>part9.配置前缀缓存、执行入口和运行状态</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">request_block_hasher</span>: <span class="pl-v">Callable</span>[[<span class="pl-v">Request</span>], <span class="pl-s1">list</span>[<span class="pl-smi">BlockHash</span>]] <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>
+<span class="pl-k">if</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">cache_config</span>.<span class="pl-c1">enable_prefix_caching</span> <span class="pl-c1">or</span> <span class="pl-s1">kv_connector</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+	<span class="pl-s1">caching_hash_fn</span> <span class="pl-c1">=</span> <span class="pl-en">get_hash_fn_by_name</span>(
+		<span class="pl-s1">vllm_config</span>.<span class="pl-c1">cache_config</span>.<span class="pl-c1">prefix_caching_hash_algo</span>
+	)
+	<span class="pl-en">init_none_hash</span>(<span class="pl-s1">caching_hash_fn</span>)
+
+	<span class="pl-s1">self</span>.<span class="pl-c1">request_block_hasher</span> <span class="pl-c1">=</span> <span class="pl-en">get_request_block_hasher</span>(
+		<span class="pl-s1">hash_block_size</span>, <span class="pl-s1">caching_hash_fn</span>
+	)
+
+<span class="pl-s1">self</span>.<span class="pl-c1">step_fn</span> <span class="pl-c1">=</span> (
+	<span class="pl-s1">self</span>.<span class="pl-c1">step</span> <span class="pl-k">if</span> <span class="pl-s1">self</span>.<span class="pl-c1">batch_queue</span> <span class="pl-c1">is</span> <span class="pl-c1">None</span> <span class="pl-k">else</span> <span class="pl-s1">self</span>.<span class="pl-c1">step_with_batch_queue</span>
+)
+<span class="pl-s1">self</span>.<span class="pl-c1">async_scheduling</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">scheduler_config</span>.<span class="pl-c1">async_scheduling</span>
+
+<span class="pl-s1">self</span>.<span class="pl-c1">aborts_queue</span> <span class="pl-c1">=</span> <span class="pl-s1">queue</span>.<span class="pl-c1">Queue</span>[<span class="pl-s1">list</span>[<span class="pl-s1">str</span>]]()
+
+<span class="pl-s1">self</span>.<span class="pl-c1">_idle_state_callbacks</span>: <span class="pl-s1">list</span>[<span class="pl-smi">Callable</span>] <span class="pl-c1">=</span> []</pre></div>
+<p>这一部分完成最后的运行配置：</p>
+<ul>
+<li>为前缀缓存创建 block 哈希函数，用来识别相同的 prompt 前缀。</li>
+<li>根据是否启用 batch queue，选择普通 <code class="notranslate">step()</code> 或队列版 <code class="notranslate">step_with_batch_queue()</code></li>
+<li>创建取消请求队列。</li>
+<li>保存异步调度和引擎空闲回调状态。<br>
+最后的：</li>
+</ul>
+<pre class="notranslate"><code class="notranslate">freeze_gc_heap()
+maybe_attach_gc_debug_callback()
+enable_envs_cache()
+</code></pre>
+<p>主要用于减少 Python 垃圾回收暂停和环境变量读取开销，属于运行性能优化。<br>
+整体初始化顺序是：</p>
+<pre class="notranslate"><code class="notranslate">读取配置与插件
+      ↓
+创建 ModelExecutor
+      ↓
+测量显存并创建 KV Cache
+      ↓
+创建 Scheduler
+      ↓
+初始化投机解码、连接器和多模态缓存
+      ↓
+配置 batch queue 与前缀缓存
+      ↓
+选择 step 执行方式
+      ↓
+准备运行状态
+</code></pre>
+<p>其中最核心的三个对象是：</p>
+<pre class="notranslate"><code class="notranslate">EngineCore
+├─ model_executor：真正执行模型
+├─ scheduler：决定本轮执行什么
+└─ KV Cache：保存历史 token 的注意力状态
+</code></pre>
+<h4>step函数</h4>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-k">def</span> <span class="pl-en">step</span>(<span class="pl-s1">self</span>) <span class="pl-c1">-&gt;</span> <span class="pl-s1">tuple</span>[<span class="pl-s1">dict</span>[<span class="pl-smi">int</span>, <span class="pl-smi">EngineCoreOutputs</span>], <span class="pl-smi">bool</span>]:
+	<span class="pl-s">"""Schedule, execute, and make output.</span>
+<span class="pl-s"></span>
+<span class="pl-s">	Returns tuple of outputs and a flag indicating whether the model</span>
+<span class="pl-s">	was executed.</span>
+<span class="pl-s">	"""</span>
+	<span class="pl-c"># Check for any requests remaining in the scheduler - unfinished,</span>
+	<span class="pl-c"># or finished and not yet removed from the batch.</span>
+	<span class="pl-k">if</span> <span class="pl-c1">not</span> <span class="pl-s1">self</span>.<span class="pl-c1">scheduler</span>.<span class="pl-c1">has_requests</span>():
+		<span class="pl-k">return</span> {}, <span class="pl-c1">False</span>
+	<span class="pl-s1">scheduler_output</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">scheduler</span>.<span class="pl-c1">schedule</span>(<span class="pl-s1">self</span>.<span class="pl-c1">_should_throttle_prefills</span>())
+	<span class="pl-s1">future</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">model_executor</span>.<span class="pl-c1">execute_model</span>(<span class="pl-s1">scheduler_output</span>, <span class="pl-s1">non_block</span><span class="pl-c1">=</span><span class="pl-c1">True</span>)
+	<span class="pl-s1">grammar_output</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">scheduler</span>.<span class="pl-c1">get_grammar_bitmask</span>(<span class="pl-s1">scheduler_output</span>)
+	<span class="pl-k">with</span> (
+		<span class="pl-s1">self</span>.<span class="pl-c1">capture_iteration_details</span>(<span class="pl-s1">scheduler_output</span>) <span class="pl-k">as</span> <span class="pl-s1">iteration_details</span>,
+		<span class="pl-s1">self</span>.<span class="pl-c1">log_error_detail</span>(<span class="pl-s1">scheduler_output</span>),
+	):
+		<span class="pl-s1">model_output</span> <span class="pl-c1">=</span> <span class="pl-s1">future</span>.<span class="pl-c1">result</span>()
+		<span class="pl-k">if</span> <span class="pl-s1">model_output</span> <span class="pl-c1">is</span> <span class="pl-c1">None</span>:
+			<span class="pl-s1">model_output</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">model_executor</span>.<span class="pl-c1">sample_tokens</span>(<span class="pl-s1">grammar_output</span>)
+
+	<span class="pl-c"># Before processing the model output, process any aborts that happened</span>
+	<span class="pl-c"># during the model execution.</span>
+	<span class="pl-s1">self</span>.<span class="pl-c1">_process_aborts_queue</span>()
+	<span class="pl-s1">engine_core_outputs</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">scheduler</span>.<span class="pl-c1">update_from_output</span>(
+		<span class="pl-s1">scheduler_output</span>, <span class="pl-s1">model_output</span>
+	)
+	<span class="pl-s1">self</span>.<span class="pl-c1">_attach_iteration_details</span>(<span class="pl-s1">engine_core_outputs</span>, <span class="pl-s1">iteration_details</span>)
+
+	<span class="pl-k">return</span> <span class="pl-s1">engine_core_outputs</span>, <span class="pl-s1">scheduler_output</span>.<span class="pl-c1">total_num_scheduled_tokens</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">0</span></pre></div>
+<ol>
+<li>
+<p><strong>主要作用</strong><br>
+<code class="notranslate">EngineCore.step()</code> 完成 vLLM 核心引擎的一轮推理：由 Scheduler 选择本轮要处理的请求和 token，交给 ModelExecutor 执行模型计算，再把生成结果写回请求状态并生成 <code class="notranslate">EngineCoreOutputs</code>。一次 <code class="notranslate">step()</code> 只推进一轮，不会保证所有请求都完成。</p>
+</li>
+<li>
+<p><strong>输入（参数）</strong><br>
+没有需要调用者传入的参数；函数使用 <code class="notranslate">self.scheduler</code>、<code class="notranslate">self.model_executor</code> 和内部取消队列完成工作。调度时会通过 <code class="notranslate">_should_throttle_prefills()</code> 判断是否暂缓新的 prefill 请求。</p>
+</li>
+<li>
+<p><strong>输出（改变了什么值）</strong><br>
+返回一个二元组：</p>
+</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">(
+    dict[int, EngineCoreOutputs],
+    bool,
+)
+</code></pre>
+<ul>
+<li>字典保存本轮各客户端的输出。</li>
+<li>布尔值表示本轮是否实际调度了 token 并执行模型。<br>
+执行过程中会更新请求的已计算 token、生成 token、完成状态和 KV Cache 占用，也可能处理取消请求；不会修改模型权重，也不会在这里把 token 转换成文本。</li>
+</ul>
+<ol start="4">
+<li><strong>术语解释</strong></li>
+</ol>
+<ul>
+<li>一轮推理：一次“调度 → 模型计算 → 状态回写”。一轮可以并行处理多个请求，但未完成的请求还要参加后续轮次。</li>
+<li><code class="notranslate">Scheduler</code>：调度器，决定本轮处理哪些请求、每个请求计算多少 token，以及为它们分配哪些 KV Cache block。</li>
+<li><code class="notranslate">has_requests()</code>：检查调度器中是否还有请求，包括未完成请求，以及已经完成但尚未从执行 batch 中清理的请求。<br>
+空返回：</li>
+</ul>
+<pre class="notranslate"><code class="notranslate">if not self.scheduler.has_requests():
+    return {}, False
+</code></pre>
+<p>表示没有任何请求需要继续处理，因此没有输出，也没有执行模型。</p>
+<ul>
+<li><code class="notranslate">_should_throttle_prefills()</code>：判断是否暂缓新的 prefill。普通 <code class="notranslate">EngineCore</code> 通常返回 <code class="notranslate">False</code>；数据并行场景可能通过它平衡不同引擎的 prefill 负载。</li>
+<li><code class="notranslate">scheduler_output</code>：Scheduler 对本轮工作的安排，包含本轮请求、每个请求的 token 数、KV Cache block table 等模型执行信息。</li>
+<li><code class="notranslate">ModelExecutor</code>：负责把调度结果交给 worker 和模型执行器，最终运行 GPU 模型计算。</li>
+<li><code class="notranslate">execute_model(..., non_block=True)</code>：以非阻塞方式启动模型执行并立即返回一个 <code class="notranslate">Future</code>，使 CPU 可以在等待 GPU 的同时准备其他信息。</li>
+<li><code class="notranslate">Future</code>：代表一个尚未完成的计算任务。调用 <code class="notranslate">future.result()</code> 时，如果模型计算尚未结束，当前函数会等待它完成。</li>
+<li>非阻塞与阻塞的区别：模型执行的启动是非阻塞的，但当前 <code class="notranslate">step()</code> 最终仍会在 <code class="notranslate">future.result()</code> 等待本轮结果，因此对调用者来说，它会在本轮完成后才返回。</li>
+<li><code class="notranslate">grammar_output</code>：结构化输出的语法约束信息，用来限制本轮哪些 token 可以被采样。</li>
+<li>grammar bitmask：一个掩码，标记词表中哪些 token 当前合法。例如要求生成 JSON 时，可以屏蔽会破坏 JSON 结构的 token。</li>
+<li><code class="notranslate">capture_iteration_details()</code>：记录本轮调度和执行的统计信息，例如本轮处理了多少 token。它主要用于监控和调试。</li>
+<li><code class="notranslate">log_error_detail()</code>：当本轮执行发生异常时，提供更完整的请求和调度上下文，方便定位错误。</li>
+<li><code class="notranslate">model_output</code>：模型执行器产生的结果，通常包含采样得到的新 token、logprob 或 pooling 输出。</li>
+<li><code class="notranslate">model_output is None</code>：某些执行模式先完成模型前向计算，但尚未采样 token，此时需要再调用 <code class="notranslate">sample_tokens(grammar_output)</code> 完成采样。</li>
+<li><code class="notranslate">sample_tokens()</code>：根据模型输出的 logits 和语法约束选择下一批 token。</li>
+<li>abort：取消一个尚未完成的请求，例如用户主动停止生成。</li>
+<li><code class="notranslate">_process_aborts_queue()</code>：处理模型执行期间新到达的取消请求。它必须在回写模型结果前执行，避免继续更新已经取消的请求。</li>
+<li><code class="notranslate">update_from_output()</code>：把模型产生的新 token 写回各个请求，并检查 EOS、<code class="notranslate">max_tokens</code> 等停止条件；请求结束时还会释放它占用的 KV Cache block。</li>
+<li><code class="notranslate">EngineCoreOutputs</code>：EngineCore 返回给前端的结果，包含新 token ID、结束原因和调度统计等，但还不是最终用户看到的文本。</li>
+<li><code class="notranslate">dict[int, EngineCoreOutputs]</code>：按客户端编号组织输出。普通进程内模式通常只使用客户端编号 <code class="notranslate">0</code>；多客户端模式可能产生多个条目。</li>
+<li><code class="notranslate">iteration_details</code>：本轮的内部统计详情，通过 <code class="notranslate">_attach_iteration_details()</code> 附加到输出中。</li>
+<li><code class="notranslate">total_num_scheduled_tokens</code>：Scheduler 本轮安排计算的 token 总数。大于 <code class="notranslate">0</code> 表示本轮确实执行了有效模型计算。</li>
+<li>返回的布尔值：</li>
+</ul>
+<pre class="notranslate"><code class="notranslate">scheduler_output.total_num_scheduled_tokens &gt; 0
+</code></pre>
+<p>它会被 <code class="notranslate">post_step()</code> 使用，例如决定是否需要取得投机解码生成的草稿 token。</p>
+<ul>
+<li>KV Cache 状态：调度器可能在本轮分配、复用或释放 KV Cache block，但启动时预先申请的整个 KV Cache 显存池通常仍然保留。</li>
+<li>不进行反分词：这里返回的是 token ID。将 token 转换成文本由后面的 <code class="notranslate">OutputProcessor</code> 和 Detokenizer 完成。</li>
+</ul>
+<ol start="5">
+<li>核心流程</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">检查 Scheduler 中是否还有请求
+        ↓
+没有请求 → 返回 ({}, False)
+        ↓
+Scheduler.schedule()
+选择本轮请求、token 和 KV Cache
+        ↓
+ModelExecutor.execute_model(non_block=True)
+启动模型计算，得到 Future
+        ↓
+Scheduler.get_grammar_bitmask()
+准备结构化输出约束
+        ↓
+future.result()
+等待本轮模型计算完成
+        ↓
+必要时 sample_tokens()
+完成 token 采样
+        ↓
+_process_aborts_queue()
+处理计算期间收到的取消请求
+        ↓
+Scheduler.update_from_output()
+写回 token、判断结束、回收资源
+        ↓
+附加本轮统计信息
+        ↓
+返回 EngineCoreOutputs 和模型执行标记
+</code></pre>
+<ol start="6">
+<li><strong>在整个项目中的定位</strong><br>
+<code class="notranslate">EngineCore.step()</code> 是 vLLM V1 数据流中“调度、执行、回写”三步闭环的核心：</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">OfflineInferenceMixin._run_engine()
+        ↓
+LLMEngine.step()
+        ↓
+EngineCoreClient.get_output()
+        ↓
+EngineCore.step()                     ← 当前函数
+        ├─ Scheduler.schedule()
+        │      ↓
+        ├─ ModelExecutor.execute_model()
+        │      ↓
+        │   Worker / GPUModelRunner
+        │      ↓
+        │   模型 forward + Sampler
+        │
+        └─ Scheduler.update_from_output()
+               ↓
+        返回 EngineCoreOutputs
+               ↓
+LLMEngine.step()
+        ↓
+OutputProcessor.process_outputs()
+        ├─ Detokenizer：token → 文本
+        └─ 生成 RequestOutput
+        ↓
+返回给用户
+</code></pre>
+<p>在进程内模式中，<code class="notranslate">InprocClient.get_output()</code> 直接调用它；在多进程模式中，则由后台 <code class="notranslate">EngineCoreProc</code> 的 busy loop 反复调用相同的核心执行逻辑。</p>
+<h4>initialize kv caches函数</h4>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-en">@<span class="pl-en">instrument</span>(<span class="pl-s1">span_name</span><span class="pl-c1">=</span><span class="pl-s">"Prepare model"</span>)</span>
+<span class="pl-k">def</span> <span class="pl-en">_initialize_kv_caches</span>(<span class="pl-s1">self</span>, <span class="pl-s1">vllm_config</span>: <span class="pl-smi">VllmConfig</span>) <span class="pl-c1">-&gt;</span> <span class="pl-smi">KVCacheConfig</span>:
+	<span class="pl-s1">start</span> <span class="pl-c1">=</span> <span class="pl-s1">time</span>.<span class="pl-c1">time</span>()
+
+	<span class="pl-c"># register all kvcache specs in enginecore process.</span>
+	<span class="pl-en">register_all_kvcache_specs</span>(<span class="pl-s1">vllm_config</span>)
+
+	<span class="pl-c"># Get all kv cache needed by the model</span>
+	<span class="pl-s1">kv_cache_specs</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">model_executor</span>.<span class="pl-c1">get_kv_cache_specs</span>()
+
+	<span class="pl-c"># Some layers (e.g. Prefix LM attention) run non-causally and tag their</span>
+	<span class="pl-c"># KV cache spec with ``non_causal=True``. The specs are collected here in</span>
+	<span class="pl-c"># the engine-core process (the same process that builds the scheduler),</span>
+	<span class="pl-c"># so this is the multiproc-safe place to translate that layer-level</span>
+	<span class="pl-c"># signal into a scheduling policy: chunked prefill and prefix caching</span>
+	<span class="pl-c"># both assume causal attention and would corrupt non-causal prefill.</span>
+	<span class="pl-k">if</span> <span class="pl-en">any</span>(
+		<span class="pl-en">getattr</span>(<span class="pl-s1">spec</span>, <span class="pl-s">"non_causal"</span>, <span class="pl-c1">False</span>)
+		<span class="pl-k">for</span> <span class="pl-s1">worker_specs</span> <span class="pl-c1">in</span> <span class="pl-s1">kv_cache_specs</span>
+		<span class="pl-k">for</span> <span class="pl-s1">spec</span> <span class="pl-c1">in</span> <span class="pl-s1">worker_specs</span>.<span class="pl-c1">values</span>()
+	):
+		<span class="pl-k">if</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">scheduler_config</span>.<span class="pl-c1">enable_chunked_prefill</span>:
+			<span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(
+				<span class="pl-s">"Disabling chunked prefill: model has non-causal attention layers."</span>
+			)
+			<span class="pl-s1">vllm_config</span>.<span class="pl-c1">scheduler_config</span>.<span class="pl-c1">enable_chunked_prefill</span> <span class="pl-c1">=</span> <span class="pl-c1">False</span>
+		<span class="pl-k">if</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">cache_config</span>.<span class="pl-c1">enable_prefix_caching</span>:
+			<span class="pl-s1">logger</span>.<span class="pl-c1">info</span>(
+				<span class="pl-s">"Disabling prefix caching: model has non-causal attention layers."</span>
+			)
+			<span class="pl-s1">vllm_config</span>.<span class="pl-c1">cache_config</span>.<span class="pl-c1">enable_prefix_caching</span> <span class="pl-c1">=</span> <span class="pl-c1">False</span>
+
+	<span class="pl-c"># Resolve the KV cache layout before memory profiling: workers that</span>
+	<span class="pl-c"># capture full cudagraphs initialize a minimal KV cache during it.</span>
+	<span class="pl-c"># Attention-free models resolve the default so layout reads never precede</span>
+	<span class="pl-c"># resolution.</span>
+	<span class="pl-s1">layout</span> <span class="pl-c1">=</span> <span class="pl-en">resolve_kv_cache_layout</span>(
+		<span class="pl-s1">vllm_config</span>,
+		<span class="pl-s1">self</span>.<span class="pl-c1">model_executor</span>.<span class="pl-c1">get_supported_kv_cache_layouts</span>(),
+		[<span class="pl-s1">s</span> <span class="pl-k">for</span> <span class="pl-s1">specs</span> <span class="pl-c1">in</span> <span class="pl-s1">kv_cache_specs</span> <span class="pl-k">for</span> <span class="pl-s1">s</span> <span class="pl-c1">in</span> <span class="pl-s1">specs</span>.<span class="pl-c1">values</span>()],
+	)
+	<span class="pl-s1">self</span>.<span class="pl-c1">model_executor</span>.<span class="pl-c1">set_kv_cache_layout</span>(<span class="pl-s1">layout</span>.<span class="pl-c1">name</span>)
+
+	<span class="pl-s1">has_kv_cache</span> <span class="pl-c1">=</span> <span class="pl-en">any</span>(<span class="pl-s1">kv_cache_spec</span> <span class="pl-k">for</span> <span class="pl-s1">kv_cache_spec</span> <span class="pl-c1">in</span> <span class="pl-s1">kv_cache_specs</span>)
+	<span class="pl-k">if</span> <span class="pl-s1">has_kv_cache</span>:
+		<span class="pl-k">if</span> <span class="pl-s1">envs</span>.<span class="pl-c1">VLLM_ELASTIC_EP_SCALE_UP_LAUNCH</span>:
+			<span class="pl-c"># NOTE(yongji): should already be set</span>
+			<span class="pl-c"># during _eep_scale_up_before_kv_init</span>
+			<span class="pl-k">assert</span> <span class="pl-s1">self</span>.<span class="pl-c1">available_gpu_memory_for_kv_cache</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">0</span>
+			<span class="pl-s1">available_gpu_memory</span> <span class="pl-c1">=</span> [<span class="pl-s1">self</span>.<span class="pl-c1">available_gpu_memory_for_kv_cache</span>] <span class="pl-c1">*</span> <span class="pl-en">len</span>(
+				<span class="pl-s1">kv_cache_specs</span>
+			)
+		<span class="pl-k">else</span>:
+			<span class="pl-c"># Profiles the peak memory usage of the model to determine how</span>
+			<span class="pl-c"># much memory can be allocated for kv cache.</span>
+			<span class="pl-s1">available_gpu_memory</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">model_executor</span>.<span class="pl-c1">determine_available_memory</span>()
+			<span class="pl-s1">self</span>.<span class="pl-c1">available_gpu_memory_for_kv_cache</span> <span class="pl-c1">=</span> <span class="pl-s1">available_gpu_memory</span>[<span class="pl-c1">0</span>]
+	<span class="pl-k">else</span>:
+		<span class="pl-c"># Attention free models don't need memory for kv cache</span>
+		<span class="pl-s1">available_gpu_memory</span> <span class="pl-c1">=</span> [<span class="pl-c1">0</span>] <span class="pl-c1">*</span> <span class="pl-en">len</span>(<span class="pl-s1">kv_cache_specs</span>)
+
+	<span class="pl-k">assert</span> <span class="pl-en">len</span>(<span class="pl-s1">kv_cache_specs</span>) <span class="pl-c1">==</span> <span class="pl-en">len</span>(<span class="pl-s1">available_gpu_memory</span>)
+
+	<span class="pl-c"># Track max_model_len before KV cache config to detect auto-fit changes</span>
+	<span class="pl-s1">max_model_len_before</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">model_config</span>.<span class="pl-c1">max_model_len</span>
+
+	<span class="pl-s1">kv_cache_configs</span> <span class="pl-c1">=</span> <span class="pl-en">get_kv_cache_configs</span>(
+		<span class="pl-s1">vllm_config</span>, <span class="pl-s1">kv_cache_specs</span>, <span class="pl-s1">available_gpu_memory</span>
+	)
+	<span class="pl-k">for</span> <span class="pl-s1">kv_cache_config</span> <span class="pl-c1">in</span> <span class="pl-s1">kv_cache_configs</span>:
+		<span class="pl-s1">kv_cache_config</span>.<span class="pl-c1">kv_cache_layout</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">cache_config</span>.<span class="pl-c1">kv_cache_layout</span>
+
+	<span class="pl-c"># If auto-fit reduced max_model_len, sync the new value to workers.</span>
+	<span class="pl-c"># This is needed because workers were spawned before memory profiling</span>
+	<span class="pl-c"># and have the original (larger) max_model_len cached.</span>
+	<span class="pl-s1">max_model_len_after</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">model_config</span>.<span class="pl-c1">max_model_len</span>
+	<span class="pl-k">if</span> <span class="pl-s1">max_model_len_after</span> <span class="pl-c1">!=</span> <span class="pl-s1">max_model_len_before</span>:
+		<span class="pl-s1">self</span>.<span class="pl-c1">collective_rpc</span>(<span class="pl-s">"update_max_model_len"</span>, <span class="pl-s1">args</span><span class="pl-c1">=</span>(<span class="pl-s1">max_model_len_after</span>,))
+
+	<span class="pl-s1">scheduler_kv_cache_config</span> <span class="pl-c1">=</span> <span class="pl-en">generate_scheduler_kv_cache_config</span>(<span class="pl-s1">kv_cache_configs</span>)
+	<span class="pl-s1">vllm_config</span>.<span class="pl-c1">cache_config</span>.<span class="pl-c1">num_gpu_blocks</span> <span class="pl-c1">=</span> <span class="pl-s1">scheduler_kv_cache_config</span>.<span class="pl-c1">num_blocks</span>
+	<span class="pl-s1">kv_cache_groups</span> <span class="pl-c1">=</span> <span class="pl-s1">scheduler_kv_cache_config</span>.<span class="pl-c1">kv_cache_groups</span>
+	<span class="pl-k">if</span> <span class="pl-s1">kv_cache_groups</span>:
+		<span class="pl-c"># Exclude groups that opt out of prefix caching (e.g. GLM-5.3-Flash</span>
+		<span class="pl-c"># kpool tail, a 1-block/req scratch buffer with block_size=kpool):</span>
+		<span class="pl-c"># their small block_size would otherwise drag the global block_size</span>
+		<span class="pl-c"># below the real allocator block size and desync it from mamba.</span>
+		<span class="pl-s1">participating</span> <span class="pl-c1">=</span> [
+			<span class="pl-s1">g</span>.<span class="pl-c1">kv_cache_spec</span>.<span class="pl-c1">block_size</span>
+			<span class="pl-k">for</span> <span class="pl-s1">g</span> <span class="pl-c1">in</span> <span class="pl-s1">kv_cache_groups</span>
+			<span class="pl-k">if</span> <span class="pl-s1">g</span>.<span class="pl-c1">kv_cache_spec</span>.<span class="pl-c1">prefix_cacheable</span>
+		]
+		<span class="pl-s1">vllm_config</span>.<span class="pl-c1">cache_config</span>.<span class="pl-c1">block_size</span> <span class="pl-c1">=</span> <span class="pl-en">min</span>(
+			<span class="pl-s1">participating</span>
+			<span class="pl-k">if</span> <span class="pl-s1">participating</span>
+			<span class="pl-k">else</span> [<span class="pl-s1">g</span>.<span class="pl-c1">kv_cache_spec</span>.<span class="pl-c1">block_size</span> <span class="pl-k">for</span> <span class="pl-s1">g</span> <span class="pl-c1">in</span> <span class="pl-s1">kv_cache_groups</span>]
+		)
+		<span class="pl-en">update_kv_cache_capacity</span>(<span class="pl-s1">vllm_config</span>, <span class="pl-s1">scheduler_kv_cache_config</span>)
+
+	<span class="pl-s1">vllm_config</span>.<span class="pl-c1">validate_block_size</span>()
+
+	<span class="pl-s1">self</span>.<span class="pl-c1">model_executor</span>.<span class="pl-c1">initialize_from_config</span>(<span class="pl-s1">kv_cache_configs</span>)
+	<span class="pl-k">if</span> <span class="pl-c1">not</span> <span class="pl-s1">envs</span>.<span class="pl-c1">VLLM_ELASTIC_EP_SCALE_UP_LAUNCH</span>:
+		<span class="pl-s1">self</span>.<span class="pl-c1">model_executor</span>.<span class="pl-c1">compile_or_warm_up_model</span>()
+
+	<span class="pl-s1">elapsed</span> <span class="pl-c1">=</span> <span class="pl-s1">time</span>.<span class="pl-c1">time</span>() <span class="pl-c1">-</span> <span class="pl-s1">start</span>
+	<span class="pl-s1">compile_time</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">compilation_config</span>.<span class="pl-c1">compilation_time</span>
+	<span class="pl-s1">encoder_compile_time</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">compilation_config</span>.<span class="pl-c1">encoder_compilation_time</span>
+	<span class="pl-k">if</span> <span class="pl-s1">encoder_compile_time</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">0</span>:
+		<span class="pl-s1">logger</span>.<span class="pl-c1">info_once</span>(
+			<span class="pl-s">"init engine (profile, create kv cache, warmup model) took "</span>
+			<span class="pl-s">"%.2f s (compilation: %.2f s — language_model: %.2f s, "</span>
+			<span class="pl-s">"encoder: %.2f s)"</span>,
+			<span class="pl-s1">elapsed</span>,
+			<span class="pl-s1">compile_time</span> <span class="pl-c1">+</span> <span class="pl-s1">encoder_compile_time</span>,
+			<span class="pl-s1">compile_time</span>,
+			<span class="pl-s1">encoder_compile_time</span>,
+		)
+	<span class="pl-k">elif</span> <span class="pl-s1">compile_time</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">0</span>:
+		<span class="pl-s1">logger</span>.<span class="pl-c1">info_once</span>(
+			<span class="pl-s">"init engine (profile, create kv cache, warmup model) took "</span>
+			<span class="pl-s">"%.2f s (compilation: %.2f s)"</span>,
+			<span class="pl-s1">elapsed</span>,
+			<span class="pl-s1">compile_time</span>,
+		)
+	<span class="pl-k">else</span>:
+		<span class="pl-s1">logger</span>.<span class="pl-c1">info_once</span>(
+			<span class="pl-s">"init engine (profile, create kv cache, warmup model) took %.2f s"</span>,
+			<span class="pl-s1">elapsed</span>,
+		)
+	<span class="pl-k">return</span> <span class="pl-s1">scheduler_kv_cache_config</span></pre></div>
+<ol>
+<li>
+<p><strong>主要作用</strong><br>
+<code class="notranslate">_initialize_kv_caches()</code> 在引擎启动阶段确定模型需要怎样的 KV Cache，测量可用 GPU 显存，计算 block 数量并创建实际的 KV Cache；随后预热或编译模型，并返回 Scheduler 使用的 <code class="notranslate">KVCacheConfig</code>。</p>
+</li>
+<li>
+<p><strong>输入（参数）</strong></p>
+</li>
+</ol>
+<ul>
+<li><code class="notranslate">self</code>：当前 <code class="notranslate">EngineCore</code>，通过其中的 <code class="notranslate">model_executor</code> 操作各个 worker。</li>
+<li><code class="notranslate">vllm_config</code>：包含模型最大长度、显存使用比例、block 大小、前缀缓存和分块预填充等配置。</li>
+</ul>
+<ol start="3">
+<li><strong>输出（改变了什么值）</strong><br>
+返回一个供 Scheduler 使用的 <code class="notranslate">KVCacheConfig</code>。执行过程中还会：</li>
+</ol>
+<ul>
+<li>记录可供 KV Cache 使用的 GPU 显存。</li>
+<li>确定 KV Cache 布局、block 数量和 block 大小。</li>
+<li>在 worker 的 GPU 上创建实际 KV Cache 张量。</li>
+<li>必要时缩小 <code class="notranslate">max_model_len</code>。</li>
+<li>对非因果注意力模型关闭不兼容的前缀缓存和分块预填充。</li>
+<li>编译或预热模型。</li>
+</ul>
+<ol start="4">
+<li><strong>术语解释</strong></li>
+</ol>
+<ul>
+<li>KV Cache spec：描述某个模型层需要什么样的 KV Cache，包括数据类型、block 大小和注意力类型等。函数先从所有 worker 收集这些规格。</li>
+<li><code class="notranslate">register_all_kvcache_specs()</code>：注册当前 vLLM 支持的 KV Cache 规格，使 EngineCore 能够识别不同模型和注意力层的缓存需求。</li>
+<li><code class="notranslate">get_kv_cache_specs()</code>：向所有 worker 查询模型各层需要的 KV Cache。返回值通常按 worker 和模型层组织。</li>
+<li>因果注意力：当前 token 只能看到自己和之前的 token，是普通自回归大模型最常见的注意力方式。</li>
+<li>非因果注意力：token 可以看到后面的 token。前缀缓存和分块预填充通常假设注意力是因果的，因此遇到非因果层时必须关闭这两个功能，避免计算错误。</li>
+<li>分块预填充：把很长的 prompt 拆成多个较小部分分轮处理，防止一个长 prompt 独占整轮 token 预算。</li>
+<li>前缀缓存：不同请求拥有相同 prompt 前缀时，可以复用已经计算好的 KV Cache block。</li>
+<li>KV Cache layout：KV Cache 张量在显存中的排列方式。不同模型、注意力后端或硬件可能支持不同布局。</li>
+<li><code class="notranslate">resolve_kv_cache_layout()</code>：综合配置、worker 支持能力和模型各层需求，选择一个可用的 KV Cache 布局。</li>
+<li>显存 profiling：先运行或分析一次模型，测量模型权重、临时张量等内容占用的峰值显存，再确定剩余多少显存可以分配给 KV Cache。</li>
+<li><code class="notranslate">determine_available_memory()</code>：让模型执行器计算每个 worker 可以用于 KV Cache 的显存大小。</li>
+<li>attention-free 模型：没有普通注意力 KV Cache 的模型。这类模型不需要为 KV Cache 预留显存，因此可用量直接记为 <code class="notranslate">0</code>。</li>
+<li>block：vLLM 分配 KV Cache 的基本单位，一个 block 可以保存固定数量 token 的 K/V 数据。</li>
+<li>block size：一个 block 能保存多少个 token。它不是显存字节数，而是以 token 数量表示的逻辑容量。</li>
+<li><code class="notranslate">num_gpu_blocks</code>：GPU KV Cache 池中一共创建多少个 block。数量越多，通常能同时保存更多请求或更长的上下文。</li>
+<li>KV Cache group：缓存规格相同的一组模型层。调度器可以按组统一管理这些层的 KV Cache。</li>
+<li><code class="notranslate">get_kv_cache_configs()</code>：根据 KV Cache 规格和可用显存，为每个 worker 生成具体的缓存分配配置。</li>
+<li><code class="notranslate">generate_scheduler_kv_cache_config()</code>：把各 worker 的配置整理成 Scheduler 能够使用的统一配置。</li>
+<li><code class="notranslate">max_model_len</code>：模型允许的最大上下文长度，包含输入 token 和输出 token。</li>
+<li>auto-fit：如果现有显存不足以支持原来的 <code class="notranslate">max_model_len</code>，配置生成过程可以自动把它缩小到可运行的长度。</li>
+<li><code class="notranslate">collective_rpc("update_max_model_len", ...)</code>：如果 <code class="notranslate">max_model_len</code> 被缩小，通知所有 worker 更新它们保存的长度配置，保证 EngineCore 和 worker 一致。</li>
+<li><code class="notranslate">update_kv_cache_capacity()</code>：根据最终 block 数量和 block 大小，更新引擎实际能够容纳的 KV Cache 容量。</li>
+<li><code class="notranslate">validate_block_size()</code>：检查最终 block 大小是否满足模型和硬件的限制。</li>
+<li><code class="notranslate">initialize_from_config()</code>：按照已经算好的配置在 worker 的 GPU 上创建真正的 KV Cache 张量。这是实际申请 KV Cache 显存的关键位置。</li>
+<li><code class="notranslate">compile_or_warm_up_model()</code>：预先编译模型或运行几次模拟输入，减少第一次真实请求时的额外开销。</li>
+<li>Scheduler 使用的 <code class="notranslate">KVCacheConfig</code>：告诉调度器共有多少 block、每个 block 多大以及有哪些缓存组。运行时调度器根据它给具体请求分配 block。</li>
+<li><code class="notranslate">@instrument(span_name="Prepare model")</code>：给整个初始化过程添加性能追踪区间，用于观察准备模型花费的时间，不改变功能。</li>
+</ul>
+<ol start="5">
+<li><strong>核心流程</strong></li>
+</ol>
+<pre class="notranslate"><code class="notranslate">记录开始时间
+    ↓
+注册并收集各层的 KV Cache spec
+    ↓
+检查是否存在非因果注意力
+    ├─ 有 → 关闭不兼容的前缀缓存和分块预填充
+    └─ 无 → 保持原配置
+    ↓
+选择 KV Cache layout
+    ↓
+测量可用于 KV Cache 的 GPU 显存
+    ↓
+生成各 worker 的 KV Cache 配置
+    ↓
+必要时缩小 max_model_len 并通知 worker
+    ↓
+生成 Scheduler 使用的统一 KVCacheConfig
+    ↓
+更新 num_gpu_blocks、block_size 和缓存容量
+    ↓
+在 GPU 上创建 KV Cache 张量
+    ↓
+编译或预热模型
+    ↓
+记录耗时并返回 KVCacheConfig
+</code></pre>
+<p>这里最关键的三个阶段是：</p>
+<pre class="notranslate"><code class="notranslate">模型需要多少缓存
+        ↓
+GPU 能提供多少显存
+        ↓
+最终创建多少 KV Cache block
+</code></pre>
+<ol start="6">
+<li><strong>在整个项目中的定位</strong><br>
+该函数位于 <code class="notranslate">EngineCore</code> 启动阶段，连接模型执行器与调度器：</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">LLM / AsyncLLM 创建引擎
+          ↓
+EngineCore.__init__()
+          ↓
+创建 ModelExecutor
+          ↓
+_initialize_kv_caches()
+    ├─ 获取模型各层的 KV Cache 规格
+    ├─ 测量可用于 KV Cache 的 GPU 显存
+    ├─ 计算 block 数量和布局
+    ├─ 在 GPU 上创建空的物理 KV Cache 张量池
+    └─ 返回 KVCacheConfig
+          ↓
+使用 KVCacheConfig 创建 Scheduler
+          ↓
+引擎初始化完成
+          ↓
+运行时 Scheduler.schedule()
+          ↓
+KVCacheManager.allocate_slots()
+把缓存池中的 block 分配给具体请求
+          ↓
+模型 Attention forward
+计算真实 K/V，并写入对应 block
+          ↓
+后续 decode 轮次
+读取前面各轮保存的 K/V
+</code></pre>
+<p>它解决的是“启动时创建多大的公共 KV Cache 显存池”；运行时给具体请求分配和回收 block，则由 Scheduler 和 KVCacheManager 负责。</p>
+<blockquote>
+<p>容易出现的误区是：<code class="notranslate">_initialize_kv_caches()</code> 只在引擎启动时调用一次，不会在每个请求或每轮 decode 时重新创建 KV 张量池。正确流程如下<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261015190924.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261015190924.png" alt="image.png" style="max-width: 100%;"></a></p>
+</blockquote>
+<h4>add request函数</h4>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-k">def</span> <span class="pl-en">add_request</span>(<span class="pl-s1">self</span>, <span class="pl-s1">request</span>: <span class="pl-smi">Request</span>, <span class="pl-s1">request_wave</span>: <span class="pl-smi">int</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>):
+	<span class="pl-s">"""Add request to the scheduler.</span>
+<span class="pl-s"></span>
+<span class="pl-s">	`request_wave`: indicate which wave of requests this is expected to</span>
+<span class="pl-s">	belong to in DP case</span>
+<span class="pl-s">	"""</span>
+	<span class="pl-c"># Validate the request_id type.</span>
+	<span class="pl-k">if</span> <span class="pl-c1">not</span> <span class="pl-en">isinstance</span>(<span class="pl-s1">request</span>.<span class="pl-c1">request_id</span>, <span class="pl-s1">str</span>):
+		<span class="pl-k">raise</span> <span class="pl-en">TypeError</span>(
+			<span class="pl-s">f"request_id must be a string, got <span class="pl-s1"><span class="pl-kos">{</span><span class="pl-en">type</span>(<span class="pl-s1">request</span>.<span class="pl-c1">request_id</span>)<span class="pl-kos">}</span></span>"</span>
+		)
+
+	<span class="pl-k">if</span> <span class="pl-s1">pooling_params</span> <span class="pl-c1">:=</span> <span class="pl-s1">request</span>.<span class="pl-c1">pooling_params</span>:
+		<span class="pl-s1">supported_pooling_tasks</span> <span class="pl-c1">=</span> [
+			<span class="pl-s1">task</span> <span class="pl-k">for</span> <span class="pl-s1">task</span> <span class="pl-c1">in</span> <span class="pl-s1">self</span>.<span class="pl-c1">get_supported_tasks</span>() <span class="pl-k">if</span> <span class="pl-s1">task</span> <span class="pl-c1">in</span> <span class="pl-c1">POOLING_TASKS</span>
+		]
+
+		<span class="pl-k">if</span> <span class="pl-s1">pooling_params</span>.<span class="pl-c1">task</span> <span class="pl-c1"><span class="pl-c1">not</span> <span class="pl-c1">in</span></span> <span class="pl-s1">supported_pooling_tasks</span>:
+			<span class="pl-k">raise</span> <span class="pl-en">ValueError</span>(
+				<span class="pl-s">f"Unsupported task: <span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">pooling_params</span>.<span class="pl-c1">task</span>!r<span class="pl-kos">}</span></span> "</span>
+				<span class="pl-s">f"Supported tasks: <span class="pl-s1"><span class="pl-kos">{</span><span class="pl-s1">supported_pooling_tasks</span><span class="pl-kos">}</span></span>"</span>
+			)
+
+	<span class="pl-k">if</span> <span class="pl-s1">request</span>.<span class="pl-c1">kv_transfer_params</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span> <span class="pl-c1">and</span> (
+		<span class="pl-c1">not</span> <span class="pl-s1">self</span>.<span class="pl-c1">scheduler</span>.<span class="pl-c1">get_kv_connector</span>()
+	):
+		<span class="pl-s1">logger</span>.<span class="pl-c1">warning</span>(
+			<span class="pl-s">"Got kv_transfer_params, but no KVConnector found. "</span>
+			<span class="pl-s">"Disabling KVTransfer for this request."</span>
+		)
+
+	<span class="pl-k">if</span> (
+		<span class="pl-s1">request</span>.<span class="pl-c1">ec_transfer_params</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>
+		<span class="pl-c1">and</span> <span class="pl-s1">self</span>.<span class="pl-c1">scheduler</span>.<span class="pl-c1">get_ec_connector</span>() <span class="pl-c1">is</span> <span class="pl-c1">None</span>
+	):
+		<span class="pl-s1">logger</span>.<span class="pl-c1">warning</span>(
+			<span class="pl-s">"Got ec_transfer_params, but no ECConnector found. "</span>
+			<span class="pl-s">"Disabling ECTransfer for this request."</span>
+		)
+
+	<span class="pl-s1">self</span>.<span class="pl-c1">scheduler</span>.<span class="pl-c1">add_request</span>(<span class="pl-s1">request</span>)
+	<span class="pl-k">if</span> <span class="pl-s1">request</span>.<span class="pl-c1">abort_immediately</span>:
+		<span class="pl-c"># Immediately abort so the connector's request_finished hook runs</span>
+		<span class="pl-c"># to free any pre-admission KV-transfer resources.</span>
+		<span class="pl-s1">self</span>.<span class="pl-c1">abort_requests</span>([<span class="pl-s1">request</span>.<span class="pl-c1">request_id</span>])</pre></div>
+<ol>
+<li>
+<p><strong>主要作用</strong><br>
+<code class="notranslate">EngineCore.add_request()</code> 对内部 <code class="notranslate">Request</code> 做最后一轮基础校验，然后交给 <code class="notranslate">Scheduler.add_request()</code>，使新请求进入调度器的等待队列；它只负责接收请求，不会立即执行模型计算或分配 KV Cache block。</p>
+</li>
+<li>
+<p><strong>输入（参数）</strong></p>
+</li>
+</ol>
+<ul>
+<li><code class="notranslate">request</code>：已经转换成 vLLM 内部格式的 <code class="notranslate">Request</code> 对象，包含请求 ID、token、采样或池化参数、优先级及缓存传输信息。</li>
+<li><code class="notranslate">request_wave</code>：数据并行场景中的请求批次编号，默认是 <code class="notranslate">0</code>；普通 <code class="notranslate">EngineCore</code> 不直接使用它，<code class="notranslate">DPEngineCoreProc</code> 会使用。</li>
+</ul>
+<ol start="3">
+<li>
+<p><strong>输出（改变了什么值）</strong><br>
+函数返回 <code class="notranslate">None</code>。正常情况下，它会把请求登记到 Scheduler 并加入 waiting 队列；如果 <code class="notranslate">abort_immediately=True</code>，则请求会在加入后立即被标记为取消，并释放相关的预接入资源。它不会修改模型权重，也不会在这里运行 GPU 模型。</p>
+</li>
+<li>
+<p><strong>术语解释</strong></p>
+</li>
+</ol>
+<ul>
+<li><code class="notranslate">Request</code>：EngineCore 和 Scheduler 内部使用的请求对象，包含模型计算与调度需要的全部信息。</li>
+<li><code class="notranslate">EngineCoreRequest</code>：前端传给 EngineCore 的标准请求对象。进入当前函数之前，通常已经由 <code class="notranslate">preprocess_add_request()</code> 转换成内部 <code class="notranslate">Request</code>。</li>
+<li><code class="notranslate">request_id</code>：请求的唯一内部编号，必须是字符串。Scheduler 通过它保存、查找、更新和取消请求。</li>
+<li><code class="notranslate">request_id</code> 类型检查：</li>
+</ul>
+<pre class="notranslate"><code class="notranslate">if not isinstance(request.request_id, str):
+    raise TypeError(...)
+</code></pre>
+<p>这是为了确保后续字典索引和请求状态管理使用统一的字符串 ID。</p>
+<ul>
+<li><code class="notranslate">PoolingParams</code>：embedding、分类或 rerank 等非生成任务使用的参数。</li>
+<li>pooling task：具体的池化任务类型。代码会检查它是否存在于当前模型的 <code class="notranslate">supported_pooling_tasks</code> 中。</li>
+<li><code class="notranslate">get_supported_tasks()</code>：查询当前模型实际支持哪些任务，防止把不兼容的请求送入 Scheduler。</li>
+<li><code class="notranslate">:=</code>：Python 的赋值表达式。下面的代码会同时取出 <code class="notranslate">request.pooling_params</code> 并判断它是否存在：</li>
+</ul>
+<pre class="notranslate"><code class="notranslate">if pooling_params := request.pooling_params:
+</code></pre>
+<ul>
+<li>Scheduler：负责管理 waiting 和 running 请求，并在每一轮决定哪些请求可以进入 GPU 计算。</li>
+<li>waiting 队列：新请求通常首先进入的队列。只有后续调用 <code class="notranslate">Scheduler.schedule()</code> 时，请求才可能被选中运行。</li>
+<li><code class="notranslate">Scheduler.add_request()</code>：登记请求并加入 waiting 队列；如果是可恢复的流式请求，也可能更新已有会话，而不是创建全新请求。</li>
+<li>请求入队与请求执行：<code class="notranslate">add_request()</code> 只让 Scheduler 知道该请求存在；真正的 KV Cache block 分配和模型计算发生在后续的 <code class="notranslate">schedule()</code> 和 <code class="notranslate">execute_model()</code> 中。</li>
+<li><code class="notranslate">kv_transfer_params</code>：描述请求如何从其他推理节点获取或传输 KV Cache 的信息，常用于 Prefill/Decode 分离等部署模式。</li>
+<li><code class="notranslate">KVConnector</code>：负责跨引擎或跨节点传输 KV Cache 的组件。如果请求带有 <code class="notranslate">kv_transfer_params</code>，但引擎没有配置 KVConnector，相关传输功能会被忽略并输出警告。</li>
+<li><code class="notranslate">ec_transfer_params</code>：描述编码缓存如何传输的信息，主要用于多模态 encoder cache 等场景。</li>
+<li><code class="notranslate">ECConnector</code>：负责跨引擎传输 encoder cache 的组件。没有配置它时，<code class="notranslate">ec_transfer_params</code> 无法生效。</li>
+<li><code class="notranslate">logger.warning()</code>：只记录配置不匹配的警告，不会因为缺少 Connector 直接拒绝整个请求。</li>
+<li><code class="notranslate">request_wave</code>：数据并行场景下的一组请求批次标识，用于协调多个 EngineCore 同时开始或结束一轮工作。基础 <code class="notranslate">EngineCore.add_request()</code> 中没有直接读取它，但数据并行子类会处理它。</li>
+<li><code class="notranslate">abort_immediately</code>：表示请求加入 Scheduler 后应立即取消。该设计看似多余，但可以确保 Connector 的“请求加入”和“请求结束”钩子都得到调用。</li>
+<li>预接入资源：某些 KV 传输请求在正式进入 Scheduler 前就可能准备通信或缓存资源。立即取消时，需要通过正常结束流程释放它们。</li>
+<li><code class="notranslate">abort_requests()</code>：通知 Scheduler 将指定请求标记为 <code class="notranslate">FINISHED_ABORTED</code>，并执行请求结束和资源释放逻辑。</li>
+<li>不分配 KV Cache block：新请求入 waiting 队列时通常还没有专属 block。只有被 <code class="notranslate">Scheduler.schedule()</code> 选中后，才通过 KVCacheManager 分配。</li>
+</ul>
+<ol start="5">
+<li>核心流程</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">接收内部 Request
+        ↓
+检查 request_id 是否为字符串
+        ├─ 否 → 抛出 TypeError
+        └─ 是
+             ↓
+如果是 pooling 请求
+        ↓
+检查模型是否支持对应 pooling task
+        ├─ 不支持 → 抛出 ValueError
+        └─ 支持
+             ↓
+检查 KV transfer 配置
+        ├─ 有参数但无 KVConnector → 记录警告
+        └─ 配置正常 → 继续
+             ↓
+检查 encoder cache transfer 配置
+        ├─ 有参数但无 ECConnector → 记录警告
+        └─ 配置正常 → 继续
+             ↓
+Scheduler.add_request(request)
+请求进入调度系统
+             ↓
+abort_immediately？
+        ├─ 是 → 立即取消并释放相关资源
+        └─ 否 → 留在 waiting 队列等待调度
+</code></pre>
+<ol start="6">
+<li><strong>在整个项目中的定位</strong><br>
+该函数位于“前端请求转换”和“Scheduler 正式调度”之间，是请求进入核心调度系统的最后入口：</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">LLM.generate() / 在线 API
+              ↓
+InputProcessor.process_inputs()
+生成 EngineCoreRequest
+              ↓
+LLMEngine / EngineCoreClient
+提交 EngineCoreRequest
+              ↓
+EngineCore.preprocess_add_request()
+EngineCoreRequest → Request
+              ↓
+EngineCore.add_request()              ← 当前函数
+校验请求并交给 Scheduler
+              ↓
+Scheduler.add_request()
+请求进入 waiting 队列
+              ↓
+EngineCore.step()
+              ↓
+Scheduler.schedule()
+选择本轮请求并分配 KV Cache block
+              ↓
+ModelExecutor.execute_model()
+执行 GPU 模型计算
+              ↓
+Scheduler.update_from_output()
+写回 token 和请求状态
+</code></pre>
+<p>因此，它解决的是“让一个已经准备好的内部请求安全进入 Scheduler”，而不是“立即运行这个请求”。</p>
+<h2>阶段性自检</h2>
+<p><strong>一、<code class="notranslate">EngineCore.step()</code> 的三步分别是什么？用一句话概括每一步的输入和输出。</strong><br>
+<code class="notranslate">EngineCore.step()</code> 的三步是：</p>
+<ol>
+<li>调度 <code class="notranslate">Scheduler.schedule()</code>：输入当前请求状态和可用 KV Cache/token 预算，输出本轮执行计划 <code class="notranslate">SchedulerOutput</code>，说明哪些请求计算多少 token、使用哪些缓存块</li>
+<li>执行 <code class="notranslate">ModelExecutor.execute_model()</code>：输入 <code class="notranslate">SchedulerOutput</code>，在 GPU 上完成模型前向与采样，输出包含新 token、logprob 或 pooling 结果的 <code class="notranslate">ModelRunnerOutput</code></li>
+<li>写回 <code class="notranslate">Scheduler.update_from_output()</code>：输入调度计划和模型结果，更新请求进度、判断结束并释放资源，输出供前端处理的 <code class="notranslate">EngineCoreOutputs</code></li>
+</ol>
+<p><strong>二、为什么离线模式默认走 <code class="notranslate">InprocClient</code>？多进程模式（<code class="notranslate">MPClient</code>）存在的意义是什么？</strong><br>
+离线模式通常使用 <code class="notranslate">InprocClient</code>，因为调用是同步的，前端可以直接调用同一进程中的 <code class="notranslate">EngineCore.step()</code>，无需 ZMQ、序列化和后台通信，开销更小、调用链更清晰，也更方便调试。<br>
+<code class="notranslate">MPClient</code> 的意义是把前端和 <code class="notranslate">EngineCore</code> 分到不同进程：EngineCore 可在后台持续运行，前端不会被模型计算阻塞，从而支持异步在线服务、多客户端、数据并行、故障隔离以及通信与计算重叠。注意，<code class="notranslate">InprocClient</code> 只表示 EngineCore 与前端同进程，不代表模型一定只使用一个 GPU 或一个 worker。</p>
+<p><strong>三、<code class="notranslate">EngineCore.__init__</code> 里为什么必须先 <code class="notranslate">_initialize_kv_caches</code> 再创建 <code class="notranslate">Scheduler</code>？如果反过来会怎样？</strong><br>
+因为 <code class="notranslate">Scheduler</code> 创建时必须知道 KV Cache 的最终配置：有多少 block、每个 block 多大、有哪些缓存组，以及实际支持的最大上下文长度。<br>
+<code class="notranslate">_initialize_kv_caches()</code> 会先：</p>
+<pre class="notranslate"><code class="notranslate">分析模型的 KV Cache 需求
+→ 测量可用 GPU 显存
+→ 确定布局和 block 数量
+→ 创建物理缓存池
+→ 必要时调整 max_model_len
+→ 返回 KVCacheConfig
+</code></pre>
+<p>然后 Scheduler 根据同一份 <code class="notranslate">KVCacheConfig</code> 创建 <code class="notranslate">KVCacheManager</code>，管理请求的 block 分配。<br>
+如果顺序反过来，Scheduler 只能使用未确定或过期的缓存配置，可能导致：</p>
+<ul>
+<li>Scheduler 认为可用 block 数与 GPU 实际分配不一致。</li>
+<li>逻辑 block table 与物理 KV Cache 布局不匹配。</li>
+<li>错误判断并发容量和最大上下文长度。</li>
+<li>最终出现分配失败、显存越界或 OOM。<br>
+所以必须先创建并确定“物理缓存池”，再创建负责管理它的 Scheduler。</li>
+</ul>
+<p><strong>四、<code class="notranslate">LLMEngine.step()</code> 和 <code class="notranslate">EngineCore.step()</code> 是两个不同的 <code class="notranslate">step</code>，它们各自做了什么？谁调谁？</strong><br>
+两者分工不同：</p>
+<ul>
+<li><code class="notranslate">EngineCore.step()</code> 是底层计算循环：执行“调度请求 → GPU 模型计算与采样 → 写回 token 和请求状态”，返回 <code class="notranslate">EngineCoreOutputs</code> 和本轮是否执行模型的标记。</li>
+<li><code class="notranslate">LLMEngine.step()</code> 是前端处理循环：通过 <code class="notranslate">EngineCoreClient</code> 获取底层输出，再进行反分词、停止字符串检查、统计记录，最后生成用户可见的 <code class="notranslate">RequestOutput</code>。<br>
+调用关系是：</li>
+</ul>
+<pre class="notranslate"><code class="notranslate">OfflineInferenceMixin._run_engine()
+        ↓
+LLMEngine.step()
+        ↓
+EngineCoreClient.get_output()
+        ↓
+EngineCore.step()
+        ↓
+返回 token 级 EngineCoreOutputs
+        ↓
+LLMEngine 的 OutputProcessor
+        ↓
+返回文本级 RequestOutput
+</code></pre>
+<p>在 <code class="notranslate">InprocClient</code> 模式中会直接调用 <code class="notranslate">EngineCore.step()</code>；多进程模式下，<code class="notranslate">EngineCore.step()</code> 由后台 EngineCore 进程运行，<code class="notranslate">LLMEngine.step()</code> 通过客户端通信获取结果。</p>
+<p><strong>五、<code class="notranslate">non_block=True</code> 让 <code class="notranslate">execute_model</code> 异步返回一个 <code class="notranslate">future</code>，这样做的收益是什么？</strong><br>
+<code class="notranslate">non_block=True</code> 的收益是：启动 GPU 模型计算后立即返回 <code class="notranslate">Future</code>，CPU 不必马上等待，可以同时准备语法约束 <code class="notranslate">grammar_bitmask</code> 等工作，让 CPU 处理与 GPU 计算发生重叠，减少空等时间。</p>
+<pre class="notranslate"><code class="notranslate">GPU：执行模型 forward
+CPU：同时计算 grammar bitmask
+             ↓
+future.result() 等待并汇合结果
+</code></pre>
+<p>在 batch queue 或流水线并行模式下，还可以进一步提前调度后续 batch，减少流水线空泡。需要注意，它并没有让整个 <code class="notranslate">EngineCore.step()</code> 变成异步；调用 <code class="notranslate">future.result()</code> 时仍会等待本轮模型执行完成。</p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
