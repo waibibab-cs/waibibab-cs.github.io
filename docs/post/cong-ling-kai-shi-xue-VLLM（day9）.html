@@ -1,0 +1,2518 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="本文基于的vllm commit hash为：`c16bb6068f70878fb8a2f7c4d6cda95cd03a778b`
+# day9-Scheduler(一)
+调度器在**每一个推理步**回答一个问题：
+**'这一步（一次 GPU 前向）应该让哪些请求参与，每个请求算多少个 token？'**
+这个问题的答案决定了：
+- GPU 利用率（batch 越大越划算）
+- 延迟（长 prompt 会不会把短请求堵住）
+- 显存占用（KV Cache 块够不够分）
+其中包含了三条核心机制：
+1. **连续批处理（Continuous Batching）**
+传统静态批处理的问题：一批请求必须同生共死。">
+<meta property="og:title" content="从零开始学VLLM（day9）">
+<meta property="og:description" content="本文基于的vllm commit hash为：`c16bb6068f70878fb8a2f7c4d6cda95cd03a778b`
+# day9-Scheduler(一)
+调度器在**每一个推理步**回答一个问题：
+**'这一步（一次 GPU 前向）应该让哪些请求参与，每个请求算多少个 token？'**
+这个问题的答案决定了：
+- GPU 利用率（batch 越大越划算）
+- 延迟（长 prompt 会不会把短请求堵住）
+- 显存占用（KV Cache 块够不够分）
+其中包含了三条核心机制：
+1. **连续批处理（Continuous Batching）**
+传统静态批处理的问题：一批请求必须同生共死。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/cong-ling-kai-shi-xue-VLLM%EF%BC%88day9%EF%BC%89.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>从零开始学VLLM（day9）</title>
+<link href="//unpkg.com/@wooorm/starry-night@2.1.1/style/both.css" rel="stylesheet" />
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+.copy-feedback {
+    display: none;
+    position: absolute;
+    top: 10px;
+    right: 50px;
+    color: var(--color-fg-on-emphasis);
+    background-color: var(--color-fg-muted);
+    border-radius: 3px;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">从零开始学VLLM（day9）</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/90" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>本文基于的vllm commit hash为：<code class="notranslate">c16bb6068f70878fb8a2f7c4d6cda95cd03a778b</code></p>
+<h1>day9-Scheduler(一)</h1>
+<p>调度器在<strong>每一个推理步</strong>回答一个问题：<br>
+<strong>"这一步（一次 GPU 前向）应该让哪些请求参与，每个请求算多少个 token？"</strong><br>
+这个问题的答案决定了：</p>
+<ul>
+<li>GPU 利用率（batch 越大越划算）</li>
+<li>延迟（长 prompt 会不会把短请求堵住）</li>
+<li>显存占用（KV Cache 块够不够分）<br>
+其中包含了三条核心机制：</li>
+</ul>
+<ol>
+<li><strong>连续批处理（Continuous Batching）</strong><br>
+传统静态批处理的问题：一批请求必须同生共死。<br>
+5 个请求里 4 个都生成完了，第 5 个还要生成 500 个 token，<br>
+GPU 就得陪跑 500 步，大部分算力浪费在 padding 上。<br>
+连续批处理解决方式：每一步都重新组 batch。</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">静态批处理（浪费）：
+步 1: [A B C D E]   ← A~D 在第 3 步就结束了
+步 2: [A B C D E]
+步 3: [A B C D E]
+步 4: [E _ _ _ _]   ← 只有 E 还在生成，其余位置空转 😱
+步 5: [E _ _ _ _]
+...
+
+步 500: [E _ _ _ _]
+连续批处理（vLLM）：
+步 1: [A B C D E]
+步 2: [A B C D E]
+步 3: [A B C D E]   ← A~D 结束，立刻腾出位置
+步 4: [E F G H I]   ← ★ waiting 队列里的新请求马上补进来
+步 5: [E F G H I]
+</code></pre>
+<p>在代码里的体现：<code class="notranslate">Scheduler.schedule()</code> 分两个阶段——</p>
+<ul>
+<li>先遍历 <code class="notranslate">running</code> 队列（已经在跑的）</li>
+<li>再从 <code class="notranslate">waiting</code> 队列提拔新请求上来填补预算</li>
+</ul>
+<ol start="2">
+<li><strong>分块预填充（Chunked Prefill）</strong><br>
+问题：一个 8000 token 的长 prompt，prefill 一次算完会占满一步的全部预算，导致同一时刻的 decode 请求全部卡住，延迟飙升。<br>
+解决：把长 prompt 切成几块，分几步算。</li>
+</ol>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-c"># V1 默认 enable_chunked_prefill=True</span>
+<span class="pl-c"># 一个 8000 token 的 prompt，token_budget=2048 时：</span>
+<span class="pl-s1">步</span> <span class="pl-c1">1</span>: <span class="pl-s1">算</span> <span class="pl-s1">prompt</span>[<span class="pl-c1">0</span>:<span class="pl-c1">2048</span>]      <span class="pl-c1">+</span> <span class="pl-s1">其他请求的</span> <span class="pl-s1">decode</span>
+<span class="pl-s1">步</span> <span class="pl-c1">2</span>: <span class="pl-s1">算</span> <span class="pl-s1">prompt</span>[<span class="pl-c1">2048</span>:<span class="pl-c1">4096</span>]   <span class="pl-c1">+</span> <span class="pl-s1">其他请求的</span> <span class="pl-s1">decode</span>
+<span class="pl-s1">步</span> <span class="pl-c1">3</span>: <span class="pl-s1">算</span> <span class="pl-s1">prompt</span>[<span class="pl-c1">4096</span>:<span class="pl-c1">6144</span>]   <span class="pl-c1">+</span> <span class="pl-s1">其他请求的</span> <span class="pl-s1">decode</span>
+<span class="pl-s1">步</span> <span class="pl-c1">4</span>: <span class="pl-s1">算</span> <span class="pl-s1">prompt</span>[<span class="pl-c1">6144</span>:<span class="pl-c1">8000</span>]   → <span class="pl-s1">prefill</span> <span class="pl-s1">完成</span>，<span class="pl-s1">进入</span> <span class="pl-s1">decode</span>
+<span class="pl-s1">步</span> <span class="pl-c1">5</span>: <span class="pl-s1">生成第</span> <span class="pl-c1">1</span> <span class="pl-s1">个</span> <span class="pl-s1">token</span></pre></div>
+<p>这样长 prompt 和短请求可以混在同一批里，互相不阻塞。</p>
+<ol start="3">
+<li><strong>抢占（Preemption）</strong><br>
+问题：显存不够了。running 里的请求越来越多，KV Cache 块不够分。<br>
+解决：把某个"受害者"请求踢出去</li>
+</ol>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-c"># ★ 重要：V1 只有 RECOMPUTE（重算）一种抢占，没有 SWAP（换出到 CPU）</span>
+<span class="pl-c">#   V0 有 SWAP，V1 删掉了。老教程讲 SWAP 的，在这个版本里是错的。</span>
+<span class="pl-en">_preempt_request</span>(<span class="pl-s1">request</span>):
+    <span class="pl-c1">1.</span> <span class="pl-s1">释放它所有的</span> <span class="pl-c1">KV</span> <span class="pl-v">Cache</span> <span class="pl-s1">block</span>
+    <span class="pl-c1">2.</span> <span class="pl-s1">num_computed_tokens</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>        <span class="pl-c"># ← 清零！之前的计算白算了</span>
+    <span class="pl-c1">3.</span> <span class="pl-s1">status</span> <span class="pl-c1">=</span> <span class="pl-c1">PREEMPTED</span>
+    <span class="pl-c1">4.</span> <span class="pl-s1">塞回</span> <span class="pl-s1">waiting</span> <span class="pl-s1">队列的</span><span class="pl-c1">**</span><span class="pl-s1">队头</span><span class="pl-c1">**</span>（<span class="pl-s1">优先重新调度</span>）</pre></div>
+<p>代价：重算。被抢占的请求下次要从头 prefill。<br>
+所以抢占是"不得已而为之"，vLLM 会尽量选影响最小的受害者。</p>
+<blockquote>
+<p>💡 <strong>这解释了为什么"显存不够"的报错在 vLLM 里不常见，但"跑得慢"很常见</strong>：<br>
+显存不够时 vLLM 不会崩，而是默默抢占 + 重算，表现为吞吐下降。</p>
+</blockquote>
+<h2>request.py</h2>
+<p><strong>路径</strong>：/home/dongmingzhe/vllm/vllm/v1/request.py<br>
+<strong>简介</strong>：<code class="notranslate">request.py</code> 定义了 vLLM 核心调度器使用的“请求状态模型”：它把输入 token、生成参数、已生成 token、计算进度、KV Cache 信息和生命周期状态集中保存在一个对象中，供 Scheduler 在多轮推理中持续更新。主要包含以下几个类：</p>
+<ul>
+<li><code class="notranslate">Request</code>：核心请求对象，保存输入 token、输出 token、采样/池化参数、优先级、多模态特征、已计算 token 数、抢占次数和缓存哈希等运行状态。<strong>信息最完整，会在调度和生成过程中不断变化</strong>。</li>
+<li><code class="notranslate">StreamingUpdate</code>：可恢复流式会话的新一段输入，只保留追加 token、多模态特征、到达时间和生成长度等必要字段。<strong>是对已有 <code class="notranslate">Request</code> 的轻量增量更新，不代表一个完整新请求</strong>。</li>
+<li><code class="notranslate">RequestStatus</code>：请求状态枚举，描述请求处于等待、运行、抢占或各种结束状态。<strong>只表示生命周期状态，不保存请求内容</strong>。<br>
+请求的主要状态流转是：</li>
+</ul>
+<pre class="notranslate"><code class="notranslate">WAITING
+   ↓
+RUNNING
+   ├─→ PREEMPTED → WAITING
+   └─→ FINISHED_STOPPED / FINISHED_LENGTH_CAPPED
+       / FINISHED_ABORTED / FINISHED_ERROR
+</code></pre>
+<p>此外，<code class="notranslate">_FINISHED_REASON_MAP</code> 负责把内部的 <code class="notranslate">RequestStatus</code> 转换成用户最终看到的 <code class="notranslate">stop</code>、<code class="notranslate">length</code>、<code class="notranslate">abort</code>、<code class="notranslate">error</code> 等结束原因。<code class="notranslate">Request</code> 是 EngineCore 和 Scheduler 内部使用的对象，不同于前端传入的 <code class="notranslate">EngineCoreRequest</code>，也不同于最终返回用户的 <code class="notranslate">RequestOutput</code>。</p>
+<p><strong>本小节阅读的内容</strong>：</p>
+<ul>
+<li>看<code class="notranslate">Request</code>类</li>
+<li>略看<code class="notranslate">RequestStatus</code>类</li>
+</ul>
+<h3>Request类</h3>
+<p><strong>作用</strong>：<code class="notranslate">Request</code> 是 vLLM Scheduler 内部使用的核心可变请求对象，它把一次推理所需的输入 token、采样或池化参数、LoRA、多模态信息、优先级与缓存哈希，以及运行过程中不断变化的请求状态、已计算 token 数、已生成 token 和抢占次数集中保存起来，使调度器能够跨多轮 <code class="notranslate">step()</code> 持续调度、更新并最终结束该请求。</p>
+<h4>构造函数</h4>
+<h5>part1.参数列表</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-k">class</span> <span class="pl-v">Request</span>:
+    <span class="pl-k">def</span> <span class="pl-en">__init__</span>(
+        <span class="pl-s1">self</span>,
+        <span class="pl-c"># 请求的内部唯一编号，用于调度、查找、更新和取消请求</span>
+        <span class="pl-s1">request_id</span>: <span class="pl-smi">str</span>,
+        <span class="pl-c"># prompt 分词后的 token ID；使用纯 embedding 输入时可以是 None</span>
+        <span class="pl-s1">prompt_token_ids</span>: <span class="pl-s1">list</span>[<span class="pl-smi">int</span>] <span class="pl-c1">|</span> <span class="pl-c1">None</span>,
+        <span class="pl-c"># 采样参数，例如 max_tokens、温度和停止条件</span>
+        <span class="pl-s1">sampling_params</span>: <span class="pl-v">SamplingParams</span> <span class="pl-c1">|</span> <span class="pl-c1">None</span>,
+        <span class="pl-c"># embedding、分类等池化任务的参数；通常与 sampling_params 二选一</span>
+        <span class="pl-s1">pooling_params</span>: <span class="pl-v">PoolingParams</span> <span class="pl-c1">|</span> <span class="pl-c1">None</span>,
+        <span class="pl-c"># 请求所属的前端客户端编号，多客户端模式下用于把结果送回正确客户端</span>
+        <span class="pl-s1">client_index</span>: <span class="pl-smi">int</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>,
+        <span class="pl-c"># 请求到达引擎的时间；未提供时使用当前时间，可用于调度和性能统计</span>
+        <span class="pl-s1">arrival_time</span>: <span class="pl-s1">float</span> <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+        <span class="pl-c"># 已经计算好的 prompt 向量，可以代替或配合 token ID 输入</span>
+        <span class="pl-s1">prompt_embeds</span>: <span class="pl-s1">torch</span>.<span class="pl-c1">Tensor</span> <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+        <span class="pl-c"># 混合输入的位置标记；每个布尔值表示该位置来自 token ID 还是 embedding</span>
+        <span class="pl-s1">prompt_is_token_ids</span>: <span class="pl-s1">list</span>[<span class="pl-smi">bool</span>] <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+        <span class="pl-c"># 图片、视频等多模态输入经过预处理后的特征及位置信息</span>
+        <span class="pl-s1">mm_features</span>: <span class="pl-s1">list</span>[<span class="pl-smi">MultiModalFeatureSpec</span>] <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+        <span class="pl-s1">lora_request</span>: <span class="pl-s">"LoRARequest | None"</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+        <span class="pl-c"># 加入前缀缓存哈希的额外字符串，用于隔离本来不应共享缓存的请求</span>
+        <span class="pl-s1">cache_salt</span>: <span class="pl-s1">str</span> <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+        <span class="pl-c"># 请求的调度优先级；调度器可据此决定请求执行顺序</span>
+        <span class="pl-s1">priority</span>: <span class="pl-smi">int</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>,
+        <span class="pl-s1">trace_headers</span>: <span class="pl-v">Mapping</span>[<span class="pl-smi">str</span>, <span class="pl-smi">str</span>] <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+        <span class="pl-c"># 计算 token block 哈希的函数，用于判断请求之间能否复用前缀缓存</span>
+        <span class="pl-s1">block_hasher</span>: <span class="pl-v">Callable</span>[[<span class="pl-s">"Request"</span>], <span class="pl-s1">list</span>[<span class="pl-s">"BlockHash"</span>]] <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+        <span class="pl-s1">resumable</span>: <span class="pl-smi">bool</span> <span class="pl-c1">=</span> <span class="pl-c1">False</span>,
+        <span class="pl-c"># 请求所属的会话编号，用于关联同一流式会话中的多段请求</span>
+        <span class="pl-s1">session_id</span>: <span class="pl-s1">str</span> <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+        <span class="pl-s1">reasoning_ended</span>: <span class="pl-s1">bool</span> <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+        <span class="pl-s1">reasoning_parser_kwargs</span>: <span class="pl-s1">dict</span>[<span class="pl-smi">str</span>, <span class="pl-smi">Any</span>] <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+        <span class="pl-c"># 是否在请求加入 Scheduler 后立即取消，主要用于触发资源清理流程</span>
+        <span class="pl-s1">abort_immediately</span>: <span class="pl-smi">bool</span> <span class="pl-c1">=</span> <span class="pl-c1">False</span>,
+    ) <span class="pl-c1">-&gt;</span> <span class="pl-c1">None</span>:</pre></div>
+<p>需要重点记住的是：</p>
+<pre class="notranslate"><code class="notranslate">request_id              标识请求
+prompt_token_ids        输入内容
+sampling/pooling_params 决定任务类型和行为
+priority                影响调度顺序
+block_hasher             服务于前缀缓存
+resumable/session_id     服务于流式会话
+</code></pre>
+<h5>part2.保存请求身份和任务配置</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">request_id</span> <span class="pl-c1">=</span> <span class="pl-s1">request_id</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">client_index</span> <span class="pl-c1">=</span> <span class="pl-s1">client_index</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">priority</span> <span class="pl-c1">=</span> <span class="pl-s1">priority</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">sampling_params</span> <span class="pl-c1">=</span> <span class="pl-s1">sampling_params</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">pooling_params</span> <span class="pl-c1">=</span> <span class="pl-s1">pooling_params</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">lora_request</span> <span class="pl-c1">=</span> <span class="pl-s1">lora_request</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">structured_output_request</span> <span class="pl-c1">=</span> 
+<span class="pl-s1">self</span>.<span class="pl-c1">arrival_time</span> <span class="pl-c1">=</span> <span class="pl-s1">arrival_time</span> <span class="pl-k">if</span> <span class="pl-s1">arrival_time</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span> <span class="pl-k">else</span> <span class="pl-s1">time</span>.<span class="pl-c1">time</span>()</pre></div>
+<p>这一部分保存请求最基本的信息：</p>
+<ul>
+<li>用 ID 区分请求。</li>
+<li>用优先级和到达时间辅助调度。</li>
+<li>保存生成、池化和 LoRA 参数。</li>
+<li>记录请求来自哪个客户端。</li>
+</ul>
+<h5>part3.初始化结构化输出和请求状态</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">structured_output_request</span> <span class="pl-c1">=</span> <span class="pl-v">StructuredOutputRequest</span>.<span class="pl-c1">from_sampling_params</span>(
+	<span class="pl-s1">sampling_params</span>
+)
+<span class="pl-k">if</span> <span class="pl-s1">self</span>.<span class="pl-c1">structured_output_request</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+	<span class="pl-s1">self</span>.<span class="pl-c1">structured_output_request</span>.<span class="pl-c1">reasoning_ended</span> <span class="pl-c1">=</span> <span class="pl-s1">reasoning_ended</span>
+	<span class="pl-s1">self</span>.<span class="pl-c1">structured_output_request</span>.<span class="pl-c1">reasoning_parser_kwargs</span> <span class="pl-c1">=</span> (
+		<span class="pl-s1">reasoning_parser_kwargs</span>
+)
+<span class="pl-s1">self</span>.<span class="pl-c1">status</span> <span class="pl-c1">=</span> <span class="pl-v">RequestStatus</span>.<span class="pl-c1">WAITING</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">events</span>: <span class="pl-s1">list</span>[<span class="pl-smi">EngineCoreEvent</span>] <span class="pl-c1">=</span> []
+<span class="pl-s1">self</span>.<span class="pl-c1">stop_reason</span>: <span class="pl-s1">int</span> <span class="pl-c1">|</span> <span class="pl-s1">str</span> <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span></pre></div>
+<p>如果生成参数要求 JSON、语法约束等结构化输出，就创建对应的约束对象。<br>
+普通请求初始状态是 <code class="notranslate">WAITING</code>；如果需要先编译结构化语法，状态会变成：</p>
+<pre class="notranslate"><code class="notranslate">WAITING_FOR_STRUCTURED_OUTPUT_GRAMMAR
+</code></pre>
+<h5>part4.区分生成任务与池化任务</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-k">if</span> <span class="pl-s1">pooling_params</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+	<span class="pl-c"># Pooling models.</span>
+	<span class="pl-s1">self</span>.<span class="pl-c1">max_tokens</span> <span class="pl-c1">=</span> <span class="pl-c1">1</span>
+<span class="pl-k">elif</span> <span class="pl-s1">sampling_params</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+	<span class="pl-c"># Generative models.</span>
+	<span class="pl-k">assert</span> <span class="pl-s1">sampling_params</span>.<span class="pl-c1">max_tokens</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>
+	<span class="pl-s1">self</span>.<span class="pl-c1">max_tokens</span> <span class="pl-c1">=</span> <span class="pl-s1">sampling_params</span>.<span class="pl-c1">max_tokens</span>
+	<span class="pl-k">if</span> <span class="pl-s1">self</span>.<span class="pl-c1">structured_output_request</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+		<span class="pl-s1">self</span>.<span class="pl-c1">status</span> <span class="pl-c1">=</span> <span class="pl-v">RequestStatus</span>.<span class="pl-c1">WAITING_FOR_STRUCTURED_OUTPUT_GRAMMAR</span>
+
+	<span class="pl-k">if</span> <span class="pl-s1">sampling_params</span>.<span class="pl-c1">extra_args</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+		<span class="pl-s1">self</span>.<span class="pl-c1">kv_transfer_params</span> <span class="pl-c1">=</span> <span class="pl-s1">sampling_params</span>.<span class="pl-c1">extra_args</span>.<span class="pl-c1">get</span>(
+			<span class="pl-s">"kv_transfer_params"</span>
+		)
+		<span class="pl-s1">self</span>.<span class="pl-c1">ec_transfer_params</span> <span class="pl-c1">=</span> <span class="pl-s1">sampling_params</span>.<span class="pl-c1">extra_args</span>.<span class="pl-c1">get</span>(
+			<span class="pl-s">"ec_transfer_params"</span>
+		)
+		<span class="pl-s1">self</span>.<span class="pl-c1">kv_cache_report_mode</span> <span class="pl-c1">=</span> <span class="pl-s1">sampling_params</span>.<span class="pl-c1">extra_args</span>.<span class="pl-c1">get</span>(
+			<span class="pl-s">"kv_cache_report_mode"</span>, <span class="pl-s">"incremental"</span>
+		)
+	<span class="pl-k">else</span>:
+		<span class="pl-s1">self</span>.<span class="pl-c1">kv_cache_report_mode</span> <span class="pl-c1">=</span> <span class="pl-s">"incremental"</span>
+<span class="pl-k">else</span>:
+	<span class="pl-k">raise</span> <span class="pl-en">ValueError</span>(<span class="pl-s">"sampling_params and pooling_params can't both be unset"</span>)</pre></div>
+<p>这里确定请求属于哪类任务：</p>
+<ul>
+<li>pooling 请求只需要一次模型结果，所以 <code class="notranslate">max_tokens = 1</code>。</li>
+<li>生成请求使用 <code class="notranslate">SamplingParams.max_tokens</code>。</li>
+<li>两种参数都没有时，请求无法执行，直接报错。<br>
+同时还会从生成参数中读取 KV Cache 和 encoder cache 的传输配置。</li>
+</ul>
+<h5>part5.初始化prompt和token状态</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">prompt_token_ids</span> <span class="pl-c1">=</span> <span class="pl-s1">prompt_token_ids</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">prompt_embeds</span> <span class="pl-c1">=</span> <span class="pl-s1">prompt_embeds</span>
+<span class="pl-c"># Per-position mask used in mixed-mode (chat completion with</span>
+<span class="pl-c"># prompt_embeds). `None` except when both `prompt_token_ids` and</span>
+<span class="pl-c"># `prompt_embeds` are set and their positions are interleaved.</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">prompt_is_token_ids</span> <span class="pl-c1">=</span> <span class="pl-s1">prompt_is_token_ids</span>
+<span class="pl-c"># Cache per-block prompt-embed hashes to avoid rehashing the same</span>
+<span class="pl-c"># tensor slices when generating extra keys.</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">_prompt_embeds_per_block_hashes</span>: <span class="pl-s1">dict</span>[<span class="pl-s1">tuple</span>[<span class="pl-smi">int</span>, <span class="pl-smi">int</span>], <span class="pl-smi">bytes</span>] <span class="pl-c1">=</span> {}
+<span class="pl-s1">self</span>.<span class="pl-c1">num_prompt_tokens</span> <span class="pl-c1">=</span> <span class="pl-en">length_from_prompt_token_ids_or_embeds</span>(
+	<span class="pl-s1">prompt_token_ids</span>, <span class="pl-s1">prompt_embeds</span>
+)
+<span class="pl-s1">self</span>.<span class="pl-c1">_output_token_ids</span>: <span class="pl-s1">list</span>[<span class="pl-smi">int</span>] <span class="pl-c1">=</span> []</pre></div>
+<p>输入可以是：</p>
+<ul>
+<li><code class="notranslate">prompt_token_ids</code>：分词后的 token ID。</li>
+<li><code class="notranslate">prompt_embeds</code>：已经计算好的输入向量。</li>
+<li>混合输入：部分位置使用 token，部分位置使用 embedding。<br>
+随后建立两个重要列表：</li>
+</ul>
+<pre class="notranslate"><code class="notranslate">_output_token_ids：只保存模型新生成的 token
+_all_token_ids：保存 prompt token 和生成 token
+</code></pre>
+<h5>part6.初始化调度进度</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">spec_token_ids</span> <span class="pl-c1">=</span> []
+<span class="pl-s1">self</span>.<span class="pl-c1">num_computed_tokens</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">num_output_placeholders</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">num_in_flight_tokens</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">num_preemptions</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span></pre></div>
+<p>这些字段记录请求在多轮调度中的进度：</p>
+<ul>
+<li><code class="notranslate">num_computed_tokens</code>：已经完成计算的 token 数。</li>
+<li><code class="notranslate">spec_token_ids</code>：投机解码产生的候选 token。</li>
+<li><code class="notranslate">num_in_flight_tokens</code>：已经提交计算但结果尚未处理的 token。</li>
+<li><code class="notranslate">num_preemptions</code>：请求被调度器抢占的次数。<br>
+其他 stale token、下一次可解码步骤等字段，主要服务于异步调度和流水线并行，入门阶段知道它们用于防止状态错乱即可。</li>
+</ul>
+<h5>part7.保存多模态、只读视图和运行统计</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">mm_features</span> <span class="pl-c1">=</span> <span class="pl-s1">mm_features</span> <span class="pl-c1">or</span> []
+
+<span class="pl-s1">self</span>.<span class="pl-c1">output_token_ids</span> <span class="pl-c1">=</span> <span class="pl-en">ConstantList</span>(<span class="pl-s1">self</span>.<span class="pl-c1">_output_token_ids</span>)
+<span class="pl-s1">self</span>.<span class="pl-c1">all_token_ids</span> <span class="pl-c1">=</span> <span class="pl-en">ConstantList</span>(<span class="pl-s1">self</span>.<span class="pl-c1">_all_token_ids</span>)
+
+<span class="pl-s1">self</span>.<span class="pl-c1">trace_headers</span> <span class="pl-c1">=</span> <span class="pl-s1">trace_headers</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">session_id</span> <span class="pl-c1">=</span> <span class="pl-s1">session_id</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">prefill_stats</span> <span class="pl-c1">=</span> <span class="pl-en">PrefillStats</span>()
+<span class="pl-s1">self</span>.<span class="pl-c1">spec_decode_metrics</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span></pre></div>
+<p>这里保存：</p>
+<ul>
+<li>图片等多模态特征。</li>
+<li>请求追踪和会话信息。</li>
+<li>prefill 与投机解码统计。<br>
+<code class="notranslate">ConstantList</code> 提供只读视图，避免外部直接修改 token 列表，导致 <code class="notranslate">_output_token_ids</code> 和 <code class="notranslate">_all_token_ids</code> 不一致。</li>
+</ul>
+<h5>part8.初始化前缀缓存和流式请求状态</h5>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">block_hashes</span> <span class="pl-c1">=</span> []
+<span class="pl-s1">self</span>.<span class="pl-c1">_block_hasher</span> <span class="pl-c1">=</span> <span class="pl-s1">block_hasher</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">update_block_hashes</span>()
+
+<span class="pl-s1">self</span>.<span class="pl-c1">skip_reading_prefix_cache</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">get_skip_reading_prefix_cache</span>()
+
+<span class="pl-s1">self</span>.<span class="pl-c1">resumable</span> <span class="pl-c1">=</span> <span class="pl-s1">resumable</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">streaming_queue</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">abort_immediately</span> <span class="pl-c1">=</span> <span class="pl-s1">abort_immediately</span></pre></div>
+<p><code class="notranslate">block_hashes</code> 用于判断当前 prompt 的完整 block 是否与其他请求相同，从而支持前缀缓存复用。<br>
+流式相关字段表示：</p>
+<ul>
+<li>请求是否允许追加输入或恢复。</li>
+<li>后续输入更新存放在哪里。</li>
+<li>请求加入 Scheduler 后是否需要立即取消。<br>
+整体初始化过程可以概括为：</li>
+</ul>
+<pre class="notranslate"><code class="notranslate">保存请求身份
+    ↓
+确定生成或池化任务
+    ↓
+初始化请求状态
+    ↓
+整理 prompt、token 和 embedding
+    ↓
+初始化调度进度
+    ↓
+准备多模态和统计信息
+    ↓
+计算前缀缓存哈希
+    ↓
+准备流式请求状态
+</code></pre>
+<p>最需要掌握的核心字段是：</p>
+<pre class="notranslate"><code class="notranslate">request_id             请求身份
+status                 当前生命周期状态
+prompt_token_ids       输入 token
+output_token_ids       已生成 token
+num_computed_tokens    已计算进度
+max_tokens             最大生成量
+block_hashes           前缀缓存依据
+</code></pre>
+<h4>from engine core request函数</h4>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-en">@<span class="pl-s1">classmethod</span></span>
+<span class="pl-k">def</span> <span class="pl-en">from_engine_core_request</span>(
+	<span class="pl-s1">cls</span>,
+	<span class="pl-s1">request</span>: <span class="pl-smi">EngineCoreRequest</span>,
+	<span class="pl-s1">block_hasher</span>: <span class="pl-v">Callable</span>[[<span class="pl-s">"Request"</span>], <span class="pl-s1">list</span>[<span class="pl-s">"BlockHash"</span>]] <span class="pl-c1">|</span> <span class="pl-c1">None</span>,
+) <span class="pl-c1">-&gt;</span> <span class="pl-s">"Request"</span>:
+	<span class="pl-k">return</span> <span class="pl-en">cls</span>(
+		<span class="pl-s1">request_id</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">request_id</span>,
+		<span class="pl-s1">client_index</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">client_index</span>,
+		<span class="pl-s1">prompt_token_ids</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">prompt_token_ids</span>,
+		<span class="pl-s1">prompt_embeds</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">prompt_embeds</span>,
+		<span class="pl-s1">prompt_is_token_ids</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">prompt_is_token_ids</span>,
+		<span class="pl-s1">mm_features</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">mm_features</span>,
+		<span class="pl-s1">sampling_params</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">sampling_params</span>,
+		<span class="pl-s1">pooling_params</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">pooling_params</span>,
+		<span class="pl-s1">arrival_time</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">arrival_time</span>,
+		<span class="pl-s1">lora_request</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">lora_request</span>,
+		<span class="pl-s1">cache_salt</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">cache_salt</span>,
+		<span class="pl-s1">priority</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">priority</span>,
+		<span class="pl-s1">trace_headers</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">trace_headers</span>,
+		<span class="pl-s1">block_hasher</span><span class="pl-c1">=</span><span class="pl-s1">block_hasher</span>,
+		<span class="pl-s1">resumable</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">resumable</span>,
+		<span class="pl-s1">session_id</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">session_id</span>,
+		<span class="pl-s1">reasoning_ended</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">reasoning_ended</span>,
+		<span class="pl-s1">reasoning_parser_kwargs</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">reasoning_parser_kwargs</span>,
+		<span class="pl-s1">abort_immediately</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">abort_immediately</span>,
+	)</pre></div>
+<ol>
+<li>
+<p><strong>主要作用</strong><br>
+<code class="notranslate">from_engine_core_request()</code> 把前端传来的 <code class="notranslate">EngineCoreRequest</code> 转换成 Scheduler 内部使用的 <code class="notranslate">Request</code>，并初始化请求状态、token 进度、结构化输出信息和前缀缓存哈希等运行数据。</p>
+</li>
+<li>
+<p><strong>输入（参数）</strong></p>
+</li>
+</ol>
+<ul>
+<li><code class="notranslate">cls</code>：当前类，这里就是 <code class="notranslate">Request</code>，由 <code class="notranslate">@classmethod</code> 自动传入。</li>
+<li><code class="notranslate">request</code>：待转换的 <code class="notranslate">EngineCoreRequest</code>，包含输入 token、采样参数、多模态特征和请求元数据。</li>
+<li><code class="notranslate">block_hasher</code>：可选的 block 哈希计算函数，用于前缀缓存。</li>
+</ul>
+<ol>
+<li>
+<p><strong>输出（改变了什么值）</strong><br>
+返回一个新的 <code class="notranslate">Request</code> 对象，不修改原来的 <code class="notranslate">EngineCoreRequest</code>。新对象会复制或引用其中的请求数据，并额外初始化 <code class="notranslate">WAITING</code> 状态、已生成 token 列表、已计算 token 数和 block 哈希等内部运行状态；它还没有进入 Scheduler。</p>
+</li>
+<li>
+<p><strong>术语解释</strong></p>
+</li>
+</ol>
+<ul>
+<li><code class="notranslate">@classmethod</code>：类方法装饰器。调用时 Python 自动传入类本身 <code class="notranslate">cls</code>，因此可以通过 <code class="notranslate">cls(...)</code> 创建对象，而不必把类名写死为 <code class="notranslate">Request(...)</code>。</li>
+<li><code class="notranslate">cls</code>：当前类。在这里通常就是 <code class="notranslate">Request</code>，所以：</li>
+</ul>
+<pre class="notranslate"><code class="notranslate">return cls(...)
+</code></pre>
+<p>相当于：</p>
+<pre class="notranslate"><code class="notranslate">return Request(...)
+</code></pre>
+<ul>
+<li><code class="notranslate">EngineCoreRequest</code>：前端与 EngineCore 之间传递请求的数据对象，重点是描述“用户提交了什么”。</li>
+<li><code class="notranslate">Request</code>：Scheduler 内部使用的可变状态对象，除了保存输入，还会记录“当前执行到哪里”。</li>
+<li>转换：不是简单修改对象类型，而是读取 <code class="notranslate">EngineCoreRequest</code> 的字段，调用 <code class="notranslate">Request</code> 构造函数创建一个新的对象。</li>
+<li><code class="notranslate">request_id</code>：请求的内部唯一编号。转换后保持不变，方便前端、EngineCore 和 Scheduler 对应同一个请求。</li>
+<li><code class="notranslate">client_index</code>：请求所属的前端客户端编号，用于将结果发回正确的客户端。</li>
+<li><code class="notranslate">prompt_token_ids</code>：prompt 分词后得到的 token ID。</li>
+<li><code class="notranslate">prompt_embeds</code>：已经计算好的 prompt 向量，可用于 embedding 输入或 token 与 embedding 混合输入。</li>
+<li><code class="notranslate">prompt_is_token_ids</code>：混合输入中每个位置的数据来源标记，用来区分 token ID 和 prompt embedding。</li>
+<li><code class="notranslate">mm_features</code>：图片、视频等多模态内容经过处理后的特征。</li>
+<li><code class="notranslate">arrival_time</code>：请求到达时间，Scheduler 可以结合它和优先级确定请求顺序。</li>
+<li><code class="notranslate">lora_request</code>：当前请求需要使用的 LoRA 适配器。</li>
+<li><code class="notranslate">cache_salt</code>：加入缓存哈希的额外内容，用于防止不应共享缓存的请求错误命中同一前缀。</li>
+<li><code class="notranslate">priority</code>：请求优先级。</li>
+<li><code class="notranslate">trace_headers</code>：链路追踪信息，用于统计请求经过各组件的时间。</li>
+<li><code class="notranslate">resumable</code>：表示请求是否支持后续追加输入或恢复执行。</li>
+<li><code class="notranslate">session_id</code>：流式请求所属的会话编号。</li>
+<li><code class="notranslate">reasoning_ended</code>：记录 reasoning 阶段是否结束，供结构化输出逻辑使用。</li>
+<li><code class="notranslate">reasoning_parser_kwargs</code>：reasoning 解析器的额外配置。</li>
+<li><code class="notranslate">abort_immediately</code>：表示请求加入 Scheduler 后是否应立即取消，主要用于清理已经准备的传输资源。</li>
+<li><code class="notranslate">block_hasher</code>：根据请求 token 计算完整 block 哈希的函数。</li>
+<li><code class="notranslate">BlockHash</code>：某段 token block 的指纹。两个请求拥有相同 block 哈希时，可能可以复用同一份前缀 KV Cache。</li>
+<li>前缀缓存：多个请求拥有相同 prompt 前缀时，复用已经计算好的 KV Cache，减少重复 prefill 计算。</li>
+<li>新增的内部状态：调用 <code class="notranslate">Request</code> 构造函数后，会产生原 <code class="notranslate">EngineCoreRequest</code> 中没有的动态字段，例如：</li>
+</ul>
+<pre class="notranslate"><code class="notranslate">status = WAITING
+num_computed_tokens = 0
+output_token_ids = []
+num_preemptions = 0
+block_hashes = [...]
+</code></pre>
+<ul>
+<li>还没有入队：返回 <code class="notranslate">Request</code> 只完成对象转换，真正加入 waiting 队列是在后续 <code class="notranslate">Scheduler.add_request()</code> 中。</li>
+</ul>
+<ol start="5">
+<li>核心流程</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">接收 EngineCoreRequest
+        ↓
+读取请求 ID、输入、参数和元数据
+        ↓
+把 block_hasher 一起传给 Request 构造函数
+        ↓
+调用 cls(...)
+        ↓
+Request.__init__()
+    ├─ 保存输入和参数
+    ├─ 初始化状态与 token 进度
+    ├─ 初始化多模态和流式信息
+    └─ 计算初始 block 哈希
+        ↓
+返回新的 Request
+</code></pre>
+<p>该函数本质上是一组字段映射：</p>
+<pre class="notranslate"><code class="notranslate">EngineCoreRequest.request_id
+    → Request.request_id
+
+EngineCoreRequest.prompt_token_ids
+    → Request.prompt_token_ids
+
+EngineCoreRequest.sampling_params
+    → Request.sampling_params
+</code></pre>
+<ol start="6">
+<li><strong>在整个项目中的定位</strong><br>
+它位于“请求跨过 EngineCore 边界”和“请求进入 Scheduler”之间：</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">用户调用 LLM.generate()
+        ↓
+InputProcessor.process_inputs()
+        ↓
+生成 EngineCoreRequest
+        ↓
+EngineCoreClient.add_request()
+        ↓
+EngineCore.preprocess_add_request()
+        ↓
+Request.from_engine_core_request()       ← 当前函数
+EngineCoreRequest → Request
+        ↓
+初始化结构化输出语法
+        ↓
+EngineCore.add_request()
+        ↓
+Scheduler.add_request()
+Request 进入 waiting 队列
+        ↓
+Scheduler.schedule()
+持续读取和修改 Request 的运行状态
+        ↓
+ModelExecutor.execute_model()
+</code></pre>
+<p>因此，它是前端请求数据模型 <code class="notranslate">EngineCoreRequest</code> 与调度器运行状态模型 <code class="notranslate">Request</code> 之间的转换桥梁。</p>
+<h3>RequestStatus类</h3>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-k">class</span> <span class="pl-v">RequestStatus</span>(<span class="pl-s1">enum</span>.<span class="pl-c1">IntEnum</span>):
+    <span class="pl-s">"""Status of a request."""</span>
+    <span class="pl-c1">WAITING</span> <span class="pl-c1">=</span> <span class="pl-s1">enum</span>.<span class="pl-c1">auto</span>()
+    <span class="pl-c1">WAITING_FOR_STRUCTURED_OUTPUT_GRAMMAR</span> <span class="pl-c1">=</span> <span class="pl-s1">enum</span>.<span class="pl-c1">auto</span>()
+    <span class="pl-c1">WAITING_FOR_REMOTE_KVS</span> <span class="pl-c1">=</span> <span class="pl-s1">enum</span>.<span class="pl-c1">auto</span>()
+    <span class="pl-c1">WAITING_FOR_STREAMING_REQ</span> <span class="pl-c1">=</span> <span class="pl-s1">enum</span>.<span class="pl-c1">auto</span>()
+    <span class="pl-c1">RUNNING</span> <span class="pl-c1">=</span> <span class="pl-s1">enum</span>.<span class="pl-c1">auto</span>()
+    <span class="pl-c1">PREEMPTED</span> <span class="pl-c1">=</span> <span class="pl-s1">enum</span>.<span class="pl-c1">auto</span>()
+    <span class="pl-c"># Note: anything after PREEMPTED will be considered</span>
+    <span class="pl-c"># as a finished status.</span>
+    <span class="pl-c1">FINISHED_STOPPED</span> <span class="pl-c1">=</span> <span class="pl-s1">enum</span>.<span class="pl-c1">auto</span>()
+    <span class="pl-c1">FINISHED_LENGTH_CAPPED</span> <span class="pl-c1">=</span> <span class="pl-s1">enum</span>.<span class="pl-c1">auto</span>()
+    <span class="pl-c1">FINISHED_ABORTED</span> <span class="pl-c1">=</span> <span class="pl-s1">enum</span>.<span class="pl-c1">auto</span>()
+    <span class="pl-c1">FINISHED_IGNORED</span> <span class="pl-c1">=</span> <span class="pl-s1">enum</span>.<span class="pl-c1">auto</span>()
+    <span class="pl-c1">FINISHED_ERROR</span> <span class="pl-c1">=</span> <span class="pl-s1">enum</span>.<span class="pl-c1">auto</span>()
+    <span class="pl-c1">FINISHED_REPETITION</span> <span class="pl-c1">=</span> <span class="pl-s1">enum</span>.<span class="pl-c1">auto</span>()
+    <span class="pl-k">def</span> <span class="pl-en">__str__</span>(<span class="pl-s1">self</span>) <span class="pl-c1">-&gt;</span> <span class="pl-smi">str</span>:
+        <span class="pl-k">return</span> <span class="pl-s1">self</span>.<span class="pl-c1">name</span>
+    <span class="pl-en">@<span class="pl-s1">staticmethod</span></span>
+    <span class="pl-k">def</span> <span class="pl-en">is_finished</span>(<span class="pl-s1">status</span>: <span class="pl-s">"RequestStatus"</span>) <span class="pl-c1">-&gt;</span> <span class="pl-smi">bool</span>:
+        <span class="pl-k">return</span> <span class="pl-s1">status</span> <span class="pl-c1">&gt;</span> <span class="pl-v">RequestStatus</span>.<span class="pl-c1">PREEMPTED</span>
+    <span class="pl-en">@<span class="pl-s1">staticmethod</span></span>
+    <span class="pl-k">def</span> <span class="pl-en">get_finished_reason</span>(<span class="pl-s1">status</span>: <span class="pl-s">"RequestStatus"</span>) <span class="pl-c1">-&gt;</span> <span class="pl-v">FinishReason</span> <span class="pl-c1">|</span> <span class="pl-c1">None</span>:
+        <span class="pl-k">return</span> <span class="pl-s1">_FINISHED_REASON_MAP</span>.<span class="pl-c1">get</span>(<span class="pl-s1">status</span>)
+
+<span class="pl-c"># Mapping of finished statuses to their finish reasons.</span>
+<span class="pl-c"># NOTE: The ignored requests are the requests whose prompt lengths</span>
+<span class="pl-c"># are longer than the model's length cap. Therefore, the stop</span>
+<span class="pl-c"># reason should also be "length" as in OpenAI API.</span>
+<span class="pl-s1">_FINISHED_REASON_MAP</span> <span class="pl-c1">=</span> {
+    <span class="pl-v">RequestStatus</span>.<span class="pl-c1">FINISHED_STOPPED</span>: <span class="pl-v">FinishReason</span>.<span class="pl-c1">STOP</span>,
+    <span class="pl-v">RequestStatus</span>.<span class="pl-c1">FINISHED_LENGTH_CAPPED</span>: <span class="pl-v">FinishReason</span>.<span class="pl-c1">LENGTH</span>,
+    <span class="pl-v">RequestStatus</span>.<span class="pl-c1">FINISHED_ABORTED</span>: <span class="pl-v">FinishReason</span>.<span class="pl-c1">ABORT</span>,
+    <span class="pl-v">RequestStatus</span>.<span class="pl-c1">FINISHED_IGNORED</span>: <span class="pl-v">FinishReason</span>.<span class="pl-c1">LENGTH</span>,
+    <span class="pl-v">RequestStatus</span>.<span class="pl-c1">FINISHED_ERROR</span>: <span class="pl-v">FinishReason</span>.<span class="pl-c1">ERROR</span>,
+    <span class="pl-v">RequestStatus</span>.<span class="pl-c1">WAITING_FOR_STREAMING_REQ</span>: <span class="pl-v">FinishReason</span>.<span class="pl-c1">STOP</span>,
+    <span class="pl-v">RequestStatus</span>.<span class="pl-c1">FINISHED_REPETITION</span>: <span class="pl-v">FinishReason</span>.<span class="pl-c1">REPETITION</span>,
+}</pre></div>
+<p><code class="notranslate">RequestStatus</code> 是 vLLM 请求的“状态标签集合”。每个 <code class="notranslate">Request</code> 对象都会通过 <code class="notranslate">request.status</code> 保存当前状态，调度器根据它判断请求是在等待、运行、暂停，还是已经结束。<br>
+<strong>1. 为什么继承 <code class="notranslate">enum.IntEnum</code></strong></p>
+<pre class="notranslate"><code class="notranslate">class RequestStatus(enum.IntEnum):
+</code></pre>
+<p><code class="notranslate">IntEnum</code> 的成员既是枚举值，也可以像整数一样比较大小。这里使用 <code class="notranslate">IntEnum</code> 的关键原因是代码通过大小关系判断请求是否结束：</p>
+<pre class="notranslate"><code class="notranslate">return status &gt; RequestStatus.PREEMPTED
+</code></pre>
+<p><code class="notranslate">enum.auto()</code> 会按照定义顺序自动赋值。因此这些状态大致对应：</p>
+<pre class="notranslate"><code class="notranslate">WAITING                                   1
+WAITING_FOR_STRUCTURED_OUTPUT_GRAMMAR     2
+WAITING_FOR_REMOTE_KVS                    3
+WAITING_FOR_STREAMING_REQ                 4
+RUNNING                                   5
+PREEMPTED                                 6
+---------------- 结束状态分界线 ----------------
+FINISHED_STOPPED                          7
+FINISHED_LENGTH_CAPPED                    8
+...
+</code></pre>
+<p>这里“定义顺序”具有实际含义：<code class="notranslate">PREEMPTED</code> 后面的状态全部被视为真正结束。因此以后增加新状态时必须谨慎，不能随便放在 <code class="notranslate">PREEMPTED</code> 后面。<br>
+<strong>2. 各个状态的含义</strong></p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>状态</th>
+<th>是否结束</th>
+<th>核心含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">WAITING</code></td>
+<td>否</td>
+<td>请求已经进入调度器，等待分配计算资源</td>
+</tr>
+<tr>
+<td><code class="notranslate">WAITING_FOR_STRUCTURED_OUTPUT_GRAMMAR</code></td>
+<td>否</td>
+<td>等待结构化输出语法准备完成</td>
+</tr>
+<tr>
+<td><code class="notranslate">WAITING_FOR_REMOTE_KVS</code></td>
+<td>否</td>
+<td>等待从远端加载 KV Cache</td>
+</tr>
+<tr>
+<td><code class="notranslate">WAITING_FOR_STREAMING_REQ</code></td>
+<td>否</td>
+<td>当前一段流式输入已经处理完，等待用户继续输入</td>
+</tr>
+<tr>
+<td><code class="notranslate">RUNNING</code></td>
+<td>否</td>
+<td>请求正在被调度和执行</td>
+</tr>
+<tr>
+<td><code class="notranslate">PREEMPTED</code></td>
+<td>否</td>
+<td>请求因资源不足被抢占，之后还会重新排队运行</td>
+</tr>
+<tr>
+<td><code class="notranslate">FINISHED_STOPPED</code></td>
+<td>是</td>
+<td>正常遇到停止条件</td>
+</tr>
+<tr>
+<td><code class="notranslate">FINISHED_LENGTH_CAPPED</code></td>
+<td>是</td>
+<td>达到了长度上限</td>
+</tr>
+<tr>
+<td><code class="notranslate">FINISHED_ABORTED</code></td>
+<td>是</td>
+<td>被用户或系统主动取消</td>
+</tr>
+<tr>
+<td><code class="notranslate">FINISHED_IGNORED</code></td>
+<td>是</td>
+<td>请求无法处理而被忽略，通常是 prompt 过长</td>
+</tr>
+<tr>
+<td><code class="notranslate">FINISHED_ERROR</code></td>
+<td>是</td>
+<td>执行过程中发生错误</td>
+</tr>
+<tr>
+<td><code class="notranslate">FINISHED_REPETITION</code></td>
+<td>是</td>
+<td>检测到重复生成，因此提前停止</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p>下面具体介绍所有状态：<br>
+<strong><code class="notranslate">WAITING</code></strong><br>
+这是普通排队状态。请求已经进入 <code class="notranslate">Scheduler</code>，但可能还没有获得 KV Cache block、token 预算或模型执行位置。</p>
+<pre class="notranslate"><code class="notranslate">请求进入 Scheduler
+        ↓
+     WAITING
+        ↓ 获得资源并被调度
+     RUNNING
+</code></pre>
+<p><strong><code class="notranslate">WAITING_FOR_STRUCTURED_OUTPUT_GRAMMAR</code></strong><br>
+结构化输出要求模型按照指定格式生成，例如 JSON Schema、正则表达式或有限选项。vLLM 需要先把这些规则编译成生成时可使用的 grammar；编译完成前，请求不能运行。</p>
+<pre class="notranslate"><code class="notranslate">创建带结构化输出的请求
+        ↓
+WAITING_FOR_STRUCTURED_OUTPUT_GRAMMAR
+        ↓ grammar 编译完成
+     WAITING
+        ↓
+     RUNNING
+</code></pre>
+<p><strong><code class="notranslate">WAITING_FOR_REMOTE_KVS</code></strong><br>
+表示请求需要的部分 KV Cache 正在从远端传输过来，常见于 Prefill/Decode 分离或分布式 KV Cache 场景。<br>
+此时请求不是普通排队，而是被外部数据依赖阻塞：</p>
+<pre class="notranslate"><code class="notranslate">等待远端 KV Cache
+        ↓ 传输完成
+WAITING 或 PREEMPTED
+        ↓
+     RUNNING
+</code></pre>
+<p><strong><code class="notranslate">WAITING_FOR_STREAMING_REQ</code></strong><br>
+它用于可恢复的流式输入会话。当前输入片段已经处理结束，但整个会话没有销毁，仍在等待用户提交下一段输入。<br>
+例如：</p>
+<pre class="notranslate"><code class="notranslate">用户输入第一段
+    ↓
+模型生成完第一段回答
+    ↓
+WAITING_FOR_STREAMING_REQ
+    ↓ 用户继续输入
+WAITING → RUNNING
+</code></pre>
+<p>它不是内部的最终状态，所以：</p>
+<pre class="notranslate"><code class="notranslate">RequestStatus.is_finished(
+    RequestStatus.WAITING_FOR_STREAMING_REQ
+)
+</code></pre>
+<p>结果是 <code class="notranslate">False</code>。<br>
+但它在 <code class="notranslate">_FINISHED_REASON_MAP</code> 中被映射为 <code class="notranslate">FinishReason.STOP</code>，表示当前这一轮输出已经正常停止，可以向前端交付完成信号；底层会话仍可保留，等待下一段输入。“当前轮输出结束”和“底层请求永久结束”在这里不是同一件事。</p>
+<p><strong><code class="notranslate">PREEMPTED</code></strong><br>
+抢占表示请求原本正在运行，但由于 KV Cache 空间或调度资源不足，被暂时移出运行队列。<br>
+在当前实现中，抢占时通常会：</p>
+<pre class="notranslate"><code class="notranslate">释放请求占用的 KV Cache block
+        ↓
+status = PREEMPTED
+        ↓
+num_computed_tokens 重置
+        ↓
+重新放回等待队列
+        ↓
+以后重新计算并继续执行
+</code></pre>
+<p>所以 <code class="notranslate">PREEMPTED</code> 不是失败，也不是结束，只是暂时让出资源。</p>
+<p><strong><code class="notranslate">FINISHED_STOPPED</code></strong><br>
+表示正常遇到停止条件，例如：</p>
+<ul>
+<li>生成了 EOS token；</li>
+<li>生成了用户指定的 stop token；</li>
+<li>pooling 请求已经得到结果；</li>
+<li>编码器任务完成。<br>
+对应前端原因：</li>
+</ul>
+<pre class="notranslate"><code class="notranslate">FinishReason.STOP
+</code></pre>
+<p><strong><code class="notranslate">FINISHED_LENGTH_CAPPED</code></strong><br>
+表示生成长度达到了限制，常见的限制包括：</p>
+<ul>
+<li><code class="notranslate">sampling_params.max_tokens</code>；</li>
+<li>模型最大上下文长度 <code class="notranslate">max_model_len</code>。<br>
+对应：</li>
+</ul>
+<pre class="notranslate"><code class="notranslate">FinishReason.LENGTH
+</code></pre>
+<p><strong><code class="notranslate">FINISHED_ABORTED</code></strong><br>
+请求被外部主动终止，例如用户取消请求、客户端断开连接或引擎关闭。<br>
+对应：</p>
+<pre class="notranslate"><code class="notranslate">FinishReason.ABORT
+</code></pre>
+<p><strong><code class="notranslate">FINISHED_IGNORED</code></strong><br>
+表示请求没有真正进入正常执行流程，通常是输入 prompt 超出模型长度限制。虽然内部叫 <code class="notranslate">IGNORED</code>，但对外仍映射为：</p>
+<pre class="notranslate"><code class="notranslate">FinishReason.LENGTH
+</code></pre>
+<p>这样可以和 OpenAI 风格 API 的结束原因保持一致。</p>
+<p><strong><code class="notranslate">FINISHED_ERROR</code></strong><br>
+请求因模型执行、结构化输出或其他内部异常而结束，对应：</p>
+<pre class="notranslate"><code class="notranslate">FinishReason.ERROR
+</code></pre>
+<p><strong><code class="notranslate">FINISHED_REPETITION</code></strong><br>
+启用重复检测后，如果输出出现符合配置条件的重复序列，请求会被提前终止，对应：</p>
+<pre class="notranslate"><code class="notranslate">FinishReason.REPETITION
+</code></pre>
+<p><strong>3. 为什么需要两套状态</strong><br>
+<code class="notranslate">RequestStatus</code> 和 <code class="notranslate">FinishReason</code> 服务于不同层次：</p>
+<pre class="notranslate"><code class="notranslate">RequestStatus
+引擎内部使用，描述详细生命周期
+例如 WAITING、RUNNING、PREEMPTED
+              ↓ 映射
+FinishReason
+输出给前端，解释为什么本轮输出结束
+例如 stop、length、abort、error
+</code></pre>
+<p>多个内部状态可以映射到同一个外部原因。例如：</p>
+<pre class="notranslate"><code class="notranslate">FINISHED_LENGTH_CAPPED ─┐
+                        ├─→ FinishReason.LENGTH
+FINISHED_IGNORED ───────┘
+</code></pre>
+<p>这样调度器能够保留详细信息，而 API 用户只需要理解较少、较稳定的结束原因。</p>
+<p><strong>4. 典型生命周期</strong><br>
+普通请求：</p>
+<pre class="notranslate"><code class="notranslate">WAITING
+   ↓ 被 Scheduler 选中
+RUNNING
+   ├─→ FINISHED_STOPPED
+   ├─→ FINISHED_LENGTH_CAPPED
+   ├─→ FINISHED_REPETITION
+   ├─→ FINISHED_ERROR
+   └─→ PREEMPTED
+          ↓ 重新排队
+       RUNNING
+</code></pre>
+<p>带结构化输出或远端 KV 的请求：</p>
+<pre class="notranslate"><code class="notranslate">WAITING_FOR_STRUCTURED_OUTPUT_GRAMMAR
+                    ↓
+                 WAITING
+                    ↓
+WAITING_FOR_REMOTE_KVS
+                    ↓
+                 RUNNING
+                    ↓
+              某个结束状态
+</code></pre>
+<p>需要注意：这个类本身只定义状态和辅助判断，并不会主动推动状态变化。真正修改 <code class="notranslate">request.status</code> 的主要是 <code class="notranslate">Request</code> 初始化逻辑、<code class="notranslate">Scheduler</code> 的调度与输出处理逻辑，以及停止条件检查函数。</p>
+<h2>scheduler.py（Scheduler类）</h2>
+<p><strong>路径</strong>：/home/dongmingzhe/vllm/vllm/v1/core/sched/scheduler.py<br>
+<strong>简介</strong>：<code class="notranslate">scheduler.py</code> 是 vLLM V1 引擎的调度中心：它管理请求的等待、运行、抢占和结束状态，在每轮模型执行前决定“本轮让哪些请求计算多少个 token”，并在模型返回结果后更新请求状态、KV Cache 占用和最终输出。它负责组织计算，但不直接执行模型的神经网络运算。<br>
+当前文件实际上只直接定义了一个类：</p>
+<ul>
+<li>管理 <code class="notranslate">waiting</code>、<code class="notranslate">running</code> 等请求队列。</li>
+<li>根据 token 预算、请求优先级和 KV Cache 空间选择请求。</li>
+<li>通过 <code class="notranslate">KVCacheManager</code> 给请求分配或释放逻辑 KV Cache block。</li>
+<li>资源不足时抢占请求，稍后重新调度。</li>
+<li>支持分块 Prefill、前缀缓存、推测解码和结构化输出。</li>
+<li>支持远程 KV Cache、编码器缓存及多模态输入。</li>
+<li>接收 <code class="notranslate">ModelRunnerOutput</code>，检查停止条件并生成 <code class="notranslate">EngineCoreOutputs</code>。</li>
+<li>收集调度、缓存和推测解码等统计信息。<br>
+最核心的两个方法是：</li>
+<li><code class="notranslate">schedule()</code>：模型运行前，生成本轮的 <code class="notranslate">SchedulerOutput</code>。</li>
+<li><code class="notranslate">update_from_output()</code>：模型运行后，根据结果更新请求并生成输出。<br>
+下面展示了一些与Scheduler类有关的类，这些类虽然不是在本文件中定义，但与 <code class="notranslate">Scheduler</code> 紧密协作：</li>
+</ul>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>类</th>
+<th>核心作用</th>
+<th>与 <code class="notranslate">Scheduler</code> 的区别</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code class="notranslate">SchedulerInterface</code></td>
+<td>规定调度器必须提供哪些方法</td>
+<td>是抽象接口；<code class="notranslate">Scheduler</code> 是具体实现</td>
+</tr>
+<tr>
+<td><code class="notranslate">Request</code></td>
+<td>保存单个请求的 token、参数、状态等</td>
+<td>是被调度的数据，不负责调度</td>
+</tr>
+<tr>
+<td><code class="notranslate">RequestQueue</code></td>
+<td>按 FCFS 或优先级保存请求</td>
+<td>只负责请求排序，决策由 <code class="notranslate">Scheduler</code> 完成</td>
+</tr>
+<tr>
+<td><code class="notranslate">KVCacheManager</code></td>
+<td>管理和分配逻辑 KV Cache block</td>
+<td>管缓存资源，不决定整批请求如何执行</td>
+</tr>
+<tr>
+<td><code class="notranslate">EncoderCacheManager</code></td>
+<td>管理图片等多模态编码结果的缓存</td>
+<td>只处理编码器缓存</td>
+</tr>
+<tr>
+<td><code class="notranslate">SchedulerOutput</code></td>
+<td>描述本轮要执行哪些请求和多少 token</td>
+<td>是调度结果，不执行模型</td>
+</tr>
+<tr>
+<td><code class="notranslate">ModelRunnerOutput</code></td>
+<td>保存模型本轮生成的 token 等结果</td>
+<td>来自模型执行端，交回调度器处理</td>
+</tr>
+<tr>
+<td><code class="notranslate">EngineCoreOutputs</code></td>
+<td>按客户端整理的最终引擎输出</td>
+<td>是调度器处理模型结果后产生的输出</td>
+</tr>
+<tr>
+<td>整体调用关系：</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<pre class="notranslate"><code class="notranslate">EngineCore.add_request()
+        ↓
+Scheduler.add_request(Request)
+        ↓
+等待队列 / 运行队列
+        ↓
+Scheduler.schedule()
+        ↓
+SchedulerOutput
+        ↓
+ModelExecutor / ModelRunner 执行模型
+        ↓
+ModelRunnerOutput
+        ↓
+Scheduler.update_from_output()
+        ├─ 更新 Request 状态
+        ├─ 检查停止或抢占
+        ├─ 分配、保留或释放缓存
+        └─ 生成 EngineCoreOutputs
+</code></pre>
+<p>简而言之，<code class="notranslate">Scheduler</code> 是连接“请求管理、缓存管理和模型执行”的控制中心，而 <code class="notranslate">ModelExecutor/ModelRunner</code> 才是真正完成 GPU 模型计算的组件。<br>
+<strong>本小节阅读的内容</strong>：</p>
+<ul>
+<li>重点看<code class="notranslate">Scheduler</code>类及相关的重要函数</li>
+</ul>
+<h3>构造函数</h3>
+<h4>part1.参数列表</h4>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-k">def</span> <span class="pl-en">__init__</span>(
+    <span class="pl-s1">self</span>,
+    <span class="pl-s1">vllm_config</span>: <span class="pl-smi">VllmConfig</span>,
+    <span class="pl-s1">kv_cache_config</span>: <span class="pl-smi">KVCacheConfig</span>,
+    <span class="pl-s1">structured_output_manager</span>: <span class="pl-smi">StructuredOutputManager</span>,
+    <span class="pl-s1">block_size</span>: <span class="pl-smi">int</span>,
+    <span class="pl-s1">hash_block_size</span>: <span class="pl-s1">int</span> <span class="pl-c1">|</span> <span class="pl-c1">None</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>,
+    <span class="pl-s1">mm_registry</span>: <span class="pl-smi">MultiModalRegistry</span> <span class="pl-c1">=</span> <span class="pl-c1">MULTIMODAL_REGISTRY</span>,
+    <span class="pl-s1">include_finished_set</span>: <span class="pl-smi">bool</span> <span class="pl-c1">=</span> <span class="pl-c1">False</span>,
+    <span class="pl-s1">log_stats</span>: <span class="pl-smi">bool</span> <span class="pl-c1">=</span> <span class="pl-c1">False</span>,
+) <span class="pl-c1">-&gt;</span> <span class="pl-c1">None</span>:</pre></div>
+<ul>
+<li><code class="notranslate">self</code>：当前创建的 <code class="notranslate">Scheduler</code> 对象，由 Python 自动传入。</li>
+<li><code class="notranslate">vllm_config</code>：vLLM 的总配置，包含模型、调度、并行、缓存、LoRA、推测解码和监控等配置。</li>
+<li><code class="notranslate">kv_cache_config</code>：已经根据 GPU 显存和模型结构计算好的 KV Cache 布局与容量配置。调度器据此管理缓存 block。</li>
+<li><code class="notranslate">structured_output_manager</code>：结构化输出管理器，负责约束模型按照 JSON、正则表达式等指定格式生成内容。</li>
+<li><code class="notranslate">block_size</code>：调度器管理 KV Cache 时，一个 block 对应的 token 数量。</li>
+<li><code class="notranslate">hash_block_size</code>：计算前缀缓存哈希时使用的 token 分块大小；不传时默认等于 <code class="notranslate">block_size</code>。</li>
+<li><code class="notranslate">mm_registry</code>：多模态模型注册表，用于判断模型是否支持图片、视频等输入，并获取对应的多模态处理能力。</li>
+<li><code class="notranslate">include_finished_set</code>：是否额外按客户端记录已完成的请求 ID，主要用于多引擎场景。</li>
+<li><code class="notranslate">log_stats</code>：是否收集和记录调度、缓存、性能等统计数据。</li>
+</ul>
+<h4>part2.保存基础配置和模型特征</h4>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">scheduler_config</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">scheduler_config</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">cache_config</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">cache_config</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">lora_config</span> <span class="pl-c1">=</span> <span class="pl-s1">vllm_config</span>.<span class="pl-c1">lora_config</span>
+...
+<span class="pl-s1">self</span>.<span class="pl-c1">is_encoder_decoder</span> <span class="pl-c1">=</span> ...
+<span class="pl-s1">self</span>.<span class="pl-c1">is_mm_encoder_only</span> <span class="pl-c1">=</span> ...</pre></div>
+<p>这一部分从总配置中提取调度、缓存、并行和监控等子配置，同时记录模型是否为编码器—解码器模型、多模态编码器模型以及是否使用 MRoPE。<br>
+如果启用了统计功能，还会创建 <code class="notranslate">KVCacheMetricsCollector</code>，用于记录 KV Cache 的使用情况。</p>
+<h4>part3.设置调度容量限制</h4>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">max_num_running_reqs</span> <span class="pl-c1">=</span> ...
+<span class="pl-s1">self</span>.<span class="pl-c1">max_num_active_reqs</span> <span class="pl-c1">=</span> ...
+<span class="pl-s1">self</span>.<span class="pl-c1">max_num_scheduled_tokens</span> <span class="pl-c1">=</span> ...
+<span class="pl-s1">self</span>.<span class="pl-c1">max_model_len</span> <span class="pl-c1">=</span> ...</pre></div>
+<p>这一部分确定调度器每轮最多可以处理：</p>
+<ul>
+<li>多少个运行请求；</li>
+<li>多少个活跃请求；</li>
+<li>多少个 token；</li>
+<li>单个请求允许使用的最大模型上下文长度。<br>
+这些值是 <code class="notranslate">schedule()</code> 选择请求和组建批次时的核心限制。</li>
+</ul>
+<h4>part4.初始化远程缓存连接器</h4>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">connector</span> <span class="pl-c1">=</span> ...
+<span class="pl-s1">self</span>.<span class="pl-c1">ec_connector</span> <span class="pl-c1">=</span> ...
+<span class="pl-s1">self</span>.<span class="pl-c1">kv_event_publisher</span> <span class="pl-c1">=</span> ...</pre></div>
+<p>这一部分处理分布式缓存传输：</p>
+<ul>
+<li><code class="notranslate">connector</code>：负责跨节点传输 KV Cache，例如 Prefill/Decode 分离。</li>
+<li><code class="notranslate">ec_connector</code>：负责传输图片等编码器输入产生的缓存。</li>
+<li><code class="notranslate">kv_event_publisher</code>：发布 KV Cache 分配、释放等事件。<br>
+如果没有配置远程缓存传输，这些连接器保持为空，不影响普通本地推理。</li>
+</ul>
+<blockquote>
+<p>远程缓存传输主要用于 Prefill/Decode 分离、跨节点推理、KV Cache 卸载或多个实例复用缓存等场景：例如一台机器完成 prompt 的 Prefill 并生成 KV Cache，另一台机器直接加载这些缓存继续 Decode，从而避免重复计算；多模态场景也可通过 <code class="notranslate">ec_connector</code> 传输图片编码器产生的特征缓存。实现时，Scheduler 侧的 Connector 负责判断哪些缓存需要加载或保存、分配本地逻辑 block并生成传输元数据，Worker 侧 Connector 根据元数据把缓存数据在本地 GPU、CPU或远端节点之间推送/拉取；异步加载期间请求进入 <code class="notranslate">WAITING_FOR_REMOTE_KVS</code>，传输完成后通知 Scheduler 恢复调度。<code class="notranslate">kv_event_publisher</code> 只负责发布缓存分配、释放和传输事件，便于外部缓存系统同步与监控，本身不传输缓存数据。</p>
+</blockquote>
+<h4>part5.创建请求容器和队列</h4>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">requests</span> <span class="pl-c1">=</span> {}
+<span class="pl-s1">self</span>.<span class="pl-c1">policy</span> <span class="pl-c1">=</span> <span class="pl-en">SchedulingPolicy</span>(...)
+<span class="pl-s1">self</span>.<span class="pl-c1">waiting</span> <span class="pl-c1">=</span> <span class="pl-en">create_request_queue</span>(...)
+<span class="pl-s1">self</span>.<span class="pl-c1">skipped_waiting</span> <span class="pl-c1">=</span> <span class="pl-en">create_request_queue</span>(...)
+<span class="pl-s1">self</span>.<span class="pl-c1">running</span> <span class="pl-c1">=</span> []</pre></div>
+<p>这是请求管理的核心部分：</p>
+<ul>
+<li><code class="notranslate">requests</code>：通过 <code class="notranslate">request_id</code> 查找请求。</li>
+<li><code class="notranslate">waiting</code>：保存可以参与后续调度的等待请求。</li>
+<li><code class="notranslate">skipped_waiting</code>：保存暂时不能调度的请求，例如正在等待远程 KV。</li>
+<li><code class="notranslate">running</code>：保存已经进入运行状态的请求。</li>
+<li><code class="notranslate">policy</code>：决定等待请求的选择顺序，例如先来先服务或优先级调度。<br>
+随后创建的若干集合用于记录已完成、被抢占、缓存传输完成或语法编译失败的请求。</li>
+</ul>
+<h4>part6.初始化多模态编码器缓存</h4>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">supports_mm_inputs</span> <span class="pl-c1">=</span> ...
+<span class="pl-s1">mm_budget</span> <span class="pl-c1">=</span> ...
+<span class="pl-s1">self</span>.<span class="pl-c1">encoder_cache_manager</span> <span class="pl-c1">=</span> ...</pre></div>
+<p>如果模型支持图片、视频或编码器—解码器输入，这一部分会计算编码器计算预算和缓存容量，并创建 <code class="notranslate">EncoderCacheManager</code>。<br>
+它管理的是图片特征、编码器输出等缓存，与文本自注意力使用的 KV Cache 不同。</p>
+<h4>part7.初始化推测解码配置</h4>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">num_spec_tokens</span> <span class="pl-c1">=</span> ...
+<span class="pl-s1">self</span>.<span class="pl-c1">num_lookahead_tokens</span> <span class="pl-c1">=</span> ...
+<span class="pl-s1">self</span>.<span class="pl-c1">dynamic_sd_lookup</span> <span class="pl-c1">=</span> ...
+<span class="pl-s1">self</span>.<span class="pl-c1">use_eagle</span> <span class="pl-c1">=</span> ...</pre></div>
+<p>这一部分读取推测解码配置，确定：</p>
+<ul>
+<li>每轮最多生成多少个候选 token；</li>
+<li>需要预留多少前瞻位置；</li>
+<li>是否使用 EAGLE；</li>
+<li>是否根据批次大小动态调整候选 token 数量。<br>
+这些配置会影响每轮 token 调度量以及 KV Cache 的预留空间。</li>
+</ul>
+<p><strong>上述内容详细解释</strong><br>
+推测解码的核心思想是：先让一个更快的“草稿模块”一次预测多个候选 token，再由主模型在一次 forward 中并行验证这些候选 token。被主模型接受的 token 才会成为最终输出；从第一个被拒绝的候选开始，后面的候选通常都不能继续采用。<br>
+例如草稿模块预测：</p>
+<pre class="notranslate"><code class="notranslate">候选 token：A → B → C → D
+主模型验证：✓   ✓   ✗
+最终接受：  A、B
+</code></pre>
+<p>这样主模型一次计算可能确认多个 token，而普通自回归解码一次通常只能前进一个 token。</p>
+<ol>
+<li><code class="notranslate">num_spec_tokens</code></li>
+</ol>
+<pre class="notranslate"><code class="notranslate">self.num_spec_tokens = vllm_config.num_speculative_tokens
+</code></pre>
+<p>它表示每轮最多使用多少个推测候选 token，也常记为 <code class="notranslate">K</code>。<br>
+例如：</p>
+<pre class="notranslate"><code class="notranslate">num_spec_tokens = 4
+</code></pre>
+<p>表示草稿模块每轮最多提出 4 个候选 token，主模型随后批量验证它们。<br>
+需要注意：</p>
+<ul>
+<li>这是候选数量，不是保证生成的最终 token 数量。</li>
+<li>主模型可能接受 0～4 个候选。</li>
+<li>普通自回归解码通常还可能在验证后得到一个额外的主模型 token，因此一轮涉及的位置数量可能接近 <code class="notranslate">1 + K</code>。</li>
+<li>设置为 <code class="notranslate">0</code> 通常表示不使用推测解码。<br>
+数值越大并不一定越快：</li>
+</ul>
+<pre class="notranslate"><code class="notranslate">K 较小
+├─ 草稿计算少
+├─ KV Cache 额外占用少
+└─ 一次主模型调用前进的 token 可能较少
+K 较大
+├─ 有机会一次接受更多 token
+├─ 草稿和验证开销更大
+├─ 需要更多 KV Cache 位置
+└─ 候选接受率低时可能浪费更多计算
+</code></pre>
+<p>因此最合适的 <code class="notranslate">K</code> 与模型、硬件、批次大小和候选接受率有关。</p>
+<ol start="2">
+<li><code class="notranslate">num_lookahead_tokens</code></li>
+</ol>
+<pre class="notranslate"><code class="notranslate">self.num_lookahead_tokens = vllm_config.num_lookahead_tokens
+</code></pre>
+<p>它表示在主模型本轮明确调度的 token 位置之外，还需要额外预留多少个 KV Cache 槽位。<br>
+草稿模块可能需要读取或写入比主模型当前查询范围更靠后的 token 位置，因此 Scheduler 在调用：</p>
+<pre class="notranslate"><code class="notranslate">self.kv_cache_manager.allocate_slots(
+    request,
+    num_new_tokens,
+    num_lookahead_tokens=self.num_lookahead_tokens,
+)
+</code></pre>
+<p>时，会为这些未来位置提前保留空间。<br>
+它和 <code class="notranslate">num_spec_tokens</code> 的区别是：</p>
+<pre class="notranslate"><code class="notranslate">num_spec_tokens
+    = 本轮最多提出多少个候选 token
+    = 生成/验证层面的数量
+num_lookahead_tokens
+    = KV Cache 还要额外预留多少个未来位置
+    = 缓存容量层面的数量
+</code></pre>
+<p>预留槽位不表示对应 token 已经生成或一定会被接受，只是保证后续草稿计算有安全的缓存空间。<br>
+当前配置的大致规则是：</p>
+<pre class="notranslate"><code class="notranslate">没有推测解码
+    num_lookahead_tokens = 0
+EAGLE、MTP、DSpark 或普通 draft model
+    num_lookahead_tokens = num_spec_tokens
+DFlash
+    num_lookahead_tokens = num_spec_tokens + 1
+</code></pre>
+<p>DFlash 多预留一个位置，是因为它使用类似 in-fill 的计算方式，需要额外的查询位置。</p>
+<ol start="3">
+<li><code class="notranslate">dynamic_sd_lookup</code></li>
+</ol>
+<pre class="notranslate"><code class="notranslate">self.dynamic_sd_lookup: list[int] | None = None
+</code></pre>
+<p>它用于动态推测解码，即根据当前批次中的请求数量，动态决定这一轮使用多少个候选 token，而不是始终使用固定的 <code class="notranslate">num_spec_tokens</code>。<br>
+如果配置了：</p>
+<pre class="notranslate"><code class="notranslate">num_speculative_tokens_per_batch_size
+</code></pre>
+<p>构造函数会生成一个按批次大小直接查询的数组：</p>
+<pre class="notranslate"><code class="notranslate">self.dynamic_sd_lookup = build_dynamic_sd_schedule_lookup(...)
+</code></pre>
+<p>例如配置逻辑可能是：</p>
+<pre class="notranslate"><code class="notranslate">批次大小 1～4    → K = 6
+批次大小 5～16   → K = 4
+批次大小 17～64  → K = 2
+</code></pre>
+<p>运行时可以直接查询：</p>
+<pre class="notranslate"><code class="notranslate">batch_size = len(num_scheduled_tokens)
+K = self.dynamic_sd_lookup[batch_size]
+</code></pre>
+<p>通常采用这种策略的原因是：</p>
+<ul>
+<li>批次小时，GPU 可能没有充分利用，可以使用更多候选 token，提高单个请求每轮前进的距离。</li>
+<li>批次大时，主模型本身已经有较高的并行度，过多候选会扩大验证批次、增加 KV Cache 和显存压力，因此可以降低 <code class="notranslate">K</code>。</li>
+<li>实际最优值还取决于接受率和硬件性能，并不是固定规律。<br>
+<code class="notranslate">dynamic_sd_lookup</code> 中的值不会超过全局 <code class="notranslate">num_spec_tokens</code>，后者仍然是候选数量的上限。<br>
+如果没有配置动态策略：</li>
+</ul>
+<pre class="notranslate"><code class="notranslate">self.dynamic_sd_lookup = None
+</code></pre>
+<p>每轮都使用固定的：</p>
+<pre class="notranslate"><code class="notranslate">num_spec_tokens_to_schedule = self.num_spec_tokens
+</code></pre>
+<p>需要注意，动态策略调整的是本轮实际候选数；缓存容量规划通常仍需要考虑全局最大候选数，避免某一轮增大 <code class="notranslate">K</code> 后空间不足。</p>
+<ol start="4">
+<li><code class="notranslate">use_eagle</code></li>
+</ol>
+<pre class="notranslate"><code class="notranslate">self.use_eagle = speculative_config.use_eagle()
+</code></pre>
+<p>它表示当前是否使用 EAGLE 系列的推测解码方式。<br>
+普通 draft model 的基本形式是：</p>
+<pre class="notranslate"><code class="notranslate">独立的小模型
+    ↓
+根据 token 预测未来 token
+    ↓
+主模型验证
+</code></pre>
+<p>EAGLE 类方法更偏向：</p>
+<pre class="notranslate"><code class="notranslate">利用主模型产生的隐藏状态
+    ↓
+较轻量的草稿模块预测未来表示/token
+    ↓
+主模型批量验证候选 token
+</code></pre>
+<p>隐藏状态比单纯的 token ID 包含更多上下文信息，因此 EAGLE 类方法希望获得更高的候选接受率，同时让草稿部分保持较低成本。<br>
+在当前代码中，<code class="notranslate">use_eagle()</code> 不只代表最原始的 EAGLE，还被用作“利用主模型隐藏状态进行推测解码”的统一判断，包括：</p>
+<pre class="notranslate"><code class="notranslate">eagle
+eagle3
+mtp
+dflash
+dspark
+</code></pre>
+<p>它会影响：</p>
+<ul>
+<li>KV Cache 需要预留多少未来位置；</li>
+<li>Prefill 边界需要保留多少前瞻 token；</li>
+<li>前缀缓存命中后如何恢复草稿模型状态；</li>
+<li>尾部 KV block 是否可以直接复用；</li>
+<li>推测候选位置如何分配。</li>
+</ul>
+<ol start="5">
+<li><code class="notranslate">use_eagle_block_drop</code><br>
+虽然示例中没有单独列出，但构造函数同时设置了：</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">self.use_eagle_block_drop = speculative_config.use_eagle_block_drop()
+</code></pre>
+<p>EAGLE 的尾部缓存 block 可能包含仍会变化的候选位置，这些位置不是稳定的已确认前缀。如果把它们当作普通前缀缓存复用，可能使用错误的草稿状态。<br>
+因此 block drop 会丢弃这种不稳定的尾部 block，只保留已经稳定确认的缓存部分：</p>
+<pre class="notranslate"><code class="notranslate">稳定、已确认的前缀 block
+    → 可以进入前缀缓存并复用
+
+包含未确认候选的尾部 block
+    → 丢弃或重新计算
+</code></pre>
+<p>这会牺牲少量缓存复用，但可以保证推测解码状态正确。关闭该功能属于实验性行为，也可能影响候选 token 的接受率。</p>
+<ol start="6">
+<li>四者之间的关系</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">speculative_config
+        ↓
+use_eagle
+决定采用哪类草稿生成方法
+        ↓
+num_spec_tokens
+确定本轮最多提出多少个候选 token
+        ↓
+dynamic_sd_lookup
+根据实际批次大小进一步选择本轮真正使用的 K
+        ↓
+num_lookahead_tokens
+根据推测方法和最大候选数预留额外 KV Cache 槽位
+        ↓
+Scheduler.schedule()
+安排候选验证所需的 token 和 KV block
+        ↓
+草稿模块生成候选
+        ↓
+主模型批量验证
+        ↓
+update_from_output()
+统计接受/拒绝数量，并回滚被拒绝候选对应的计算进度
+</code></pre>
+<p>简单地说：</p>
+<pre class="notranslate"><code class="notranslate">num_spec_tokens      决定“最多猜几个”
+dynamic_sd_lookup    决定“这一轮实际猜几个”
+use_eagle            决定“用什么类型的方法猜”
+num_lookahead_tokens 决定“为了这些猜测要多留多少缓存位置”
+</code></pre>
+<h4>part8.创建 KV Cache 管理器</h4>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">kv_cache_manager</span> <span class="pl-c1">=</span> <span class="pl-en">KVCacheManager</span>(...)</pre></div>
+<p><code class="notranslate">KVCacheManager</code> 根据已经传入的 <code class="notranslate">kv_cache_config</code>，负责：</p>
+<ul>
+<li>给请求分配和释放逻辑 KV Cache block；</li>
+<li>管理前缀缓存；</li>
+<li>判断缓存空间是否足够；</li>
+<li>为推测解码和并行模式预留空间。<br>
+这里创建的是缓存的管理器，不是在重新创建 GPU 上的 KV Cache 张量池；实际张量池已在创建 <code class="notranslate">Scheduler</code> 之前由执行器初始化完成。</li>
+</ul>
+<h4>part9.初始化并行与模型状态</h4>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">use_pp</span> <span class="pl-c1">=</span> ...
+<span class="pl-s1">self</span>.<span class="pl-c1">current_step</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">has_mamba_layers</span> <span class="pl-c1">=</span> ...
+<span class="pl-s1">self</span>.<span class="pl-c1">need_mamba_block_aligned_split</span> <span class="pl-c1">=</span> ...</pre></div>
+<p>这一部分保存流水线并行、异步调度以及 Mamba 模型需要的特殊状态。它们用于处理特殊的批次节奏、缓存对齐和前缀复用规则，普通 Transformer 模型通常不需要重点关注这些细节。</p>
+<h4>part10.初始化运行期辅助状态</h4>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-s1">self</span>.<span class="pl-c1">deferred_frees</span> <span class="pl-c1">=</span> <span class="pl-en">deque</span>()
+<span class="pl-s1">self</span>.<span class="pl-c1">perf_metrics</span> <span class="pl-c1">=</span> ...
+<span class="pl-s1">self</span>.<span class="pl-c1">routed_experts_mgr</span> <span class="pl-c1">=</span> ...
+<span class="pl-s1">self</span>.<span class="pl-c1">_pause_state</span> <span class="pl-c1">=</span> <span class="pl-v">PauseState</span>.<span class="pl-c1">UNPAUSED</span>
+<span class="pl-s1">self</span>.<span class="pl-c1">_inflight_prefills</span> <span class="pl-c1">=</span> <span class="pl-en">set</span>()</pre></div>
+<p>最后一部分创建运行过程中需要持续更新的状态：</p>
+<ul>
+<li><code class="notranslate">deferred_frees</code>：暂缓释放仍可能被异步任务使用的缓存块。</li>
+<li><code class="notranslate">perf_metrics</code>：收集模型性能指标。</li>
+<li><code class="notranslate">routed_experts_mgr</code>：记录 MoE 模型选择了哪些专家。</li>
+<li><code class="notranslate">_pause_state</code>：记录调度器是否暂停。</li>
+<li><code class="notranslate">_inflight_prefills</code>：记录尚未完成 Prefill 的请求。</li>
+</ul>
+<h3>add request函数</h3>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-c"># scheduler.py:2547</span>
+<span class="pl-k">def</span> <span class="pl-en">add_request</span>(<span class="pl-s1">self</span>, <span class="pl-s1">request</span>: <span class="pl-smi">Request</span>) <span class="pl-c1">-&gt;</span> <span class="pl-c1">None</span>:
+    <span class="pl-s1">request_id</span> <span class="pl-c1">=</span> <span class="pl-s1">request</span>.<span class="pl-c1">request_id</span>
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-c">#  第一种情况：request_id 已存在</span>
+    <span class="pl-c">#  说明这是同一个可恢复流式会话的后续输入</span>
+    <span class="pl-c">#  L2548 - L2563</span>
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-s1">existing</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">requests</span>.<span class="pl-c1">get</span>(<span class="pl-s1">request_id</span>)
+    <span class="pl-k">if</span> <span class="pl-s1">existing</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+        <span class="pl-c"># ── 1. 从新 Request 中提取流式更新数据 ──</span>
+        <span class="pl-c"># 包括新增 token、多模态特征、采样参数等</span>
+        <span class="pl-c"># 如果 request.resumable=False，则 update=None，</span>
+        <span class="pl-c"># 表示不再提供后续输入</span>
+        <span class="pl-s1">update</span> <span class="pl-c1">=</span> <span class="pl-v">StreamingUpdate</span>.<span class="pl-c1">from_request</span>(<span class="pl-s1">request</span>)
+        <span class="pl-c"># ── 2. 原请求仍在运行：先缓存后续输入 ──</span>
+        <span class="pl-k">if</span> <span class="pl-s1">existing</span>.<span class="pl-c1">status</span> <span class="pl-c1">!=</span> <span class="pl-v">RequestStatus</span>.<span class="pl-c1">WAITING_FOR_STREAMING_REQ</span>:
+            <span class="pl-c"># 相同 ID 只允许用于已开启可恢复模式的请求</span>
+            <span class="pl-k">assert</span> <span class="pl-s1">existing</span>.<span class="pl-c1">streaming_queue</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>, <span class="pl-s">"duplicate request id"</span>
+            <span class="pl-c"># update 也可能是 None，作为“输入流结束”的标记</span>
+            <span class="pl-s1">existing</span>.<span class="pl-c1">streaming_queue</span>.<span class="pl-c1">append</span>(<span class="pl-s1">update</span>)
+        <span class="pl-c"># ── 3. 原请求正在等待输入：立即恢复会话 ──</span>
+        <span class="pl-k">elif</span> <span class="pl-s1">update</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+            <span class="pl-s1">self</span>.<span class="pl-c1">_update_request_as_session</span>(
+                <span class="pl-s1">existing</span>,
+                <span class="pl-s1">update</span>,
+            )
+            <span class="pl-c"># 主要效果：</span>
+            <span class="pl-c">#   追加新的输入 token / 多模态特征</span>
+            <span class="pl-c">#   更新采样参数</span>
+            <span class="pl-c">#   WAITING_FOR_STREAMING_REQ → WAITING</span>
+            <span class="pl-c">#   重新进入等待队列</span>
+        <span class="pl-c"># ── 4. 没有后续输入：结束流式会话 ──</span>
+        <span class="pl-k">else</span>:
+            <span class="pl-s1">self</span>.<span class="pl-c1">finish_requests</span>(
+                <span class="pl-s1">request_id</span>,
+                <span class="pl-v">RequestStatus</span>.<span class="pl-c1">FINISHED_ABORTED</span>,
+            )
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-c">#  第二种情况：request_id 不存在</span>
+    <span class="pl-c">#  这是第一次进入 Scheduler 的新请求</span>
+    <span class="pl-c">#  L2564 - L2574</span>
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-k">else</span>:
+        <span class="pl-c"># ── 1. 可恢复请求需要保存后续输入的队列 ──</span>
+        <span class="pl-k">if</span> <span class="pl-s1">request</span>.<span class="pl-c1">resumable</span>:
+            <span class="pl-s1">request</span>.<span class="pl-c1">streaming_queue</span> <span class="pl-c1">=</span> <span class="pl-en">deque</span>()
+        <span class="pl-c"># ── 2. ★ 放入合适的等待队列 ──</span>
+        <span class="pl-s1">self</span>.<span class="pl-c1">_enqueue_waiting_request</span>(<span class="pl-s1">request</span>)
+        <span class="pl-c"># 普通 WAITING 请求        → self.waiting</span>
+        <span class="pl-c"># 等待 grammar / 远端 KV /</span>
+        <span class="pl-c"># 流式输入的阻塞请求       → self.skipped_waiting</span>
+
+        <span class="pl-c"># ── 3. ★ 注册到请求总表 ──</span>
+        <span class="pl-s1">self</span>.<span class="pl-c1">requests</span>[<span class="pl-s1">request_id</span>] <span class="pl-c1">=</span> <span class="pl-s1">request</span>
+        <span class="pl-c"># 后续 schedule、abort、update_from_output</span>
+        <span class="pl-c"># 都通过 request_id 查找该 Request</span>
+
+        <span class="pl-c"># ── 4. 初始化推测解码统计 ──</span>
+        <span class="pl-k">if</span> <span class="pl-s1">self</span>.<span class="pl-c1">spec_decode_metrics_level</span> <span class="pl-c1">!=</span> <span class="pl-s">"none"</span>:
+            <span class="pl-s1">request</span>.<span class="pl-c1">spec_decode_metrics</span> <span class="pl-c1">=</span> <span class="pl-v">RequestSpecDecodeMetrics</span>.<span class="pl-c1">new</span>(
+                <span class="pl-s1">self</span>.<span class="pl-c1">num_spec_tokens</span>
+            )
+
+        <span class="pl-c"># ── 5. 通知 KV Connector 有新请求进入 ──</span>
+        <span class="pl-k">if</span> <span class="pl-s1">self</span>.<span class="pl-c1">connector</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+            <span class="pl-s1">self</span>.<span class="pl-c1">connector</span>.<span class="pl-c1">on_new_request</span>(<span class="pl-s1">request</span>)
+
+        <span class="pl-c"># ── 6. 记录请求进入队列的事件 ──</span>
+        <span class="pl-k">if</span> <span class="pl-s1">self</span>.<span class="pl-c1">log_stats</span>:
+            <span class="pl-s1">request</span>.<span class="pl-c1">record_event</span>(<span class="pl-v">EngineCoreEventType</span>.<span class="pl-c1">QUEUED</span>)
+
+    <span class="pl-c"># 无返回值；核心产物是 Scheduler 内部状态发生变化</span></pre></div>
+<ol>
+<li>
+<p><strong>主要作用</strong>：<code class="notranslate">Scheduler.add_request()</code> 把新的 <code class="notranslate">Request</code> 注册到调度器并放入合适的等待队列；如果 <code class="notranslate">request_id</code> 已存在，则把它当作可恢复流式会话的后续输入，而不是创建重复请求。</p>
+</li>
+<li>
+<p><strong>输入（参数）</strong>：输入一个 <code class="notranslate">Request</code> 对象，其中包含请求 ID、prompt token、采样参数、优先级、LoRA、多模态信息和当前状态等。</p>
+</li>
+<li>
+<p><strong>输出（改变了什么值）</strong>：函数没有返回值；它会修改 <code class="notranslate">Scheduler</code> 内部的 <code class="notranslate">requests</code>、<code class="notranslate">waiting</code> 或 <code class="notranslate">skipped_waiting</code>，并可能更新已有流式会话的输入队列、推测解码统计、KV Connector 状态和请求事件记录。</p>
+</li>
+<li>
+<p><strong>术语解释</strong>：</p>
+</li>
+</ol>
+<ul>
+<li><code class="notranslate">Request</code>：进入 <code class="notranslate">EngineCore</code> 后的内部请求对象。它已经完成分词，主要保存 token、生成参数和执行状态。</li>
+<li><code class="notranslate">request_id</code>：请求的唯一标识。调度器通过它判断这是新请求，还是已有流式会话的后续输入。</li>
+<li>可恢复流式会话：一个请求可以分多次提交输入。当前输入处理完后，请求进入 <code class="notranslate">WAITING_FOR_STREAMING_REQ</code>，后续使用相同 <code class="notranslate">request_id</code> 提交新的输入片段。</li>
+<li><code class="notranslate">StreamingUpdate</code>：从新传入的 <code class="notranslate">Request</code> 中提取出的会话更新信息，例如新增 token、多模态特征和新的采样参数。</li>
+<li><code class="notranslate">streaming_queue</code>：已有会话仍在运行时，后续输入先暂存在这里；它表示“流式输入队列”，不只是模型逐 token 返回结果的普通流式输出。</li>
+<li><code class="notranslate">waiting</code>：可以正常参与后续调度的请求队列。</li>
+<li><code class="notranslate">skipped_waiting</code>：暂时不能运行的请求队列，例如正在等待结构化输出 grammar、远端 KV Cache 或下一段流式输入。</li>
+<li><code class="notranslate">spec_decode_metrics</code>：当前请求的推测解码统计信息，例如草稿 token 数量和接受数量。</li>
+<li><code class="notranslate">connector.on_new_request()</code>：通知 KV Connector 有新请求进入，使远程 KV Cache 传输组件可以建立相应状态。</li>
+<li><code class="notranslate">QUEUED</code> 事件：记录请求已经进入调度队列，主要用于性能统计和问题定位。</li>
+</ul>
+<ol start="5">
+<li><strong>核心流程</strong>：</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">根据 request_id 查找已有请求
+        │
+        ├─ 已存在
+        │    ├─ 提取 StreamingUpdate
+        │    ├─ 已有请求仍在运行 → 后续输入放入 streaming_queue
+        │    ├─ 正在等待输入 → 立即更新并恢复会话
+        │    └─ 没有后续输入 → 结束该流式会话
+        │
+        └─ 不存在
+             ├─ 可恢复请求则创建 streaming_queue
+             ├─ 放入 waiting 或 skipped_waiting
+             ├─ 写入 requests 字典
+             ├─ 初始化推测解码统计
+             └─ 通知 Connector 并记录 QUEUED 事件
+</code></pre>
+<ol start="6">
+<li><strong>在整个项目中的定位</strong>：</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">用户调用 LLM / AsyncLLM
+          ↓
+InputProcessor
+把原始输入转换为 EngineCoreRequest
+          ↓
+EngineCore.preprocess_add_request()
+转换为内部 Request
+          ↓
+EngineCore.add_request()
+          ↓
+Scheduler.add_request()             ← 当前函数
+注册请求并放入等待队列
+          ↓
+Scheduler.schedule()
+选择本轮请求并分配逻辑 KV Cache block
+          ↓
+ModelExecutor / ModelRunner
+执行模型计算
+          ↓
+Scheduler.update_from_output()
+更新 Request 状态并整理输出
+          ↓
+OutputProcessor
+生成用户可见的结果
+</code></pre>
+<p>该函数位于“输入处理完成”和“正式调度执行”之间，是请求进入调度系统的入口；它只负责登记和排队，不会立即执行模型计算。</p>
+<h3>schedule函数</h3>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-c"># scheduler.py:570</span>
+<span class="pl-k">def</span> <span class="pl-en">schedule</span>(<span class="pl-s1">self</span>, <span class="pl-s1">throttle_prefills</span><span class="pl-c1">=</span><span class="pl-c1">False</span>) <span class="pl-c1">-&gt;</span> <span class="pl-smi">SchedulerOutput</span>:
+
+    <span class="pl-c"># ═══ 初始化预算 ═══════════════════════════════════════ L590</span>
+    <span class="pl-s1">token_budget</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">max_num_scheduled_tokens</span>   <span class="pl-c"># 本步总 token 预算，默认 = max_num_batched_tokens</span>
+    <span class="pl-s1">input_budget</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">max_num_batched_tokens</span>     <span class="pl-c"># 输入侧预算</span>
+    <span class="pl-s1">kv_cache_manager</span>.<span class="pl-c1">new_step_starts</span>()             <span class="pl-c"># 通知 KV 管理器新的一步</span>
+
+    <span class="pl-s1">scheduled_new_reqs</span>     <span class="pl-c1">=</span> []   <span class="pl-c"># 首次调度的请求</span>
+    <span class="pl-s1">scheduled_cached_reqs</span>  <span class="pl-c1">=</span> []   <span class="pl-c"># 已调度过的请求（只记录增量）</span>
+    <span class="pl-s1">num_scheduled_tokens</span>   <span class="pl-c1">=</span> {}   <span class="pl-c"># {req_id: 本步给它算多少 token} ★ 最终产物</span>
+    <span class="pl-s1">req_to_new_blocks</span>      <span class="pl-c1">=</span> {}   <span class="pl-c"># {req_id: 新分配的 block}</span>
+
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-c">#  第一阶段：调度 RUNNING 队列（已经在跑的请求）</span>
+    <span class="pl-c">#  L620 - L851</span>
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-k">for</span> <span class="pl-s1">request</span> <span class="pl-c1">in</span> <span class="pl-s1">self</span>.<span class="pl-c1">running</span>:                    <span class="pl-c"># L~640，按 FCFS 顺序</span>
+
+        <span class="pl-c"># ── 1. 算这个请求这一步要算多少 token ──      L665-713</span>
+        <span class="pl-s1">num_new_tokens</span> <span class="pl-c1">=</span> (<span class="pl-s1">request</span>.<span class="pl-c1">num_tokens_with_spec</span>
+                          <span class="pl-c1">-</span> <span class="pl-s1">request</span>.<span class="pl-c1">num_computed_tokens</span>)
+        <span class="pl-c"># 被预算截断（关键！）                        L672</span>
+        <span class="pl-s1">num_new_tokens</span> <span class="pl-c1">=</span> <span class="pl-en">min</span>(<span class="pl-s1">num_new_tokens</span>, <span class="pl-s1">token_budget</span>)
+
+        <span class="pl-c"># ── 2. 如果算不了（预算用光 / 已算完），跳过 ── L715-733</span>
+        <span class="pl-k">if</span> <span class="pl-s1">num_new_tokens</span> <span class="pl-c1">==</span> <span class="pl-c1">0</span>:
+            <span class="pl-k">continue</span>          <span class="pl-c"># ★ 注意是 continue 不是 break</span>
+                              <span class="pl-c">#   为了公平性，允许低优先级请求也被调度</span>
+
+        <span class="pl-c"># ── 3. ★ 分配 KV Cache block（可能触发抢占）── L736-808</span>
+        <span class="pl-k">while</span> <span class="pl-c1">True</span>:
+            <span class="pl-s1">new_blocks</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">kv_cache_manager</span>.<span class="pl-c1">allocate_slots</span>(<span class="pl-s1">request</span>, <span class="pl-s1">num_new_tokens</span>, ...)  <span class="pl-c"># L738</span>
+
+            <span class="pl-k">if</span> <span class="pl-s1">new_blocks</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+                <span class="pl-k">break</span>                     <span class="pl-c"># 分配成功</span>
+
+            <span class="pl-c"># ★★ 分配失败 → 抢占一个受害者 ★★</span>
+            <span class="pl-k">if</span> <span class="pl-s1">self</span>.<span class="pl-c1">policy</span> <span class="pl-c1">==</span> <span class="pl-v">SchedulingPolicy</span>.<span class="pl-c1">PRIORITY</span>:
+                <span class="pl-s1">victim</span> <span class="pl-c1">=</span> <span class="pl-en">max</span>(...)         <span class="pl-c"># 优先级策略：挑 priority 最高的踢</span>
+            <span class="pl-k">else</span>:
+                <span class="pl-s1">victim</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">running</span>[<span class="pl-c1">-</span><span class="pl-c1">1</span>] <span class="pl-c"># 默认：踢最后一个（FCFS 里最晚来的）</span>
+
+            <span class="pl-s1">self</span>.<span class="pl-c1">_preempt_request</span>(<span class="pl-s1">victim</span>) <span class="pl-c"># L796 ★ 见 8.7</span>
+            <span class="pl-k">if</span> <span class="pl-s1">victim</span> <span class="pl-c1">is</span> <span class="pl-s1">request</span>:
+                <span class="pl-k">break</span>                     <span class="pl-c"># 连自己都被抢占了，放弃这个请求</span>
+
+        <span class="pl-c"># ── 4. 记账 ──                               L811-818</span>
+        <span class="pl-s1">req_to_new_blocks</span>[<span class="pl-s1">request</span>.<span class="pl-c1">request_id</span>] <span class="pl-c1">=</span> <span class="pl-s1">new_blocks</span>
+        <span class="pl-s1">num_scheduled_tokens</span>[<span class="pl-s1">request</span>.<span class="pl-c1">request_id</span>] <span class="pl-c1">=</span> <span class="pl-s1">num_new_tokens</span>
+        <span class="pl-s1">token_budget</span>     <span class="pl-c1">-=</span> <span class="pl-s1">num_new_tokens</span>         <span class="pl-c"># ★ 扣预算</span>
+        <span class="pl-s1">input_budget</span>     <span class="pl-c1">-=</span> <span class="pl-s1">num_new_tokens</span>
+
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-c">#  第二阶段：从 WAITING 队列提拔新请求（连续批处理的关键！）</span>
+    <span class="pl-c">#  L863 - L1348</span>
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-c"># 只有"第一步没发生抢占"时才提拔新请求              L864</span>
+    <span class="pl-c"># 因为发生了抢占就说明显存已经紧张，不该再塞新请求</span>
+    <span class="pl-k">while</span> <span class="pl-s1">self</span>.<span class="pl-c1">waiting</span> <span class="pl-c1">and</span> <span class="pl-s1">token_budget</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">0</span>:
+
+        <span class="pl-s1">request</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">waiting</span>[<span class="pl-c1">0</span>]     <span class="pl-c"># 取出队头请求（⚫ 阻塞态处理跳过）</span>
+
+        <span class="pl-c"># ── 1. ★ 查前缀缓存能命中多少 ──              L927-1039</span>
+        <span class="pl-c">#    "这个 prompt 的开头，之前是不是有别的请求算过？"</span>
+        <span class="pl-c">#    命中 → 那些 token 直接复用，不用重算！</span>
+        <span class="pl-s1">num_computed_tokens</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">_get_local_prefix_cache_hit</span>(<span class="pl-s1">request</span>, ...)  <span class="pl-c"># L934</span>
+
+        <span class="pl-c"># ── 2. 算新请求要算多少 token ──               L1084-1124</span>
+        <span class="pl-s1">num_new_tokens</span> <span class="pl-c1">=</span> <span class="pl-s1">request</span>.<span class="pl-c1">num_tokens</span> <span class="pl-c1">-</span> <span class="pl-s1">num_computed_tokens</span>
+
+        <span class="pl-c"># ★ 分块 prefill 的核心三行                    L1116-1124</span>
+        <span class="pl-k">if</span> <span class="pl-c1">not</span> <span class="pl-s1">self</span>.<span class="pl-c1">enable_chunked_prefill</span> <span class="pl-c1">and</span> <span class="pl-s1">num_new_tokens</span> <span class="pl-c1">&gt;</span> <span class="pl-s1">token_budget</span>:
+            <span class="pl-k">break</span>                     <span class="pl-c"># 不开分块 prefill：整块放不下就等下一步</span>
+        <span class="pl-k">else</span>:
+            <span class="pl-c"># ★ 开分块 prefill（V1 默认）：截断到预算大小</span>
+            <span class="pl-s1">num_new_tokens</span> <span class="pl-c1">=</span> <span class="pl-en">min</span>(<span class="pl-s1">num_new_tokens</span>, <span class="pl-s1">token_budget</span>)
+
+        <span class="pl-c"># ── 3. 分配 KV Cache block ──                  L1210-1222</span>
+        <span class="pl-s1">new_blocks</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">kv_cache_manager</span>.<span class="pl-c1">allocate_slots</span>(...)  <span class="pl-c"># L1210</span>
+        <span class="pl-k">if</span> <span class="pl-s1">new_blocks</span> <span class="pl-c1">is</span> <span class="pl-c1">None</span>:
+            <span class="pl-k">break</span>                     <span class="pl-c"># 分配失败 → 停止提拔</span>
+
+        <span class="pl-c"># ── 4. ★ 提拔到 running 队列 ──                L1292-1339</span>
+        <span class="pl-s1">self</span>.<span class="pl-c1">running</span>.<span class="pl-c1">append</span>(<span class="pl-s1">request</span>)
+        <span class="pl-s1">request</span>.<span class="pl-c1">status</span> <span class="pl-c1">=</span> <span class="pl-v">RequestStatus</span>.<span class="pl-c1">RUNNING</span>
+        <span class="pl-s1">request</span>.<span class="pl-c1">num_computed_tokens</span> <span class="pl-c1">=</span> <span class="pl-s1">num_computed_tokens</span>
+
+        <span class="pl-c"># ★ 注意区分：新请求 vs 被抢占后恢复的请求</span>
+        <span class="pl-k">if</span> <span class="pl-s1">request</span>.<span class="pl-c1">status</span> <span class="pl-c1">==</span> <span class="pl-v">RequestStatus</span>.<span class="pl-c1">WAITING</span>:
+            <span class="pl-s1">scheduled_new_reqs</span>.<span class="pl-c1">append</span>(<span class="pl-v">NewRequestData</span>.<span class="pl-c1">from_request</span>(<span class="pl-s1">request</span>, <span class="pl-s1">new_blocks</span>))
+        <span class="pl-k">else</span>:  <span class="pl-c"># PREEMPTED</span>
+            <span class="pl-s1">scheduled_cached_reqs</span>.<span class="pl-c1">append</span>(<span class="pl-v">CachedRequestData</span>.<span class="pl-c1">from_request</span>(...))
+
+        <span class="pl-s1">token_budget</span> <span class="pl-c1">-=</span> <span class="pl-s1">num_new_tokens</span>
+
+    <span class="pl-c"># ═══ 收尾：组装 SchedulerOutput ═══════════════════════ L1350-1507</span>
+    <span class="pl-k">return</span> <span class="pl-en">SchedulerOutput</span>(
+        <span class="pl-s1">scheduled_new_reqs</span><span class="pl-c1">=</span><span class="pl-s1">scheduled_new_reqs</span>,
+        <span class="pl-s1">scheduled_cached_reqs</span><span class="pl-c1">=</span><span class="pl-s1">scheduled_cached_reqs</span>,
+        <span class="pl-s1">num_scheduled_tokens</span><span class="pl-c1">=</span><span class="pl-s1">num_scheduled_tokens</span>,     <span class="pl-c"># ★ 最重要</span>
+        <span class="pl-s1">total_num_scheduled_tokens</span><span class="pl-c1">=</span>...,
+        <span class="pl-s1">finished_req_ids</span><span class="pl-c1">=</span>...,
+        ...
+    )</pre></div>
+<ol>
+<li>
+<p><strong>主要作用</strong>：<code class="notranslate">schedule()</code> 为当前一轮模型计算选择请求，决定每个请求本轮需要处理多少个 token，并为它们分配逻辑 KV Cache block、编码器缓存等资源，最终生成供 <code class="notranslate">ModelExecutor</code> 使用的 <code class="notranslate">SchedulerOutput</code>。它只制定本轮执行计划，不进行真正的 GPU 模型计算。</p>
+</li>
+<li>
+<p><strong>输入（参数）</strong>：</p>
+</li>
+</ol>
+<ul>
+<li><code class="notranslate">self</code>：当前 <code class="notranslate">Scheduler</code>，内部保存等待请求、运行请求、缓存管理器和各类预算。</li>
+<li><code class="notranslate">throttle_prefills=False</code>：是否暂缓 Prefill 请求，用于数据并行场景下平衡不同 DP rank 的 Prefill 负载；暂缓时通常仍允许 Decode 请求执行。</li>
+</ul>
+<ol start="3">
+<li>
+<p><strong>输出（改变了什么值）</strong>：返回一个 <code class="notranslate">SchedulerOutput</code>，其中记录本轮的新请求、已有请求、每个请求处理的 token 数、KV block、推测解码 token、多模态编码输入、远程缓存传输信息以及完成或抢占的请求 ID。函数还会修改调度器内部状态，例如移动请求队列、把请求设为 <code class="notranslate">RUNNING</code> 或 <code class="notranslate">PREEMPTED</code>、分配或释放逻辑缓存 block，并更新 <code class="notranslate">num_computed_tokens</code>、<code class="notranslate">num_in_flight_tokens</code> 和本轮预算等；但不会生成最终文本。</p>
+</li>
+<li>
+<p><strong>术语解释</strong>：</p>
+</li>
+</ol>
+<ul>
+<li>调度轮次：一次 <code class="notranslate">schedule()</code> 对应一次模型执行计划，通常随后触发一次模型 forward；一轮可以同时安排多个请求，也可以给不同请求安排不同数量的 token。</li>
+<li>统一 token 调度：该函数没有完全分开的“Prefill 调度器”和“Decode 调度器”，而是计算：
+<pre class="notranslate"><code class="notranslate">请求现有的 token 总数
+- 已经计算的 token 数
+= 本轮仍需要计算的 token 数
+</code></pre>
+</li>
+</ul>
+<p>因此同一套逻辑可以处理 Prefill、Decode、分块 Prefill和推测解码。</p>
+<ul>
+<li><code class="notranslate">token_budget</code>：本轮允许调度的 token 总量，所有请求共享，不能超过 <code class="notranslate">max_num_scheduled_tokens</code>。</li>
+<li><code class="notranslate">input_budget</code>：本轮模型批次允许承载的输入 token 总量，通常来自 <code class="notranslate">max_num_batched_tokens</code>。</li>
+<li><code class="notranslate">encoder_compute_budget</code>：图片、视频等多模态编码器本轮允许处理的输入量。</li>
+<li><code class="notranslate">num_tokens_with_spec</code>：请求当前需要处理的 token 总数，包含 prompt token、已经生成的输出 token以及推测解码产生的候选 token。</li>
+<li><code class="notranslate">num_computed_tokens</code>：该请求已经被模型计算过的 token 数量，也就是已经建立了有效计算进度的位置数。</li>
+<li><code class="notranslate">num_new_tokens</code>：本轮计划交给模型继续计算的 token 数量。基础关系是：<code class="notranslate">num_tokens_with_spec</code>-<code class="notranslate">num_computed_tokens</code></li>
+<li><code class="notranslate">num_in_flight_tokens</code>：已经调度、但结果可能还没有完全返回的 token 数，用于异步调度。</li>
+<li>前缀缓存：新请求进入时，调度器先查找本地或远端是否已经存在相同 prompt 前缀的 KV Cache；命中的 token 无需重新计算。</li>
+<li><code class="notranslate">allocate_slots()</code>：从预先创建的 KV Cache 池中给请求分配逻辑 block。它不是重新创建 GPU KV Cache 张量，而是在已有缓存池里安排哪些 block 属于哪个请求。</li>
+<li>抢占：如果 KV Cache 空间不足，调度器会选择较低优先级的运行请求，释放其缓存并将其设为 <code class="notranslate">PREEMPTED</code>，以后重新排队计算。</li>
+<li><code class="notranslate">scheduled_new_reqs</code>：第一次进入模型执行端的请求，需要发送较完整的请求信息。</li>
+<li><code class="notranslate">scheduled_cached_reqs</code>：模型执行端已经缓存过信息的请求，只需发送本轮变化，减少进程通信量。</li>
+<li><code class="notranslate">scheduled_spec_decode_tokens</code>：推测解码器提前预测的候选 token，本轮由主模型验证。</li>
+<li>lookahead slots：为推测解码可能使用的未来 token 预留的 KV Cache 位置。</li>
+<li><code class="notranslate">WAITING_FOR_REMOTE_KVS</code>：请求需要的 KV Cache 正在从远端异步加载，本轮暂时不执行模型。</li>
+<li>Connector metadata：描述本轮远程 KV Cache 或编码器缓存应该加载、保存或传输哪些内容。</li>
+<li><code class="notranslate">num_common_prefix_blocks</code>：运行请求共同拥有的前缀 block 数，可以供 Cascade Attention 等优化使用。</li>
+</ul>
+<ol start="4">
+<li>核心流程：</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">1. 初始化本轮状态
+   ├─ current_step 加一
+   ├─ 建立 token、输入和编码器预算
+   └─ 检查暂停状态与 Prefill 节流
+                  ↓
+2. 优先处理 RUNNING 请求
+   ├─ 计算每个请求还需处理多少 token
+   ├─ 限制长度和本轮预算
+   ├─ 安排推测 token、多模态编码输入
+   ├─ 分配逻辑 KV Cache block
+   └─ 空间不足时抢占低优先级请求
+                  ↓
+3. 处理 WAITING 请求
+   ├─ 跳过仍在等待 grammar、远端 KV 或流式输入的请求
+   ├─ 检查 LoRA 数量和活跃请求数限制
+   ├─ 查询本地及远端前缀缓存
+   ├─ 计算本轮需要处理的 token
+   ├─ 分配 KV Cache 和编码器缓存
+   └─ 将成功接纳的请求移入 running
+                  ↓
+4. 检查调度约束
+   ├─ token 预算不能超限
+   ├─ 请求数量不能超限
+   └─ 各项预算不能为负
+                  ↓
+5. 构造 SchedulerOutput
+   ├─ 新请求与已有请求数据
+   ├─ 每个请求的 token 数和 KV block
+   ├─ 推测解码与多模态输入
+   ├─ 缓存清零、复制和 Connector 信息
+   └─ 完成或抢占的请求 ID
+                  ↓
+6. 更新调度器内部状态
+   ├─ 增加 num_computed_tokens
+   ├─ 增加 num_in_flight_tokens
+   ├─ 更新是否仍处于 Prefill
+   └─ 清空已交付的 finished/preempted ID 集合
+</code></pre>
+<p>需要特别注意：只有在本轮没有发生抢占并且调度器未暂停时，才会继续接纳新的等待请求。这可以避免一边因缓存不足抢占旧请求，一边又把新请求加入运行队列。</p>
+<p><strong>在整个项目中的定位</strong>：</p>
+<pre class="notranslate"><code class="notranslate">InputProcessor
+把用户输入转换为 EngineCoreRequest
+        ↓
+EngineCore.add_request()
+        ↓
+Scheduler.add_request()
+请求进入 waiting / skipped_waiting
+        ↓
+EngineCore.step()
+        ↓
+Scheduler.schedule()                     ← 当前函数
+决定“哪些请求、本轮处理多少 token、使用哪些缓存 block”
+        ↓
+SchedulerOutput
+        ↓
+ModelExecutor.execute_model()
+        ↓
+Worker / ModelRunner
+执行真正的 GPU 模型计算
+        ↓
+ModelRunnerOutput
+        ↓
+Scheduler.update_from_output()
+更新 token、停止状态和缓存状态
+        ↓
+EngineCoreOutputs
+        ↓
+OutputProcessor
+转换为用户最终看到的输出
+        ↓
+下一轮再次调用 Scheduler.schedule()
+</code></pre>
+<p>因此，<code class="notranslate">schedule()</code> 是 <code class="notranslate">EngineCore.step()</code> 中“模型执行之前”的核心决策函数：上接请求队列和缓存状态，下接 <code class="notranslate">ModelExecutor</code>，决定 GPU 下一轮具体计算什么。</p>
+<h3>preempt request函数</h3>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-c"># scheduler.py:1528</span>
+<span class="pl-k">def</span> <span class="pl-en">_preempt_request</span>(
+    <span class="pl-s1">self</span>,
+    <span class="pl-s1">request</span>: <span class="pl-smi">Request</span>,
+    <span class="pl-s1">timestamp</span>: <span class="pl-smi">float</span>,
+    <span class="pl-s1">drop_stale_output</span>: <span class="pl-smi">bool</span> <span class="pl-c1">=</span> <span class="pl-c1">False</span>,
+) <span class="pl-c1">-&gt;</span> <span class="pl-c1">None</span>:
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-c">#  前置条件：只能抢占正在运行的请求</span>
+    <span class="pl-c">#  L1541</span>
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-k">assert</span> <span class="pl-s1">request</span>.<span class="pl-c1">status</span> <span class="pl-c1">==</span> <span class="pl-v">RequestStatus</span>.<span class="pl-c1">RUNNING</span>
+    <span class="pl-c"># 注意：调用者必须提前把 request 从 self.running 中移除，</span>
+    <span class="pl-c"># 当前函数只负责释放资源、重置状态和重新排队。</span>
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-c">#  第一阶段：释放请求占用的缓存资源</span>
+    <span class="pl-c">#  L1544 - L1546</span>
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+
+    <span class="pl-c"># ── 1. ★ 释放逻辑 KV Cache block ──</span>
+    <span class="pl-s1">self</span>.<span class="pl-c1">_free_request_blocks</span>(<span class="pl-s1">request</span>)
+    <span class="pl-c"># 如果仍有异步 GPU 操作在使用这些 block，</span>
+    <span class="pl-c"># 可能先放入 deferred_frees，稍后再真正归还缓存池。</span>
+
+    <span class="pl-c"># ── 2. 释放多模态/编码器缓存 ──</span>
+    <span class="pl-s1">self</span>.<span class="pl-c1">encoder_cache_manager</span>.<span class="pl-c1">free</span>(<span class="pl-s1">request</span>)
+
+    <span class="pl-c"># ── 3. 不再把它视为正在进行的 Prefill ──</span>
+    <span class="pl-s1">self</span>.<span class="pl-c1">_inflight_prefills</span>.<span class="pl-c1">discard</span>(<span class="pl-s1">request</span>)
+
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-c">#  第二阶段：重置请求的执行状态</span>
+    <span class="pl-c">#  L1547 - L1552</span>
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+
+    <span class="pl-c"># ── 1. ★ 标记为“被抢占”，不是“已结束” ──</span>
+    <span class="pl-s1">request</span>.<span class="pl-c1">status</span> <span class="pl-c1">=</span> <span class="pl-v">RequestStatus</span>.<span class="pl-c1">PREEMPTED</span>
+
+    <span class="pl-c"># ── 2. KV Cache 已释放，旧计算进度不能继续信任 ──</span>
+    <span class="pl-s1">request</span>.<span class="pl-c1">num_computed_tokens</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>
+
+    <span class="pl-c"># 原始 prompt 和已经保存的输出 token 不会删除；</span>
+    <span class="pl-c"># 请求恢复时需要重新计算，也可能通过前缀缓存复用部分结果。</span>
+
+    <span class="pl-c"># ── 3. 清除依赖旧模型状态的推测 token ──</span>
+    <span class="pl-k">if</span> <span class="pl-s1">request</span>.<span class="pl-c1">spec_token_ids</span>:
+        <span class="pl-s1">request</span>.<span class="pl-c1">spec_token_ids</span> <span class="pl-c1">=</span> []
+
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-c">#  第三阶段：处理尚未返回的异步输出</span>
+    <span class="pl-c">#  L1553 - L1562</span>
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+
+    <span class="pl-c"># 抢占发生时，之前提交给 GPU 的计算可能仍未返回。</span>
+    <span class="pl-c"># 这些结果返回后属于 stale output（过期输出）。</span>
+
+    <span class="pl-c"># ── 1. 决定旧输出返回后是交付还是丢弃 ──</span>
+    <span class="pl-s1">request</span>.<span class="pl-c1">drop_stale_output</span> <span class="pl-c1">=</span> (
+        <span class="pl-s1">drop_stale_output</span>
+        <span class="pl-c1">or</span> (
+            <span class="pl-s1">request</span>.<span class="pl-c1">drop_stale_output</span>
+            <span class="pl-c1">and</span> <span class="pl-s1">request</span>.<span class="pl-c1">num_stale_output_tokens</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">0</span>
+        )
+    )
+    <span class="pl-c"># False：旧输出仍可交付，但不能修改已经重置的计算计数。</span>
+    <span class="pl-c"># True ：旧输出返回后直接丢弃，相关位置以后重新计算。</span>
+    <span class="pl-c"># 已进入丢弃模式且旧输出尚未排空时，继续保持丢弃模式。</span>
+
+    <span class="pl-c"># ── 2. ★ 当前所有在途 token 都标记为 stale ──</span>
+    <span class="pl-s1">request</span>.<span class="pl-c1">num_stale_output_tokens</span> <span class="pl-c1">=</span> <span class="pl-s1">request</span>.<span class="pl-c1">num_in_flight_tokens</span>
+    <span class="pl-c"># 注意这里是赋值，不是累加，因为 num_in_flight_tokens</span>
+    <span class="pl-c"># 已经包含尚未排空的旧 token。</span>
+
+    <span class="pl-c"># ── 3. 抢占后取消异步/推测输出占位 ──</span>
+    <span class="pl-s1">request</span>.<span class="pl-c1">num_output_placeholders</span> <span class="pl-c1">=</span> <span class="pl-c1">0</span>
+
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-c">#  第四阶段：更新抢占统计</span>
+    <span class="pl-c">#  L1563 - L1566</span>
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+
+    <span class="pl-s1">request</span>.<span class="pl-c1">num_preemptions</span> <span class="pl-c1">+=</span> <span class="pl-c1">1</span>
+
+    <span class="pl-k">if</span> <span class="pl-s1">self</span>.<span class="pl-c1">log_stats</span>:
+        <span class="pl-s1">request</span>.<span class="pl-c1">record_event</span>(
+            <span class="pl-v">EngineCoreEventType</span>.<span class="pl-c1">PREEMPTED</span>,
+            <span class="pl-s1">timestamp</span>,
+        )
+
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-c">#  第五阶段：重新排队并通知 ModelRunner</span>
+    <span class="pl-c">#  L1568 - L1569</span>
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+
+    <span class="pl-c"># ── 1. ★ 放回等待队列，后续可以重新调度 ──</span>
+    <span class="pl-s1">self</span>.<span class="pl-c1">waiting</span>.<span class="pl-c1">prepend_request</span>(<span class="pl-s1">request</span>)
+
+    <span class="pl-c"># ── 2. 记录本轮被抢占的请求 ID ──</span>
+    <span class="pl-s1">self</span>.<span class="pl-c1">reset_preempted_req_ids</span>.<span class="pl-c1">add</span>(<span class="pl-s1">request</span>.<span class="pl-c1">request_id</span>)
+    <span class="pl-c"># 随后会写入 SchedulerOutput.preempted_req_ids，</span>
+    <span class="pl-c"># 通知 ModelRunner 清理该请求对应的旧运行状态。</span>
+
+    <span class="pl-c"># 无返回值；核心结果是请求释放资源、状态重置并重新排队</span></pre></div>
+<ol>
+<li>
+<p><strong>主要作用</strong>：<code class="notranslate">_preempt_request()</code> 暂停一个正在运行的请求，释放它占用的 KV Cache 和编码器缓存，将状态改为 <code class="notranslate">PREEMPTED</code>，再放回等待队列，以便以后重新调度。抢占不是取消或结束请求，用户生成任务仍会继续。</p>
+</li>
+<li>
+<p><strong>输入（参数）</strong>：</p>
+</li>
+</ol>
+<ul>
+<li><code class="notranslate">request</code>：要被抢占的 <code class="notranslate">Request</code>，其状态必须为 <code class="notranslate">RUNNING</code>；调用者需要先将它从 <code class="notranslate">self.running</code> 中移除。</li>
+<li><code class="notranslate">timestamp</code>：抢占发生的时间，用于性能统计和事件记录。</li>
+<li><code class="notranslate">drop_stale_output=False</code>：是否丢弃抢占前已经发起、但尚未返回的异步模型输出；默认仍将这些输出交付，特殊情况下才丢弃。</li>
+</ul>
+<ol start="3">
+<li>
+<p><strong>输出（改变了什么值）</strong>：函数没有返回值。它会释放或延迟释放请求的逻辑 KV block，释放编码器缓存，将请求状态改为 <code class="notranslate">PREEMPTED</code>，重置已计算 token 数和推测 token，增加抢占次数，并把请求重新放到 <code class="notranslate">waiting</code> 队列；同时把请求 ID 加入 <code class="notranslate">reset_preempted_req_ids</code>，通知模型执行端清理该请求的旧状态。</p>
+</li>
+<li>
+<p><strong>术语解释</strong>：</p>
+</li>
+</ol>
+<ul>
+<li>抢占：当 KV Cache 空间不足时，调度器暂时停止某个运行请求，把资源让给其他请求。被抢占请求没有完成，之后还会重新运行。</li>
+<li><code class="notranslate">PREEMPTED</code>：表示请求被暂停并等待恢复，不属于结束状态，也不会产生 <code class="notranslate">finish_reason</code>。</li>
+<li><code class="notranslate">_free_request_blocks()</code>：解除该请求对 KV Cache block 的占用。如果异步 GPU 操作仍可能写入这些 block，会先放入延迟释放队列，等相关计算完成后再安全归还缓存池。</li>
+<li>编码器缓存：保存图片、音频或编码器—解码器模型产生的中间特征；抢占时通过 <code class="notranslate">encoder_cache_manager.free()</code> 一并释放。</li>
+<li><code class="notranslate">num_computed_tokens = 0</code>：调度器不再相信旧 KV Cache 对应的计算进度。请求恢复后需要重新计算，但原始 prompt token 和已经保留的输出 token 并没有被删除，并且可能通过前缀缓存减少实际重算量。</li>
+<li><code class="notranslate">spec_token_ids</code>：推测解码模型给出的候选 token。它们依赖抢占前的模型状态，因此抢占后必须清空，不能继续使用。</li>
+<li><code class="notranslate">num_output_placeholders</code>：异步或推测解码中，为尚未返回的输出预留的位置。抢占后原有计算进度已失效，因此重置为 <code class="notranslate">0</code>。</li>
+<li>in-flight output：已经提交给模型执行器、但尚未返回调度器的结果。异步调度下，请求被抢占时，这些 GPU 计算可能仍在进行，无法立即撤销。</li>
+<li>stale output：抢占前发起、抢占后才返回的旧结果。代码通过 <code class="notranslate">num_stale_output_tokens</code> 记录还有多少旧结果尚未返回。</li>
+<li><code class="notranslate">drop_stale_output=False</code>：旧结果返回时通常仍会交付，但不能用它修改已经重置的计算计数；在旧结果排空前，请求也不会贸然恢复，以免同一位置被重复采样。</li>
+<li><code class="notranslate">drop_stale_output=True</code>：旧结果返回后直接丢弃，适用于重置前缀缓存或 KV Connector 状态已失效等情况，因为这些位置将重新计算。</li>
+<li><code class="notranslate">num_preemptions</code>：请求累计被抢占的次数，可用于统计和判断后续是否属于恢复执行。</li>
+<li><code class="notranslate">waiting.prepend_request()</code>：把请求重新放回等待队列，使其以后可以由 <code class="notranslate">schedule()</code> 再次选择。</li>
+<li><code class="notranslate">reset_preempted_req_ids</code>：记录本轮被抢占的请求 ID，随后写入 <code class="notranslate">SchedulerOutput.preempted_req_ids</code>，让 ModelRunner 重置对应的缓存状态。</li>
+<li><code class="notranslate">_inflight_prefills.discard()</code>：如果该请求仍处于分块 Prefill，将它从正在进行的 Prefill 集合中移除，因为其当前缓存和计算进度已经被重置。</li>
+<li>重要调用约束：该函数不会自行从 <code class="notranslate">self.running</code> 删除请求。<code class="notranslate">schedule()</code> 或 <code class="notranslate">reset_prefix_cache()</code> 必须先把请求弹出，再调用此函数。</li>
+</ul>
+<ol start="5">
+<li>核心流程：</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">确认 request.status == RUNNING
+              ↓
+释放或延迟释放 KV Cache block
+              ↓
+释放多模态/编码器缓存
+              ↓
+从正在 Prefill 的集合中移除
+              ↓
+状态改为 PREEMPTED
+              ↓
+num_computed_tokens 清零
+清空推测 token 和输出占位符
+              ↓
+标记尚未返回的异步输出为 stale
+并决定交付还是丢弃
+              ↓
+num_preemptions 加一
+记录 PREEMPTED 事件
+              ↓
+重新放入 waiting 队列
+              ↓
+记录到 reset_preempted_req_ids
+</code></pre>
+<ol start="6">
+<li><strong>在整个项目中的定位</strong>：</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">Scheduler.schedule()
+尝试为运行请求分配 KV Cache block
+              ↓
+缓存空间不足
+              ↓
+选择低优先级或队尾请求作为被抢占者
+              ↓
+调用者先从 running 队列移除请求
+              ↓
+_preempt_request()                         ← 当前函数
+    ├─ 释放缓存资源
+    ├─ 重置计算进度
+    ├─ 处理未返回的旧输出
+    └─ 放回 waiting 队列
+              ↓
+SchedulerOutput.preempted_req_ids
+通知 ModelRunner 清理请求状态
+              ↓
+后续 Scheduler.schedule()
+重新选择该请求并分配 KV block
+              ↓
+重新计算或利用前缀缓存恢复
+              ↓
+ModelExecutor / ModelRunner 继续执行
+</code></pre>
+<p>除缓存不足外，<code class="notranslate">reset_prefix_cache(reset_running_requests=True)</code> 也会调用该函数，将所有运行请求抢占后再安全重置前缀缓存。</p>
+<h3>update from output函数</h3>
+<div class="highlight highlight-source-python"><pre class="notranslate"><span class="pl-c"># scheduler.py:1922</span>
+<span class="pl-k">def</span> <span class="pl-en">update_from_output</span>(
+    <span class="pl-s1">self</span>,
+    <span class="pl-s1">scheduler_output</span>: <span class="pl-smi">SchedulerOutput</span>,
+    <span class="pl-s1">model_runner_output</span>: <span class="pl-smi">ModelRunnerOutput</span>,
+) <span class="pl-c1">-&gt;</span> <span class="pl-s1">dict</span>[<span class="pl-smi">int</span>, <span class="pl-smi">EngineCoreOutputs</span>]:
+
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-c">#  第一阶段：提取本轮调度计划和模型计算结果</span>
+    <span class="pl-c">#  L1927 - L1937</span>
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+
+    <span class="pl-s1">sampled_token_ids</span> <span class="pl-c1">=</span> <span class="pl-s1">model_runner_output</span>.<span class="pl-c1">sampled_token_ids</span>
+    <span class="pl-s1">logprobs</span> <span class="pl-c1">=</span> <span class="pl-s1">model_runner_output</span>.<span class="pl-c1">logprobs</span>
+    <span class="pl-s1">prompt_logprobs_dict</span> <span class="pl-c1">=</span> <span class="pl-s1">model_runner_output</span>.<span class="pl-c1">prompt_logprobs_dict</span>
+    <span class="pl-s1">pooler_outputs</span> <span class="pl-c1">=</span> <span class="pl-s1">model_runner_output</span>.<span class="pl-c1">pooler_output</span>
+
+    <span class="pl-c"># ★ schedule() 决定的“每个请求本轮计算多少 token”</span>
+    <span class="pl-s1">num_scheduled_tokens</span> <span class="pl-c1">=</span> <span class="pl-s1">scheduler_output</span>.<span class="pl-c1">num_scheduled_tokens</span>
+
+    <span class="pl-s1">kv_connector_output</span> <span class="pl-c1">=</span> <span class="pl-s1">model_runner_output</span>.<span class="pl-c1">kv_connector_output</span>
+    <span class="pl-s1">ec_connector_output</span> <span class="pl-c1">=</span> <span class="pl-s1">model_runner_output</span>.<span class="pl-c1">ec_connector_output</span>
+    <span class="pl-s1">cudagraph_stats</span> <span class="pl-c1">=</span> <span class="pl-s1">model_runner_output</span>.<span class="pl-c1">cudagraph_stats</span>
+
+    <span class="pl-c"># 最终先按 client_index 收集每个客户端的请求输出</span>
+    <span class="pl-s1">outputs</span> <span class="pl-c1">=</span> <span class="pl-en">defaultdict</span>(<span class="pl-s1">list</span>)
+
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-c">#  第二阶段：处理批次级资源和缓存传输结果</span>
+    <span class="pl-c">#  L1939 - L1986</span>
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+
+    <span class="pl-c"># ── 1. 释放已经确认不再被 GPU 使用的延期 KV block ──</span>
+    <span class="pl-k">if</span> <span class="pl-s1">self</span>.<span class="pl-c1">defer_block_free</span> <span class="pl-c1">and</span> <span class="pl-s1">scheduler_output</span>.<span class="pl-c1">total_num_scheduled_tokens</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">0</span>:
+        <span class="pl-s1">self</span>.<span class="pl-c1">processed_step_seq</span> <span class="pl-c1">+=</span> <span class="pl-c1">1</span>
+        <span class="pl-s1">self</span>.<span class="pl-c1">_drain_deferred_frees</span>()
+
+    <span class="pl-c"># ── 2. 收集本轮性能统计 ──</span>
+    <span class="pl-s1">perf_stats</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>
+    <span class="pl-k">if</span> <span class="pl-s1">self</span>.<span class="pl-c1">perf_metrics</span> <span class="pl-c1">and</span> <span class="pl-s1">self</span>.<span class="pl-c1">perf_metrics</span>.<span class="pl-c1">is_enabled</span>():
+        <span class="pl-s1">perf_stats</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">perf_metrics</span>.<span class="pl-c1">get_step_perf_stats_per_gpu</span>(
+            <span class="pl-s1">scheduler_output</span>
+        )
+
+    <span class="pl-c"># ── 3. 处理远端 KV 加载失败或无效 block ──</span>
+    <span class="pl-s1">failed_kv_load_req_ids</span> <span class="pl-c1">=</span> <span class="pl-en">set</span>()
+
+    <span class="pl-k">if</span> <span class="pl-s1">kv_connector_output</span> <span class="pl-c1">and</span> <span class="pl-s1">kv_connector_output</span>.<span class="pl-c1">failed_recving</span>:
+        <span class="pl-s1">failed_kv_load_req_ids</span>.<span class="pl-c1">update</span>(
+            <span class="pl-s1">self</span>.<span class="pl-c1">_handle_failed_recving</span>(
+                <span class="pl-s1">kv_connector_output</span>.<span class="pl-c1">failed_recving</span>
+            )
+        )
+
+    <span class="pl-k">if</span> <span class="pl-s1">kv_connector_output</span> <span class="pl-c1">and</span> <span class="pl-s1">kv_connector_output</span>.<span class="pl-c1">invalid_block_ids</span>:
+        <span class="pl-s1">failed_kv_load_req_ids</span>.<span class="pl-c1">update</span>(
+            <span class="pl-s1">self</span>.<span class="pl-c1">_handle_invalid_blocks</span>(
+                <span class="pl-s1">kv_connector_output</span>.<span class="pl-c1">invalid_block_ids</span>,
+                <span class="pl-s1">num_scheduled_tokens</span>,
+            )
+        )
+        <span class="pl-c"># 根据配置：</span>
+        <span class="pl-c">#   要么降低 num_computed_tokens，让这些 token 重新计算</span>
+        <span class="pl-c">#   要么稍后把请求作为错误结束</span>
+
+    <span class="pl-c"># ── 4. 保存本轮 MoE 专家路由信息 ──</span>
+    <span class="pl-k">if</span> <span class="pl-s1">model_runner_output</span>.<span class="pl-c1">routed_experts</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+        <span class="pl-s1">routing_data</span> <span class="pl-c1">=</span> ...
+        <span class="pl-s1">routing_offsets</span> <span class="pl-c1">=</span> ...
+    <span class="pl-k">else</span>:
+        <span class="pl-s1">routing_data</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>
+        <span class="pl-s1">routing_offsets</span> <span class="pl-c1">=</span> {}
+
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-c">#  第三阶段：★ 逐个处理本轮执行过的请求</span>
+    <span class="pl-c">#  L1988 - L2232</span>
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+
+    <span class="pl-s1">stopped_running_reqs</span> <span class="pl-c1">=</span> <span class="pl-en">set</span>()
+    <span class="pl-s1">stopped_preempted_reqs</span> <span class="pl-c1">=</span> <span class="pl-en">set</span>()
+    <span class="pl-s1">spec_decoding_stats</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>
+
+    <span class="pl-k">for</span> <span class="pl-s1">req_id</span>, <span class="pl-s1">num_tokens_scheduled</span> <span class="pl-c1">in</span> <span class="pl-s1">num_scheduled_tokens</span>.<span class="pl-c1">items</span>():
+
+        <span class="pl-s1">request</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">requests</span>.<span class="pl-c1">get</span>(<span class="pl-s1">req_id</span>)
+
+        <span class="pl-c"># ── 1. 更新在途 token 和 stale output 计数 ──</span>
+        <span class="pl-s1">output_is_stale</span> <span class="pl-c1">=</span> <span class="pl-c1">False</span>
+
+        <span class="pl-k">if</span> <span class="pl-s1">request</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+            <span class="pl-s1">request</span>.<span class="pl-c1">num_in_flight_tokens</span> <span class="pl-c1">-=</span> <span class="pl-s1">num_tokens_scheduled</span>
+
+            <span class="pl-k">if</span> <span class="pl-s1">request</span>.<span class="pl-c1">num_stale_output_tokens</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">0</span>:
+                <span class="pl-s1">output_is_stale</span> <span class="pl-c1">=</span> <span class="pl-c1">True</span>
+                <span class="pl-s1">request</span>.<span class="pl-c1">num_stale_output_tokens</span> <span class="pl-c1">-=</span> <span class="pl-s1">num_tokens_scheduled</span>
+
+        <span class="pl-c"># 远端 KV 加载失败：等待重新计算或错误处理</span>
+        <span class="pl-k">if</span> <span class="pl-s1">req_id</span> <span class="pl-c1">in</span> <span class="pl-s1">failed_kv_load_req_ids</span>:
+            <span class="pl-k">continue</span>
+
+        <span class="pl-c"># 请求可能在模型运行期间被用户取消</span>
+        <span class="pl-k">if</span> <span class="pl-s1">request</span> <span class="pl-c1">is</span> <span class="pl-c1">None</span> <span class="pl-c1">or</span> <span class="pl-s1">request</span>.<span class="pl-c1">is_finished</span>():
+            <span class="pl-k">continue</span>
+
+        <span class="pl-c"># 抢占前的旧输出被配置为直接丢弃</span>
+        <span class="pl-k">if</span> <span class="pl-s1">output_is_stale</span> <span class="pl-c1">and</span> <span class="pl-s1">request</span>.<span class="pl-c1">drop_stale_output</span>:
+            <span class="pl-k">continue</span>
+
+        <span class="pl-c"># ── 2. 找到该请求的模型输出 ──</span>
+        <span class="pl-s1">req_index</span> <span class="pl-c1">=</span> <span class="pl-s1">model_runner_output</span>.<span class="pl-c1">req_id_to_index</span>[<span class="pl-s1">req_id</span>]
+
+        <span class="pl-s1">generated_token_ids</span> <span class="pl-c1">=</span> (
+            <span class="pl-s1">sampled_token_ids</span>[<span class="pl-s1">req_index</span>]
+            <span class="pl-k">if</span> <span class="pl-s1">sampled_token_ids</span>
+            <span class="pl-k">else</span> []
+        )
+
+        <span class="pl-c"># ── 3. ★ 修正推测解码结果 ──</span>
+        <span class="pl-s1">scheduled_spec_token_ids</span> <span class="pl-c1">=</span> (
+            <span class="pl-s1">scheduler_output</span>.<span class="pl-c1">scheduled_spec_decode_tokens</span>.<span class="pl-c1">get</span>(<span class="pl-s1">req_id</span>)
+        )
+
+        <span class="pl-k">if</span> <span class="pl-s1">scheduled_spec_token_ids</span>:
+            <span class="pl-s1">num_draft_tokens</span> <span class="pl-c1">=</span> <span class="pl-en">len</span>(<span class="pl-s1">scheduled_spec_token_ids</span>)
+            <span class="pl-s1">num_accepted</span> <span class="pl-c1">=</span> <span class="pl-en">max</span>(
+                <span class="pl-en">len</span>(<span class="pl-s1">generated_token_ids</span>)
+                <span class="pl-c1">-</span> <span class="pl-s1">self</span>.<span class="pl-c1">num_sampled_tokens_per_step</span>,
+                <span class="pl-c1">0</span>,
+            )
+            <span class="pl-s1">num_rejected</span> <span class="pl-c1">=</span> <span class="pl-s1">num_draft_tokens</span> <span class="pl-c1">-</span> <span class="pl-s1">num_accepted</span>
+
+            <span class="pl-c"># schedule() 曾乐观地把草稿 token 计入已计算数量，</span>
+            <span class="pl-c"># 被主模型拒绝的部分必须回滚。</span>
+            <span class="pl-k">if</span> <span class="pl-c1">not</span> <span class="pl-s1">output_is_stale</span>:
+                <span class="pl-s1">request</span>.<span class="pl-c1">num_computed_tokens</span> <span class="pl-c1">-=</span> <span class="pl-s1">num_rejected</span>
+
+                <span class="pl-k">if</span> <span class="pl-s1">request</span>.<span class="pl-c1">num_output_placeholders</span> <span class="pl-c1">&gt;</span> <span class="pl-c1">0</span>:
+                    <span class="pl-s1">request</span>.<span class="pl-c1">num_output_placeholders</span> <span class="pl-c1">-=</span> <span class="pl-s1">num_rejected</span>
+
+            <span class="pl-c"># 记录推测 token 的提议、接受和拒绝情况</span>
+            <span class="pl-s1">spec_decoding_stats</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">make_spec_decoding_stats</span>(...)
+            <span class="pl-k">if</span> <span class="pl-s1">request</span>.<span class="pl-c1">spec_decode_metrics</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+                <span class="pl-s1">request</span>.<span class="pl-c1">spec_decode_metrics</span>.<span class="pl-c1">observe</span>(...)
+
+        <span class="pl-c"># ── 4. 模型已经真正使用完输入后，释放编码器输入 ──</span>
+        <span class="pl-k">if</span> <span class="pl-s1">request</span>.<span class="pl-c1">has_encoder_inputs</span>:
+            <span class="pl-s1">self</span>.<span class="pl-c1">_free_encoder_inputs</span>(<span class="pl-s1">request</span>)
+
+        <span class="pl-c"># ══════════════════════════════════════════════════</span>
+        <span class="pl-c">#  第四阶段：写入生成结果并判断请求是否停止</span>
+        <span class="pl-c">#  L2079 - L2187</span>
+        <span class="pl-c"># ══════════════════════════════════════════════════</span>
+
+        <span class="pl-s1">stopped</span> <span class="pl-c1">=</span> <span class="pl-c1">False</span>
+        <span class="pl-s1">new_token_ids</span> <span class="pl-c1">=</span> <span class="pl-s1">generated_token_ids</span>
+        <span class="pl-s1">pooler_output</span> <span class="pl-c1">=</span> (
+            <span class="pl-s1">pooler_outputs</span>[<span class="pl-s1">req_index</span>]
+            <span class="pl-k">if</span> <span class="pl-s1">pooler_outputs</span>
+            <span class="pl-k">else</span> <span class="pl-c1">None</span>
+        )
+
+        <span class="pl-s1">status_before_stop</span> <span class="pl-c1">=</span> <span class="pl-s1">request</span>.<span class="pl-c1">status</span>
+
+        <span class="pl-c"># ── 1. 普通生成请求：追加 token 并检查停止条件 ──</span>
+        <span class="pl-k">if</span> <span class="pl-s1">new_token_ids</span>:
+            <span class="pl-s1">new_token_ids</span>, <span class="pl-s1">stopped</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">_update_request_with_output</span>(
+                <span class="pl-s1">request</span>,
+                <span class="pl-s1">new_token_ids</span>,
+                <span class="pl-s1">is_stale</span><span class="pl-c1">=</span><span class="pl-s1">output_is_stale</span>,
+            )
+            <span class="pl-c"># 检查：</span>
+            <span class="pl-c">#   EOS / stop token</span>
+            <span class="pl-c">#   max_tokens / max_model_len</span>
+            <span class="pl-c">#   重复生成</span>
+
+        <span class="pl-c"># ── 2. Pooling 请求：得到向量后立即完成 ──</span>
+        <span class="pl-k">elif</span> <span class="pl-s1">request</span>.<span class="pl-c1">pooling_params</span> <span class="pl-c1">and</span> <span class="pl-s1">pooler_output</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+            <span class="pl-s1">request</span>.<span class="pl-c1">status</span> <span class="pl-c1">=</span> <span class="pl-v">RequestStatus</span>.<span class="pl-c1">FINISHED_STOPPED</span>
+            <span class="pl-s1">stopped</span> <span class="pl-c1">=</span> <span class="pl-c1">True</span>
+
+        <span class="pl-c"># ── 3. 纯多模态编码器：处理完整个输入后完成 ──</span>
+        <span class="pl-k">elif</span> (
+            <span class="pl-s1">self</span>.<span class="pl-c1">is_mm_encoder_only</span>
+            <span class="pl-c1">and</span> <span class="pl-s1">request</span>.<span class="pl-c1">num_computed_tokens</span> <span class="pl-c1">&gt;=</span> <span class="pl-s1">request</span>.<span class="pl-c1">num_prompt_tokens</span>
+        ):
+            <span class="pl-s1">request</span>.<span class="pl-c1">status</span> <span class="pl-c1">=</span> <span class="pl-v">RequestStatus</span>.<span class="pl-c1">FINISHED_STOPPED</span>
+            <span class="pl-s1">stopped</span> <span class="pl-c1">=</span> <span class="pl-c1">True</span>
+
+        <span class="pl-c"># ── 4. 校验结构化输出 token ──</span>
+        <span class="pl-k">if</span> <span class="pl-s1">new_token_ids</span> <span class="pl-c1">and</span> <span class="pl-c1">not</span> <span class="pl-s1">self</span>.<span class="pl-c1">structured_output_manager</span>.<span class="pl-c1">accept_tokens</span>(
+            <span class="pl-s1">request</span>,
+            <span class="pl-s1">new_token_ids</span>,
+        ):
+            <span class="pl-s1">request</span>.<span class="pl-c1">status</span> <span class="pl-c1">=</span> <span class="pl-v">RequestStatus</span>.<span class="pl-c1">FINISHED_ERROR</span>
+            <span class="pl-s1">request</span>.<span class="pl-c1">resumable</span> <span class="pl-c1">=</span> <span class="pl-c1">False</span>
+            <span class="pl-s1">stopped</span> <span class="pl-c1">=</span> <span class="pl-c1">True</span>
+
+        <span class="pl-c"># ── 5. 整理 MoE 路由和 Prefill 统计 ──</span>
+        <span class="pl-s1">routed_experts</span> <span class="pl-c1">=</span> ...
+        <span class="pl-s1">should_emit_output</span> <span class="pl-c1">=</span> <span class="pl-en">bool</span>(
+            <span class="pl-s1">new_token_ids</span>
+            <span class="pl-c1">or</span> <span class="pl-s1">pooler_output</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>
+            <span class="pl-c1">or</span> <span class="pl-s1">stopped</span>
+        )
+
+        <span class="pl-s1">prefill_stats</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>
+        <span class="pl-k">if</span> <span class="pl-s1">should_emit_output</span>:
+            <span class="pl-s1">prefill_stats</span> <span class="pl-c1">=</span> <span class="pl-s1">request</span>.<span class="pl-c1">take_prefill_stats</span>()
+            <span class="pl-k">if</span> <span class="pl-s1">prefill_stats</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+                <span class="pl-s1">prefill_stats</span>.<span class="pl-c1">finalize</span>(
+                    <span class="pl-s1">self</span>.<span class="pl-c1">kv_cache_manager</span>.<span class="pl-c1">estimate_cached_tokens</span>(<span class="pl-s1">request</span>)
+                )
+
+        <span class="pl-c"># ── 6. ★ 请求停止：处理会话并释放资源 ──</span>
+        <span class="pl-s1">finish_reason</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>
+        <span class="pl-s1">kv_transfer_params</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>
+        <span class="pl-s1">ec_transfer_params</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>
+
+        <span class="pl-k">if</span> <span class="pl-s1">stopped</span>:
+            <span class="pl-c"># 必须先保存结束原因；</span>
+            <span class="pl-c"># 可恢复会话可能随后被重新设为 WAITING。</span>
+            <span class="pl-s1">finish_reason</span> <span class="pl-c1">=</span> <span class="pl-s1">request</span>.<span class="pl-c1">get_finished_reason</span>()
+
+            <span class="pl-s1">finished</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">_handle_stopped_request</span>(<span class="pl-s1">request</span>)
+
+            <span class="pl-k">if</span> <span class="pl-s1">finished</span>:
+                (
+                    <span class="pl-s1">kv_transfer_params</span>,
+                    <span class="pl-s1">ec_transfer_params</span>,
+                ) <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">_free_request</span>(<span class="pl-s1">request</span>)
+                <span class="pl-c"># 释放编码器缓存和 KV block，</span>
+                <span class="pl-c"># 或等待 Connector 传输结束后再释放。</span>
+
+            <span class="pl-k">if</span> <span class="pl-s1">status_before_stop</span> <span class="pl-c1">==</span> <span class="pl-v">RequestStatus</span>.<span class="pl-c1">RUNNING</span>:
+                <span class="pl-s1">stopped_running_reqs</span>.<span class="pl-c1">add</span>(<span class="pl-s1">request</span>)
+            <span class="pl-k">else</span>:
+                <span class="pl-s1">stopped_preempted_reqs</span>.<span class="pl-c1">add</span>(<span class="pl-s1">request</span>)
+
+        <span class="pl-c"># ══════════════════════════════════════════════════</span>
+        <span class="pl-c">#  第五阶段：构造单个请求的 EngineCoreOutput</span>
+        <span class="pl-c">#  L2189 - L2232</span>
+        <span class="pl-c"># ══════════════════════════════════════════════════</span>
+
+        <span class="pl-c"># 提取该请求对应的生成 logprob</span>
+        <span class="pl-s1">new_logprobs</span> <span class="pl-c1">=</span> <span class="pl-c1">None</span>
+        <span class="pl-k">if</span> <span class="pl-s1">request</span>.<span class="pl-c1">sampling_params</span>.<span class="pl-c1">num_logprobs</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span> <span class="pl-c1">and</span> <span class="pl-s1">logprobs</span>:
+            <span class="pl-s1">new_logprobs</span> <span class="pl-c1">=</span> <span class="pl-s1">logprobs</span>.<span class="pl-c1">slice_request</span>(
+                <span class="pl-s1">req_index</span>,
+                <span class="pl-en">len</span>(<span class="pl-s1">new_token_ids</span>),
+            )
+
+        <span class="pl-c"># 可选：采样掩码、prompt logprob、NaN 统计等</span>
+        <span class="pl-s1">new_sampling_mask</span> <span class="pl-c1">=</span> ...
+        <span class="pl-s1">prompt_logprobs</span> <span class="pl-c1">=</span> <span class="pl-s1">prompt_logprobs_dict</span>.<span class="pl-c1">get</span>(<span class="pl-s1">req_id</span>)
+
+        <span class="pl-k">if</span> <span class="pl-s1">should_emit_output</span>:
+            <span class="pl-c"># ★ 按 client_index 分组，确保结果返回正确客户端</span>
+            <span class="pl-s1">outputs</span>[<span class="pl-s1">request</span>.<span class="pl-c1">client_index</span>].<span class="pl-c1">append</span>(
+                <span class="pl-en">EngineCoreOutput</span>(
+                    <span class="pl-s1">request_id</span><span class="pl-c1">=</span><span class="pl-s1">req_id</span>,
+                    <span class="pl-s1">new_token_ids</span><span class="pl-c1">=</span><span class="pl-s1">new_token_ids</span>,
+                    <span class="pl-s1">finish_reason</span><span class="pl-c1">=</span><span class="pl-s1">finish_reason</span>,
+                    <span class="pl-s1">new_logprobs</span><span class="pl-c1">=</span><span class="pl-s1">new_logprobs</span>,
+                    <span class="pl-s1">new_prompt_logprobs_tensors</span><span class="pl-c1">=</span><span class="pl-s1">prompt_logprobs</span>,
+                    <span class="pl-s1">pooling_output</span><span class="pl-c1">=</span><span class="pl-s1">pooler_output</span>,
+                    <span class="pl-s1">stop_reason</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">stop_reason</span>,
+                    <span class="pl-s1">events</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">take_events</span>(),
+                    <span class="pl-s1">prefill_stats</span><span class="pl-c1">=</span><span class="pl-s1">prefill_stats</span>,
+                    <span class="pl-s1">spec_decode_metrics</span><span class="pl-c1">=</span>...,
+                    <span class="pl-s1">kv_transfer_params</span><span class="pl-c1">=</span><span class="pl-s1">kv_transfer_params</span>,
+                    <span class="pl-s1">ec_transfer_params</span><span class="pl-c1">=</span><span class="pl-s1">ec_transfer_params</span>,
+                    <span class="pl-s1">routed_experts</span><span class="pl-c1">=</span><span class="pl-s1">routed_experts</span>,
+                    ...
+                )
+            )
+        <span class="pl-k">else</span>:
+            <span class="pl-c"># ★ 纯分块 Prefill 不向前端返回中间输出</span>
+            <span class="pl-k">assert</span> <span class="pl-c1">not</span> <span class="pl-s1">prompt_logprobs</span>
+
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-c">#  第六阶段：从请求队列中清除已停止请求</span>
+    <span class="pl-c">#  L2234 - L2241</span>
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+
+    <span class="pl-k">if</span> <span class="pl-s1">stopped_running_reqs</span>:
+        <span class="pl-s1">self</span>.<span class="pl-c1">running</span> <span class="pl-c1">=</span> <span class="pl-en">remove_all</span>(
+            <span class="pl-s1">self</span>.<span class="pl-c1">running</span>,
+            <span class="pl-s1">stopped_running_reqs</span>,
+        )
+
+    <span class="pl-k">if</span> <span class="pl-s1">stopped_preempted_reqs</span>:
+        <span class="pl-s1">self</span>.<span class="pl-c1">waiting</span>.<span class="pl-c1">remove_requests</span>(<span class="pl-s1">stopped_preempted_reqs</span>)
+        <span class="pl-s1">self</span>.<span class="pl-c1">skipped_waiting</span>.<span class="pl-c1">remove_requests</span>(<span class="pl-s1">stopped_preempted_reqs</span>)
+
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-c">#  第七阶段：处理 grammar、KV 和 EC 错误</span>
+    <span class="pl-c">#  L2243 - L2270</span>
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+
+    <span class="pl-s1">error_req_ids</span> <span class="pl-c1">=</span> <span class="pl-en">set</span>(<span class="pl-s1">self</span>.<span class="pl-c1">grammar_compile_error_reqs</span>)
+    <span class="pl-s1">self</span>.<span class="pl-c1">grammar_compile_error_reqs</span>.<span class="pl-c1">clear</span>()
+
+    <span class="pl-k">if</span> <span class="pl-s1">failed_kv_load_req_ids</span> <span class="pl-c1">and</span> <span class="pl-c1">not</span> <span class="pl-s1">self</span>.<span class="pl-c1">recompute_kv_load_failures</span>:
+        <span class="pl-s1">error_req_ids</span>.<span class="pl-c1">update</span>(<span class="pl-s1">failed_kv_load_req_ids</span>)
+
+    <span class="pl-k">if</span> <span class="pl-s1">self</span>.<span class="pl-c1">ec_connector</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+        <span class="pl-s1">error_req_ids</span>.<span class="pl-c1">update</span>(
+            <span class="pl-s1">self</span>.<span class="pl-c1">ec_connector</span>.<span class="pl-c1">take_unavailable_requests</span>()
+        )
+
+    <span class="pl-k">if</span> <span class="pl-s1">error_req_ids</span>:
+        <span class="pl-s1">error_reqs</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">finish_requests</span>(
+            <span class="pl-s1">error_req_ids</span>,
+            <span class="pl-v">RequestStatus</span>.<span class="pl-c1">FINISHED_ERROR</span>,
+        )
+
+        <span class="pl-k">for</span> <span class="pl-s1">request</span> <span class="pl-c1">in</span> <span class="pl-s1">error_reqs</span>:
+            <span class="pl-s1">outputs</span>[<span class="pl-s1">request</span>.<span class="pl-c1">client_index</span>].<span class="pl-c1">append</span>(
+                <span class="pl-en">EngineCoreOutput</span>(
+                    <span class="pl-s1">request_id</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">request_id</span>,
+                    <span class="pl-s1">new_token_ids</span><span class="pl-c1">=</span>[],
+                    <span class="pl-s1">finish_reason</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">get_finished_reason</span>(),
+                    <span class="pl-s1">events</span><span class="pl-c1">=</span><span class="pl-s1">request</span>.<span class="pl-c1">take_events</span>(),
+                )
+            )
+
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-c">#  第八阶段：更新缓存连接器状态和统计信息</span>
+    <span class="pl-c">#  L2271 - L2334</span>
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+
+    <span class="pl-c"># 处理远端 KV 接收/发送完成事件</span>
+    <span class="pl-k">if</span> <span class="pl-s1">kv_connector_output</span>:
+        <span class="pl-s1">self</span>.<span class="pl-c1">_update_from_kv_xfer_finished</span>(<span class="pl-s1">kv_connector_output</span>)
+
+    <span class="pl-c"># 更新编码器缓存传输状态</span>
+    <span class="pl-k">if</span> <span class="pl-s1">self</span>.<span class="pl-c1">ec_connector</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span> <span class="pl-c1">and</span> <span class="pl-s1">ec_connector_output</span>:
+        <span class="pl-s1">self</span>.<span class="pl-c1">ec_connector</span>.<span class="pl-c1">update_connector_output</span>(
+            <span class="pl-s1">ec_connector_output</span>
+        )
+
+    <span class="pl-c"># 合并 Worker 侧和 Scheduler 侧的 Connector 统计</span>
+    <span class="pl-s1">kv_connector_stats</span> <span class="pl-c1">=</span> ...
+    <span class="pl-s1">ec_connector_stats</span> <span class="pl-c1">=</span> ...
+
+    <span class="pl-c"># 收集并发布 KV Cache 事件</span>
+    <span class="pl-s1">events</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">kv_cache_manager</span>.<span class="pl-c1">take_events</span>()
+
+    <span class="pl-k">if</span> <span class="pl-s1">self</span>.<span class="pl-c1">connector</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+        <span class="pl-s1">connector_events</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">connector</span>.<span class="pl-c1">take_events</span>()
+        ...
+
+    <span class="pl-k">if</span> <span class="pl-s1">events</span>:
+        <span class="pl-s1">self</span>.<span class="pl-c1">kv_event_publisher</span>.<span class="pl-c1">publish</span>(
+            <span class="pl-en">KVEventBatch</span>(
+                <span class="pl-s1">ts</span><span class="pl-c1">=</span><span class="pl-s1">time</span>.<span class="pl-c1">time</span>(),
+                <span class="pl-s1">events</span><span class="pl-c1">=</span><span class="pl-s1">events</span>,
+            )
+        )
+
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+    <span class="pl-c">#  第九阶段：★ 组装最终 EngineCoreOutputs</span>
+    <span class="pl-c">#  L2335 - L2368</span>
+    <span class="pl-c"># ══════════════════════════════════════════════════════</span>
+
+    <span class="pl-c"># 每个 client_index 得到一份独立输出</span>
+    <span class="pl-s1">engine_core_outputs</span> <span class="pl-c1">=</span> {
+        <span class="pl-s1">client_index</span>: <span class="pl-en">EngineCoreOutputs</span>(<span class="pl-s1">outputs</span><span class="pl-c1">=</span><span class="pl-s1">client_outputs</span>)
+        <span class="pl-k">for</span> <span class="pl-s1">client_index</span>, <span class="pl-s1">client_outputs</span> <span class="pl-c1">in</span> <span class="pl-s1">outputs</span>.<span class="pl-c1">items</span>()
+    }
+
+    <span class="pl-c"># 多引擎模式：附加已完成的请求 ID</span>
+    <span class="pl-k">if</span> <span class="pl-s1">self</span>.<span class="pl-c1">finished_req_ids_dict</span>:
+        <span class="pl-k">for</span> <span class="pl-s1">client_index</span>, <span class="pl-s1">finished_set</span> <span class="pl-c1">in</span> <span class="pl-s1">self</span>.<span class="pl-c1">finished_req_ids_dict</span>.<span class="pl-c1">items</span>():
+            <span class="pl-k">if</span> <span class="pl-s1">client_index</span> <span class="pl-c1">in</span> <span class="pl-s1">engine_core_outputs</span>:
+                <span class="pl-s1">engine_core_outputs</span>[<span class="pl-s1">client_index</span>].<span class="pl-c1">finished_requests</span> <span class="pl-c1">=</span> <span class="pl-s1">finished_set</span>
+            <span class="pl-k">else</span>:
+                <span class="pl-s1">engine_core_outputs</span>[<span class="pl-s1">client_index</span>] <span class="pl-c1">=</span> <span class="pl-en">EngineCoreOutputs</span>(
+                    <span class="pl-s1">finished_requests</span><span class="pl-c1">=</span><span class="pl-s1">finished_set</span>
+                )
+
+        <span class="pl-s1">self</span>.<span class="pl-c1">finished_req_ids_dict</span>.<span class="pl-c1">clear</span>()
+
+    <span class="pl-c"># 附加调度、推测解码、Connector 和性能统计</span>
+    <span class="pl-s1">stats</span> <span class="pl-c1">=</span> <span class="pl-s1">self</span>.<span class="pl-c1">make_stats</span>(
+        <span class="pl-s1">spec_decoding_stats</span>,
+        <span class="pl-s1">kv_connector_stats</span>,
+        <span class="pl-s1">cudagraph_stats</span>,
+        <span class="pl-s1">perf_stats</span>,
+        <span class="pl-s1">ec_connector_stats</span><span class="pl-c1">=</span><span class="pl-s1">ec_connector_stats</span>,
+    )
+
+    <span class="pl-k">if</span> <span class="pl-s1">stats</span> <span class="pl-c1"><span class="pl-c1">is</span> <span class="pl-c1">not</span></span> <span class="pl-c1">None</span>:
+        <span class="pl-c"># 统计只需要发送给一个前端</span>
+        <span class="pl-k">if</span> <span class="pl-c1">not</span> <span class="pl-s1">engine_core_outputs</span>:
+            <span class="pl-s1">engine_core_outputs</span>[<span class="pl-c1">0</span>] <span class="pl-c1">=</span> <span class="pl-en">EngineCoreOutputs</span>()
+
+        <span class="pl-s1">first_output</span> <span class="pl-c1">=</span> <span class="pl-en">next</span>(<span class="pl-en">iter</span>(<span class="pl-s1">engine_core_outputs</span>.<span class="pl-c1">values</span>()))
+        <span class="pl-s1">first_output</span>.<span class="pl-c1">scheduler_stats</span> <span class="pl-c1">=</span> <span class="pl-s1">stats</span>
+
+    <span class="pl-c"># ★ 最终产物：</span>
+    <span class="pl-c"># {client_index: 该客户端本轮产生的所有 EngineCoreOutput}</span>
+    <span class="pl-k">return</span> <span class="pl-s1">engine_core_outputs</span></pre></div>
+<ol>
+<li>
+<p><strong>主要作用</strong>：<code class="notranslate">update_from_output()</code> 接收本轮模型执行结果，把新生成的 token 写回对应 <code class="notranslate">Request</code>，修正推测解码和异步调度状态，判断请求是否结束并释放资源，最后生成按客户端分组的 <code class="notranslate">EngineCoreOutputs</code>。它是“模型完成一轮计算”之后，调度器处理结果和更新内部状态的核心函数。</p>
+</li>
+<li>
+<p><strong>输入（参数）</strong>：</p>
+</li>
+</ol>
+<ul>
+<li><code class="notranslate">scheduler_output</code>：本轮执行前由 <code class="notranslate">schedule()</code> 生成的计划，记录哪些请求被执行、各自执行多少 token，以及推测解码、编码器输入和缓存信息。</li>
+<li><code class="notranslate">model_runner_output</code>：<code class="notranslate">ModelRunner</code> 真正执行模型后返回的结果，可能包含生成的 token ID、logprob、Pooling 结果、KV/编码器缓存传输结果、MoE 专家路由信息和性能统计。<br>
+这两个参数必须属于同一轮执行，否则请求和输出将无法正确对应。</li>
+</ul>
+<ol start="3">
+<li>
+<p><strong>输出（改变了什么值）</strong>：返回 <code class="notranslate">dict[int, EngineCoreOutputs]</code>，键是 <code class="notranslate">client_index</code>，值是该客户端本轮收到的 token、结束原因、logprob、Pooling 结果、事件和统计信息。函数还会更新请求的输出 token、在途 token 数、停止状态和推测解码计数；移除并释放已结束请求；处理缓存传输结果、延迟释放的 KV block、缓存事件和调度统计。</p>
+</li>
+<li>
+<p><strong>术语解释</strong>：</p>
+</li>
+</ol>
+<ul>
+<li><code class="notranslate">SchedulerOutput</code>：模型执行前的“计算计划”。其中 <code class="notranslate">num_scheduled_tokens</code> 表示每个请求本轮被安排计算多少个 token。</li>
+<li><code class="notranslate">ModelRunnerOutput</code>：模型执行后的“计算结果”。它保存 token ID 等底层结果，还不是用户最终看到的文本。</li>
+<li><code class="notranslate">EngineCoreOutput</code>：单个请求本轮产生的引擎输出，包含新增 token、结束原因、logprob、Pooling 结果等。</li>
+<li><code class="notranslate">EngineCoreOutputs</code>：一组请求输出的容器。同一个 <code class="notranslate">client_index</code> 的结果会放在一起，便于多前端或多客户端把结果送回正确用户。</li>
+<li><code class="notranslate">num_in_flight_tokens</code>：已经提交执行、但结果尚未处理完的 token 数。本函数收到结果后会减去本轮完成的数量。</li>
+<li>stale output：请求被抢占后才返回的旧一轮异步输出。函数会减少对应的 stale 计数；如果设置了 <code class="notranslate">drop_stale_output</code>，则直接丢弃这些旧结果。</li>
+<li>推测解码回滚：<code class="notranslate">schedule()</code> 会先假设草稿 token 都参与了计算，但主模型可能只接受其中一部分。本函数根据接受数量把被拒绝的部分从 <code class="notranslate">num_computed_tokens</code> 和输出占位符中扣除。</li>
+<li><code class="notranslate">sampled_token_ids</code>：模型新生成的 token ID。函数通过 <code class="notranslate">_update_request_with_output()</code> 追加到请求中，并逐个检查停止条件。</li>
+<li>停止条件：包括 EOS token、指定的 stop token、<code class="notranslate">max_tokens</code>、模型最大长度以及重复检测。命中后会设置相应的 <code class="notranslate">RequestStatus</code> 和 <code class="notranslate">finish_reason</code>。</li>
+<li><code class="notranslate">finish_reason</code>：返回给上层的结束原因，例如 <code class="notranslate">stop</code>、<code class="notranslate">length</code>、<code class="notranslate">abort</code>、<code class="notranslate">error</code> 或 <code class="notranslate">repetition</code>。</li>
+<li>结构化输出校验：生成 JSON、正则约束内容时，<code class="notranslate">StructuredOutputManager</code> 检查生成 token 是否符合 grammar；意外违反约束时，请求以错误状态结束。</li>
+<li>Pooling 输出：Embedding、分类等任务不生成普通文本 token，而是返回向量或分类结果；得到结果后即可结束。</li>
+<li>可恢复流式会话：请求满足当前停止条件后，不一定永久结束。<code class="notranslate">_handle_stopped_request()</code> 可能把它转为等待下一段输入，而不是释放整个会话。</li>
+<li>logprob：模型为 token 给出的对数概率，可用于观察模型对生成结果的置信程度。</li>
+<li>prompt logprob：prompt 中各 token 的对数概率，与新生成 token 的 logprob 不同。</li>
+<li>延迟释放：异步执行时，某些 GPU 操作可能仍在写 KV block。本函数确认对应执行轮次完成后，才通过 <code class="notranslate">_drain_deferred_frees()</code> 安全归还这些 block。</li>
+<li>KV/EC Connector：分别处理远程 KV Cache和编码器缓存传输。本函数接收传输成功、失败或 block 无效等结果，并决定重新计算还是让请求报错。</li>
+<li>缓存加载失败：如果配置允许重新计算，会调整请求的计算进度，使无效 token 重新计算；否则以 <code class="notranslate">FINISHED_ERROR</code> 结束请求。</li>
+<li>编码器缓存释放：图片等输入已经实际执行完后，函数才释放不再需要的编码器缓存，避免提前释放仍被 GPU 使用的数据。</li>
+<li>MoE 专家路由：如果启用相关返回功能，函数整理本轮 token 使用了哪些专家，并随请求输出返回。</li>
+<li>KV Cache event：缓存分配、释放或远程传输产生的事件，处理完成后统一发布。</li>
+<li>无部分 Prefill 输出：如果本轮只处理了部分 prompt、没有生成 token、Pooling 结果或停止事件，通常不会创建 <code class="notranslate">EngineCoreOutput</code>。</li>
+<li>该函数不负责 detokenize：它主要返回 token ID，后面的 <code class="notranslate">OutputProcessor</code> 才把 token ID 转换为文字，并处理字符串级 stop 条件。</li>
+</ul>
+<p>25 核心流程：</p>
+<pre class="notranslate"><code class="notranslate">1. 读取本轮计划和模型结果
+   ├─ sampled token
+   ├─ logprob / pooling output
+   ├─ Connector 结果
+   └─ 性能与 CUDA Graph 信息
+                  ↓
+2. 处理批次级状态
+   ├─ 安全释放延期归还的 KV block
+   ├─ 处理远程 KV 加载失败或无效 block
+   └─ 保存 MoE 专家路由数据
+                  ↓
+3. 逐个处理本轮请求
+   ├─ 减少 num_in_flight_tokens
+   ├─ 忽略已结束、失效或应丢弃的旧结果
+   ├─ 统计推测 token 的接受与拒绝
+   ├─ 回滚被拒绝的推测计算进度
+   ├─ 追加新生成 token
+   ├─ 检查长度、EOS、stop token和重复条件
+   ├─ 校验结构化输出
+   └─ 提取 logprob、Pooling 和其他附加结果
+                  ↓
+4. 处理停止请求
+   ├─ 可恢复会话 → 等待下一段输入
+   └─ 真正结束 → 释放 KV/编码器缓存和请求状态
+                  ↓
+5. 构造 EngineCoreOutput
+   └─ 按 request.client_index 分组
+                  ↓
+6. 清理请求队列
+   ├─ 从 running 移除已停止请求
+   └─ 从 waiting 移除结束的抢占请求
+                  ↓
+7. 处理额外错误与 Connector 状态
+   ├─ grammar 编译错误
+   ├─ KV/EC 传输错误
+   └─ 更新远程缓存传输完成状态
+                  ↓
+8. 汇总事件与统计
+   ├─ KV Cache 事件
+   ├─ 推测解码统计
+   ├─ Connector 统计
+   └─ 性能与 CUDA Graph 统计
+                  ↓
+返回 dict[client_index, EngineCoreOutputs]
+</code></pre>
+<p>一个重要细节是：<code class="notranslate">schedule()</code> 在模型执行前已经先增加了 <code class="notranslate">num_computed_tokens</code>；本函数负责根据真实执行结果进行确认或修正。例如推测 token 被拒绝时，需要把多算的进度回滚。</p>
+<ol start="6">
+<li><strong>在整个项目中的定位</strong>：</li>
+</ol>
+<pre class="notranslate"><code class="notranslate">Scheduler.add_request()
+请求进入等待队列
+        ↓
+EngineCore.step()
+        ↓
+Scheduler.schedule()
+生成本轮 SchedulerOutput
+        ↓
+ModelExecutor.execute_model()
+        ↓
+Worker / ModelRunner
+执行真正的 GPU 模型计算
+        ↓
+ModelRunnerOutput
+        ↓
+Scheduler.update_from_output()              ← 当前函数
+    ├─ 将结果写回 Request
+    ├─ 修正推测解码和异步状态
+    ├─ 判断请求是否结束
+    ├─ 释放请求缓存资源
+    └─ 生成 EngineCoreOutputs
+        ↓
+EngineCore.step() 返回
+        ↓
+EngineCoreClient / LLMEngine
+        ↓
+OutputProcessor
+detokenize、处理字符串 stop 条件
+并生成用户可见结果
+        ↓
+未结束请求进入下一轮 schedule()
+</code></pre>
+<p>因此，<code class="notranslate">schedule()</code> 负责决定“这一轮计算什么”，<code class="notranslate">ModelRunner</code> 负责“真正计算”，而 <code class="notranslate">update_from_output()</code> 负责“解释计算结果、更新请求并决定下一步”。</p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z', 'copy': 'M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z', 'check': 'M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const createClipboardHTML = (codeContent, additionalClasses = '') => `
+        <pre class="notranslate"><code class="notranslate">${codeContent}</code></pre>
+        <div class="clipboard-container position-absolute right-0 top-0 ${additionalClasses}">
+            <clipboard-copy class="ClipboardButton btn m-2 p-0" role="button" style="display: inherit;">
+                <svg height="16" width="16" class="octicon octicon-copy m-2"><path d="${IconList["copy"]}"></path></svg>
+                <svg height="16" width="16" class="octicon octicon-check color-fg-success m-2 d-none"><path d="${IconList["check"]}"></path></svg>
+            </clipboard-copy>
+            <div class="copy-feedback">Copied!</div>
+        </div>
+    `;
+
+    const handleCodeElements = (selector = '') => {
+        document.querySelectorAll(selector).forEach(codeElement => {
+            const codeContent = codeElement.innerHTML;
+            const newStructure = document.createElement('div');
+            newStructure.className = 'snippet-clipboard-content position-relative overflow-auto';
+            newStructure.innerHTML = createClipboardHTML(codeContent);
+
+            const parentElement = codeElement.parentElement;
+            if (selector.includes('highlight')) {
+                parentElement.insertBefore(newStructure, codeElement.nextSibling);
+                parentElement.removeChild(codeElement);
+            } else {
+                parentElement.parentElement.replaceChild(newStructure, parentElement);
+            }
+        });
+    };
+
+    handleCodeElements('pre.notranslate > code.notranslate');
+    handleCodeElements('div.highlight > pre.notranslate');
+
+    let currentFeedback = null;
+    document.querySelectorAll('clipboard-copy').forEach(copyButton => {
+        copyButton.addEventListener('click', () => {
+            const codeContent = copyButton.closest('.snippet-clipboard-content').innerText;
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = codeContent;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempTextArea);
+
+            const copyIcon = copyButton.querySelector('.octicon-copy');
+            const checkIcon = copyButton.querySelector('.octicon-check');
+            const copyFeedback = copyButton.nextElementSibling;
+
+            if (currentFeedback && currentFeedback !== copyFeedback) {currentFeedback.style.display = 'none';}
+            currentFeedback = copyFeedback;
+
+            copyIcon.classList.add('d-none');
+            checkIcon.classList.remove('d-none');
+            copyFeedback.style.display = 'block';
+            copyButton.style.borderColor = 'var(--color-success-fg)';
+
+            setTimeout(() => {
+                copyIcon.classList.remove('d-none');
+                checkIcon.classList.add('d-none');
+                copyFeedback.style.display = 'none';
+                copyButton.style.borderColor = '';
+            }, 2000);
+        });
+    });
+});
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script>
+
+</html>
