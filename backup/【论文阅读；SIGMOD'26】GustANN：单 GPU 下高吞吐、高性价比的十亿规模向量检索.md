@@ -298,6 +298,7 @@ SPANN 的 SSD 最大带宽利用率（18.0%）高于 DiskANN 与 Starling，得�
 GustANN 最大占用 33GB 内存空间（大部分用于初始化阶段向 GPU 传输数据；检索阶段仅需约 200MB 作为 4.3 节提及的跳转缓冲区），内存写入带宽需求 61GB/s，读取带宽需求 13GB/s。此外，GustANN 执行检索时，仅使用单个 NUMA 节点的内存。因此，单个 NUMA 节点上的 4 条内存（总计 128GB）便可满足需求。
 除此之外，GustANN 其余硬件配置与 5.1 节描述一致。
 ### 5.5.2 成本对比
+![image.png](https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261106102013.png)
 我们根据硬件需求，将所有参与对比的系统分为三类；在 SIFT100M 数据集、recall@10=0.9 条件下，以吞吐量最高的系统（下述列表首个系统）为基准对比各方案性价比：
 (1) **GPU+CPU+SSD（GustANN）**：硬件规格如上所述。
 (2) **CPU+SSD（DiskANN、Starling、SPANN）**：硬件规格沿用 5.1 节配置，无需 GPU，内存同样配置 128GB。这类系统无法打满单块 SSD 带宽，为保证对比公平，统一使用 1 块 SSD。我们同时给出 3.1 节提到的理想系统的性价比（表格中标注 “Ideal”）。经测算，该理想系统可打满 3.6 块 SSD 的带宽，因此配置 4 块 SSD 参与对比。

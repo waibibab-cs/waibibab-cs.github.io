@@ -313,7 +313,8 @@ SIFT100M、DEEP100M 数据集的实验结果分别如图 7、图 8 所示，我�
 GustANN 最大占用 33GB 内存空间（大部分用于初始化阶段向 GPU 传输数据；检索阶段仅需约 200MB 作为 4.3 节提及的跳转缓冲区），内存写入带宽需求 61GB/s，读取带宽需求 13GB/s。此外，GustANN 执行检索时，仅使用单个 NUMA 节点的内存。因此，单个 NUMA 节点上的 4 条内存（总计 128GB）便可满足需求。<br>
 除此之外，GustANN 其余硬件配置与 5.1 节描述一致。</p>
 <h3>5.5.2 成本对比</h3>
-<p>我们根据硬件需求，将所有参与对比的系统分为三类；在 SIFT100M 数据集、recall@10=0.9 条件下，以吞吐量最高的系统（下述列表首个系统）为基准对比各方案性价比：<br>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261106102013.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261106102013.png" alt="image.png" style="max-width: 100%;"></a><br>
+我们根据硬件需求，将所有参与对比的系统分为三类；在 SIFT100M 数据集、recall@10=0.9 条件下，以吞吐量最高的系统（下述列表首个系统）为基准对比各方案性价比：<br>
 (1) <strong>GPU+CPU+SSD（GustANN）</strong>：硬件规格如上所述。<br>
 (2) <strong>CPU+SSD（DiskANN、Starling、SPANN）</strong>：硬件规格沿用 5.1 节配置，无需 GPU，内存同样配置 128GB。这类系统无法打满单块 SSD 带宽，为保证对比公平，统一使用 1 块 SSD。我们同时给出 3.1 节提到的理想系统的性价比（表格中标注 “Ideal”）。经测算，该理想系统可打满 3.6 块 SSD 的带宽，因此配置 4 块 SSD 参与对比。<br>
 (3) <strong>CPU+GPU（BANG、RUMMY）</strong>：要支撑十亿规模数据集，需要更大容量内存；处理 DEEP1B 数据集时最高需要 1TB 内存，无需 SSD。<br>
