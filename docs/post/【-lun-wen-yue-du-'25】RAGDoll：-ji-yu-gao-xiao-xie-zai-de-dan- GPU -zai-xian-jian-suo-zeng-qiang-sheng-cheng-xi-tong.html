@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="RAGDoll: Efficient Offloading-based Online RAG System on a Single GPU
+# 摘要
+检索增强生成（RAG）通过引入相关外部知识，提升大语言模型（LLM）的生成质量。">
+<meta property="og:title" content="【论文阅读'25】RAGDoll：基于高效卸载的单 GPU 在线检索增强生成系统">
+<meta property="og:description" content="RAGDoll: Efficient Offloading-based Online RAG System on a Single GPU
+# 摘要
+检索增强生成（RAG）通过引入相关外部知识，提升大语言模型（LLM）的生成质量。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/%E3%80%90-lun-wen-yue-du-%2725%E3%80%91RAGDoll%EF%BC%9A-ji-yu-gao-xiao-xie-zai-de-dan-%20GPU%20-zai-xian-jian-suo-zeng-qiang-sheng-cheng-xi-tong.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>【论文阅读'25】RAGDoll：基于高效卸载的单 GPU 在线检索增强生成系统</title>
+
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">【论文阅读'25】RAGDoll：基于高效卸载的单 GPU 在线检索增强生成系统</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/92" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>RAGDoll: Efficient Offloading-based Online RAG System on a Single GPU</p>
+<h1>摘要</h1>
+<p>检索增强生成（RAG）通过引入相关外部知识，提升大语言模型（LLM）的生成质量。然而，受限于内存容量，加之模型与知识库规模持续增长，在消费级平台上部署 RAG 面临诸多挑战。本文提出 RAGDoll—— 一款资源高效、自适应的 RAG 服务系统，与大语言模型深度集成，专门面向资源受限平台设计。</p>
+<p>RAGDoll 基于如下核心洞察：RAG 检索阶段与 LLM 生成阶段对计算和内存资源的需求差异显著；在传统串行工作流中，该特性会造成大量空闲时间、资源利用率低下。基于这一洞察，RAGDoll 将检索与生成解耦为并行流水线，融合联合内存放置与动态批调度策略，在异构硬件与多样负载下优化资源使用。大量实验表明，RAGDoll 可以很好适配多种硬件配置与不同规模的大语言模型；相比基于 vLLM 的串行 RAG 系统，其平均延迟最高可降低至原来的 1/3.6（最高 3.6 倍加速）。</p>
+<h1>一、引言</h1>
+<p>大语言模型（LLM）的出现改变了人们生产与生活的诸多方面，催生了编程助手、通用对话机器人等应用。为在富含上下文的场景下保证大语言模型输出内容的质量与相关性，检索增强生成（RAG）技术得到广泛使用，它将外部知识库（例如企业内部本地私有数据）引入大语言模型推理流程。本地 RAG 部署通常服务少量并发查询，目标是降低这批数据请求的整体时延。</p>
+<p>一般而言，RAG 工作流首先根据用户请求从知识库检索数据，随后大语言模型基于提取到的信息生成回答。然而，检索相关技术的引入给全方位性能优化带来了新挑战，尤其当 RAG 系统部署在算力资源受限环境中时。该问题源于检索模块与生成模块之间固有的矛盾：二者在算力需求与内存使用模式上具备不同特征。例如，检索操作可以通过更大批大小的批处理获得更高的数据库吞吐；而考虑大语言模型张量放置，生成操作通常需要限制批大小，以保证低时延。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261110194642.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261110194642.png" alt="image.png" style="max-width: 100%;"></a><br>
+在图 1 中，我们从两个维度梳理现有相关工作，涵盖大模型服务、RAG 计算以及数据库检索优化技术：一是目标任务，聚焦检索过程或生成过程；二是与计算、存储资源相关的性能瓶颈。由于这类技术大多只针对 RAG 系统内的单个组件或单一设计目标，直接将其部署在资源受限平台上运行 RAG，会引发两方面问题。</p>
+<p>第一，RAG 工作流的数据分布跨多个设备，尤其涉及 GPU-CPU - 磁盘构成的存储层级。大模型服务框架常在消费级环境下使用卸载技术，将闲置数据迁移至内存与磁盘，以节省 GPU 显存。用于知识检索的向量数据库也会将部分或全部数据保存在内存或磁盘中。尽管两个组件都倾向于分配更多内存以获得更好性能，但相较于大模型与知识库的规模，可用内存容量相对有限。过高的开销会引发内存颠簸，甚至内存耗尽，进而增加响应时延。</p>
+<p>第二，数据随时间的处理与传输需要精细设计。RAG 流水线对一批数据进行处理：检索阶段由 CPU 先完成知识嵌入计算，再将数据传输至 GPU 执行生成。除此之外，卸载策略会周期性地在 GPU 与 CPU 之间迁移大模型张量。这些操作存在复杂依赖关系。当前针对 RAG 服务优化的相关研究大多采用简单串行处理策略，依赖每个阶段有序执行。但我们的评测表明，在算力与内存资源受限的条件下，数据利用率不足会拉高整体时延。因此，需要一套完备的流水线，减少冗余数据处理、等待与传输时间，同时实现多设备并发利用。</p>
+<p>本文提出 RAGDoll，一套在单张消费级 GPU 上融合大语言模型与数据库组件的 RAG 部署系统。如图 1 所示，RAGDoll 拥有丰富的设计空间，可以协同提升计算与存储利用率，并自适应发挥不同服务模式的优势，以降低时延。具体来说，RAGDoll 包含三项核心设计，用以解决上述挑战。</p>
+<p>为高效利用跨设备存储资源，RAGDoll 提出一种融合检索与生成模块的联合内存放置方案。该系统结合 GPU、CPU、磁盘各自的容量与访问速度，在整个存储层级上对数据放置进行策略性优化。这套综合性优化提升了设备利用率，实测中，相比传统串行 RAG 实现，CPU 平均利用率提升 2 倍。数据库分片、大模型张量这类主要内存开销项，可以通过调整 RAGDoll 的关键配置参数协同调度。</p>
+<p>为提升数据利用率，RAGDoll 提出一种全新多流水线 RAG 集成方案，将 CPU 密集型的检索阶段与 GPU 密集型的生成阶段解耦。在不同计算设备上的并行执行，可以将 RAG 工作流中的空闲时间占比从总时延的 80% 降至 30%。此外，细粒度数据流管控降低了模块之间的依赖，支持更多类型的流水线配置。</p>
+<p>最后，联合存储放置与流水线设计赋予 RAGDoll 自适应调度能力，可应对静态方案效果不佳的服务场景。依托专用的数据放置与流水线执行模块，仅通过少量和性能相关的参数（主要是批大小与资源分配），就可以有效调节系统负载。RAGDoll 服务端的配置能够动态适配新到来查询与设备负载状态。基于此，RAGDoll 可以动态选择最合适的方案，适配不同服务需求，最高可降低 80% 的峰值时延。</p>
+<p>我们实现了 RAGDoll 原型，集成基于卸载的大模型服务系统 FlexGen 与高性能向量数据库 Milvus。我们针对消费级平台上搭载主流大模型框架的热门 RAG 系统开展充分评测。具体来说，RAGDoll 仅依靠单张显存 12–24GB、内存 176–256GB 的 GPU，就可以在动态负载下承载 8B~70B 规模的大模型。实验结果表明，RAGDoll 可将等待时延、生成时延分别最高缩短至原来的 1/20、1/5；相比基线系统，整体平均时延最高可实现 3.6 倍、11.7 倍加速。</p>
+<p>本文贡献总结如下：</p>
+<ul>
+<li>提出 RAGDoll，一款面向内存受限场景下按需服务的全新 RAG 系统，具备一套完整设计，覆盖数据库检索与大模型生成的计算、存储管理。</li>
+<li>提出面向按需 RAG 服务的多流水线机制，配套全新大模型预取方案，支持请求持续入队与动态数据放置。</li>
+<li>采用带在线优化的自适应配置，综合平衡检索、生成开销以及单批时延。</li>
+<li>实现 RAGDoll 原型；在资源受限场景下，相比主流 RAG 部署方案，平均时延最高提升 3.6 倍。</li>
+</ul>
+<h1>二、背景</h1>
+<h2>2.1 基于卸载的大语言模型推理</h2>
+<p>典型的大语言模型推理采用自回归方式执行。给定用户输入，模型会依次经过一系列 Transformer 块（即层）处理数据，逐一生成一个 token。每一层包含自注意力机制与带有可学习参数（即权重）的前馈网络，用于捕捉 token 之间的依赖关系。该层同时维护 KV 缓存，缓存注意力模块中先前计算得到的键值结果，以此降低生成过程中的冗余计算。随着数据逐层传递，模型会积累用于准确预测 token 所需的上下文信息。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111102750.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111102750.png" alt="image.png" style="max-width: 100%;"></a><br>
+近年来大语言模型规模快速增长，其大小常常超过单张 GPU 的内存容量。为降低硬件要求，让大语言模型可以在消费级平台上完成推理，卸载技术会将部分大模型张量（包括权重与 KV 缓存）迁移至内存与磁盘，从而控制 GPU 内存占用上限。图 2 (a) 展示了主流实际大模型服务的时间线：完成第i层的计算后，系统异步预取第(i+1)层的张量。GPU 与主机之间的通信时间可以和计算部分重叠，以此降低推理时延。</p>
+<p>但在 RAG 应用中，内存占用与传输带宽同样会影响检索性能。模型权重与缓存的无序放置可能引发内存颠簸或者拥塞，迫使系统调用速度更慢的磁盘存储，拖累整体性能。</p>
+<h2>2.2 按需 RAG 服务</h2>
+<p>RAG 是一种很有前景的方案，能够把外部知识库中的海量信息供给大语言模型推理使用，在不重新训练大模型的前提下，有效拓展模型对上下文的理解能力、提升生成质量。检索能力依托向量数据库实现：文档等知识被切分为数据片段，并编码为向量。检索阶段，这些向量会和查询的嵌入向量做相似度匹配，相关性高的对应片段会送入后续大模型生成环节。</p>
+<p>当代知识库可管理海量数据，嵌入向量的总规模可达数百 GB。这就需要采用磁盘存储方案：数据库将绝大多数数据片段保存在磁盘，仅将相关分区缓存到内存，用于按需检索。尽管这种分层存储结构可以在有限内存下承载更大规模信息，但数据传输成为另一项时延瓶颈，并且会对后续所有 RAG 计算产生决定性影响。</p>
+<p>传统 RAG 框架通常面向离线服务场景，依次处理到来的检索请求，保证单个请求的端到端时延。但受知识库庞大体积、大模型自回归特性的制约，检索与生成的处理时间没有上限。在存在并发查询的在线场景中，新请求必须等待前面的请求释放资源，最终所有请求的整体时延难以满足需求。</p>
+<p>近期优化 RAG 服务的相关工作大多聚焦系统内计算密集型组件，默认内存资源充足、在线服务高效。这些工作很少研究上述时间维度与设备侧的挑战，因此和本文研究内容相互独立。</p>
+<h2>2.3 批调度</h2>
+<p>批处理策略对 RAG 系统中大模型生成、向量检索的吞吐 - 时延权衡优化至关重要。在大模型服务架构中，批处理策略一般分为在线处理与离线处理两类。vLLM 这类在线系统采用迭代级调度：设置预设最大批大小，动态调整批内请求组合，降低平均时延。与之相对，FlexGen 这类离线系统采用更大批大小，优先保障吞吐。</p>
+<p>现代向量数据库支持对多条嵌入查询做高效批处理，能够在维持低时延的同时承载高查询量。例如 Milvus 支持在一次 API 调用中传入一批向量，而不是逐个处理，以此减少网络往返，并利用数据库引擎的批量处理优化。</p>
+<p>现有的 RAG 服务框架借助大模型批处理策略优化整体性能。RAGCache、CacheBlend 等系统基于 vLLM 的批调度机制降低时延。RAGCache 采用最大批大小方案以追求更低平均时延；而 CacheBlend 在多种批调度策略下评估性能，没有针对按需场景指定批大小。这些方案证明，高效的批处理技术是 RAG 系统实现低时延的关键。</p>
+<h1>三、研究动机</h1>
+<h2>3.1 问题定义</h2>
+<p>本文面向资源受限场景下的检索增强生成（RAG）服务问题展开研究。该系统包含三大核心组件：容量为$V$的向量数据库、参数量规模为$M$的大语言模型（LLM），以及容量为$C$的运行时缓存。函数$\mathcal{P}_\theta(V,M,C)$输出一个$d$维向量，代表系统各组件分配到$d$个存储设备上的内存资源，资源分配由内存放置策略$\theta$控制。大语言模型执行过程还需要额外存储空间承载运行数据，例如 KV 缓存，该部分开销由函数$\mathcal{W}(B,M)$刻画，其中$B$为生成批次大小。各存储设备的容量上限由向量$D \in \mathbb{R}^d$定义。</p>
+<p>在线服务场景下，查询到达率随时间$t$变化，是一个时变随机过程$\lambda(t)$。我们的优化目标是：在满足各设备内存容量约束的前提下，联合优化批次大小$B$与放置策略$\theta$，最小化期望延迟$\mathcal{L}(B,\theta,\lambda(t))$。由此得到如下带约束优化问题：</p>
+<p>$$
+\begin{aligned}
+\min_{B,\theta} \quad &amp; \mathcal{L}(B,\theta,\lambda(t)), \\
+\text{s.t.} \quad &amp; \mathcal{P}_\theta(V,M,C) + \mathcal{W}(B,M) \preceq D,
+\end{aligned}
+\tag{1}
+$$</p>
+<p>式中偏序关系$\preceq$代表按分量比较的不等式，即每个设备（显存、内存、磁盘等）上的内存开销，均不能超过该设备自身的容量上限。</p>
+<h2>3.2 RAG 系统面临的挑战</h2>
+<p>主流 RAG 服务框架 [27,30,64] 大多聚焦于 GPU 侧的计算优化与内存放置，同时默认内存资源充足、数据库检索规模较小。针对大语言模型组件，现有方案直接采用卸载策略来缓解设备资源限制、提升计算效率。我们将代表性 RAG 系统部署在消费级硬件平台后发现，这类场景下的服务性能表现出更为复杂的特征，给延迟优化带来了全新挑战。</p>
+<p><strong>C1：内存密集型操作带来显著性能影响</strong> 尽管 vLLM [33] 支持 KV 缓存在多设备间放置，但 RAGCache [30]、CacheBlend [64] 这类系统仍需要大量计算资源才能运行 LLaMA2-70B 模型：分别需要 2 张 H800 显卡（2×80GB 显存）、2 张 A40 显卡（2×48GB 显存）。如果再搭配基于磁盘的向量数据库承载大规模知识库，内存开销会进一步激增。因此，将现有范式迁移到常见的单 GPU 环境，并不是一件容易的事。 我们选取三个影响服务延迟的核心变量开展系统性评估：向量数据库内缓存分区数量、大模型张量驻留 GPU 的比例、生成批次大小。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111104404.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111104404.png" alt="image.png" style="max-width: 100%;"></a><br>
+图 3 结果表明，系统总延迟与各阶段延迟，很大程度上由内存放置配置决定。将更多数据库分区从磁盘加载到内存缓存，可以降低检索延迟；而保守的卸载策略、让更多模型张量留在 GPU 显存中，能够提升生成阶段的效率。值得注意的是，当生成批次大小取B=128时，大模型服务延迟会显著上升。根源在于 KV 缓存占用的内存急剧膨胀，迫使模型张量、向量数据库分区被卸载到更低层级的存储介质。该现象说明：如果缺少全局统一的配置方案，RAG 各个组件之间会发生资源争抢。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111104602.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111104602.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>C2：大模型生成之外的额外等待时延</strong> 除了内存层面的开销，RAG 全链路本身也会消耗大量运行时间。图 4 (a) 统计了 CPU 检索、GPU 生成阶段的设备利用率。第一批次查询的平均端到端延迟约 400 秒，而第二批查询的延迟最高可达 1000 秒，在实际业务中完全无法接受。</p>
+<p>我们识别出两类会拉高延迟的空闲等待时间：<br>
+外部时延：该问题来自资源受限条件下批处理的积压效应。部分请求在第一批任务处理期间就已经到达，却必须等待前一批全部执行完毕，才能进入下一批调度。该问题会拉高部分查询的端到端时延，极端场景下会造成极长等待时间。<br>
+内部时延：来自单批次内部 GPU 与 CPU 的资源利用率不足。检索阶段主要依靠 CPU 完成向量匹配，生成阶段则依赖 GPU 算力。在没有流水线重叠的情况下，两个设备会长时间空闲、等待另一方计算完成，进而降低系统吞吐与资源利用率。</p>
+<p><strong>C3：按需服务的负载具有不规则性</strong> 离线 RAG 服务可以预先确定批处理策略等系统配置；与之不同，按需在线服务需要应对动态变化的请求到达率 [47,56,60]。有限的算力与内存资源，进一步增加了按需调度的难度。具体来说，业务高峰与低谷时段的请求流量波动，会形成大小不一的批次，不同批次对应的算力、内存占用特征差异明显 [46,48]。如图 4 (b) 所示，批次大小变化会显著改变 GPU 与 CPU 的内存开销。例如在生成阶段，CPU 内存占用会从约 60GB 上升至 120GB。 同时，检索和生成阶段随批次规模增长的缩放特性完全不同：即使批次大小达到 64，检索耗时基本保持稳定；而生成耗时会直接翻倍。</p>
+<p>该结论说明系统需要自适应服务模式，能够根据实时负载动态配置内存分配与批调度策略。但 vLLM 这类传统在线批调度器，无法适配内存密集型 RAG 系统的需求，不匹配性体现在两点： (1) 检索、生成两个阶段随批次扩大的缩放规律不一样，采用统一批处理策略对两个链路来说都不是最优； (2) 在内存压力大、每批开始前就已经积压大量请求的场景下，细粒度的请求替换策略反而会造成性能退化 [33]。 因此，我们需要对检索、生成两个阶段的开销同时建模，设计感知请求积压的批调度策略。</p>
+<h1>四、RAGDoll设计</h1>
+<p>在本节中，我们介绍 RAGDoll：一套面向大规模数据、GPU 与内存设备资源受限场景的自适应多流水线 RAG 系统。首先，我们概述 RAGDoll 所提供的全新设计空间，该设计空间可对 RAG 工作流进行系统化组织（4.1 节）。随后，我们依次介绍系统的创新组件及其集成方案，包括跨设备内存放置策略（4.2 节）、基于卸载的推理系统（4.3 节）。最后，我们介绍一套两步式策略，实现对配置空间的自适应调优（4.4 节）。</p>
+<h2>4.1 设计空间总览</h2>
+<p>本工作的目标是在消费级硬件环境下部署低延迟 RAG 系统，我们提出一套全新范式，用于联合设计 RAG 组件、组件间协作方式以及服务过程中的动态配置。这套全新的设计空间不仅可以让 RAGDoll 更高效地利用资源，同时也可为领域社区提供参考：探究这类设计如何同时提升检索与生成的效果，以及如何平衡 RAG 系统中的算力需求与存储需求。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111105742.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111105742.png" alt="image.png" style="max-width: 100%;"></a><br>
+RAGDoll 的创新设计旨在解决 3.2 节提出的核心挑战。如图 5 所示，RAGDoll 内各个模块在服务过程中支持可调，通过调整关键参数适配不同的服务条件与资源约束。为完整展示整体设计空间，下面依次介绍 RAGDoll 的三大核心组件及其可配置因子，详细设计将在后续小节展开。</p>
+<p><strong>联合流水线：分层内存放置</strong> RAGDoll 采用全新流水线架构，将检索流程与生成流程拆分为独立的工作单元。用户请求抵达后先进入检索队列，系统主动攒批，向数据库发起检索；检索得到包含用户请求与检索文档块的上下文，再送入生成队列，由大语言模型执行批处理并输出回复文本。由于不同批次的完成时长并不固定，检索批次与生成批次可以承载不同的请求，从而解除两者之间强处理顺序依赖。</p>
+<p>流水线方案便于对多类硬件资源做显式管理。算力层面，检索操作主要占用 CPU 资源，生成任务则利用 GPU 算力。将两条流水线解耦之后，二者可以并行执行，提升硬件利用率。存储层面，向量数据库分片、大模型权重、KV 缓存可以在 GPU、内存、磁盘构成的存储层级之间动态加载或卸载，保证在容量约束下高效计算。</p>
+<p><strong>卸载预取：动态批次大小</strong> 面向单 GPU 部署 RAG 的场景，大模型卸载是必要手段，用来在运行时动态调度模型权重与 KV 缓存。RAGDoll 在基于卸载的大模型推理中实现了一套适配 RAG 流水线的创新预取机制。为提升生成效率，系统将计算与数据传输并行执行，减少空闲等待时间。</p>
+<p>批次大小是平衡生成吞吐与延迟的核心参数。本方案的目标是：在不同请求到达率下，调优出能够实现低延迟的理想批次大小。系统还会基于实时负载模式动态调整批调度策略，高效处理请求积压。内存层级内的数据放置策略也会同步调整，适配生成阶段的批调度。</p>
+<p><strong>自适应配置：负载反馈</strong> 系统将多个可调节组件整合，增加一层配置层，在整个服务周期内根据计算负载自适应调节系统。RAGDoll 的配置由两类因素共同调优：首先，主动剖析器迭代探索配置空间，预先找到能够最小化平均延迟、同时平衡两条流水线的最优配置；在正式运行阶段，批调度器根据实时积压情况选择最优批次大小。基于选定的配置，系统同步调度其余组件，在多样负载下降低平均延迟。</p>
+<h2>4.2 分层内存放置</h2>
+<p>传统 RAG 工作流中，检索阶段和生成阶段存在强依赖关系，造成数据处理与存储的低效。尽管检索与生成流水线化并不是新概念，但在内存密集型场景下实现高效流水线仍然存在诸多挑战。RAGDoll 通过对完整内存层级的内存分配进行全局管理，缓解资源失衡与硬件利用率不足的问题。该方案对多个关键组件做优化，如图 6 所示：<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111110308.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111110308.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>数据库分片</strong> 系统为向量检索实现精细的分片管理，分片可以根据当前业务需求动态加载或释放。当系统判定调整驻留内存分片数量能够优化性能时，会筛选待释放、待加载的分片候选，并在连续两轮检索任务批次之间执行分片换入换出。</p>
+<p><strong>大模型权重与 KV 缓存</strong> 针对模型权重和 KV 缓存，我们采用基于占比的内存放置策略，在内存层级之间动态分配资源。举例来说，如果分析得到最优权重分布为 GPU 存放 50%、CPU 内存存放 50%、磁盘 0%，系统会按照该比例，为下一轮生成批次重新分配张量。该分布由配置项管控，指定每一张张量的存放位置。</p>
+<p><strong>计算工作区</strong> 我们基于批次大小需求，实现自适应计算工作区分配。批次内请求构成发生变化时，模型推理中间计算所需内存（注意力矩阵、隐状态等）也需要同步调整。系统基于当前批次配置计算内存需求，在每一轮生成批次开始前完成资源分配。</p>
+<p>在批次间隙，系统采用一套精细的锁机制，保证内存重组安全高效。检索工作单元与生成工作单元使用独立的锁协议，支持并发运行，同时避免配置更新时发生资源冲突。张量与分片传输机制的更多细节见第 5 节。这套全局方案让系统无需人工介入，即可动态响应波动负载，最大化资源利用率，同时维持最优性能。</p>
+<h2>4.3 大模型预取流水线</h2>
+<p>RAGDoll 的预取模块用于优化基于卸载的大模型推理过程中，GPU、CPU、磁盘之间的数据搬运。现有方案大多采用固定预取策略（图 2 (a)），在资源受限环境下会因为 CPU 调度抖动、计算抖动 [2,3] 产生性能损耗。这类波动会造成计算与预取操作错位，导致资源利用率低下。本文提出的增强方案（图 2 (b)）在原有策略基础上做了改进。</p>
+<p><strong>时序数据流</strong> RAGDoll 基于线程执行模型，实现增强版异步张量管理系统。预取不再局限于紧邻的下一层，而是持续将后续层送入预取队列，仅受可用内存资源约束（如图 2 (b)）。专用线程池与多 CUDA 流负责管理这些并发数据传输，保证后续计算迭代能够拿到所需张量。</p>
+<p>该方案充分考虑计算与加载的波动，有效减少空闲时间；同时根据可用内存资源，在预填充阶段和解码阶段动态调整预取策略。该区分是必要的：正如 FlexGen [53] 所指出，预填充与解码的内存使用模式存在本质差异。预填充阶段需要同时处理全部输入 token，激活值内存开销很高，留给预取队列的空间更小；而解码阶段每步仅处理单个新 token，激活值内存占用更低，可以采用更激进的预取策略。RAGDoll 利用该特性优化队列容量：预填充阶段采用保守的预取距离，解码阶段提升预取激进程度。</p>
+<p><strong>跨设备张量放置</strong> 预取模块与 4.2 节介绍的分层内存管理深度协同。它可以在内存层级之间加载、卸载张量，并随负载变化动态调整批次大小与内存分配。组件之间的协同机制，使得 RAGDoll 在严苛的运行条件下依然能够保持稳定性能。</p>
+<h2>4.4 自适应服务配置</h2>
+<p>为了调优设计空间，本文提出一种两步范式。 第一步是离线阶段：采用定向主动性能剖析，系统采集复杂并行处理场景下硬件的各项性能特征；第二步是在线阶段：提出一种感知请求积压的批调度方法，用于在运行时阶段优化批调度策略。</p>
+<p><strong>主动性能剖析（离线）</strong> 主流检索增强生成（RAG）系统通常采用静态配置，无法适配不同的负载特征与硬件约束。为解决该缺陷，本文提出面向预处理阶段的主动性能剖析方案，对内存层次结构进行动态配置。该方法迭代遍历配置空间，在检索流水线与生成流水线之间寻找最优平衡点。 这套主动性能剖析方案的核心思路是：最优配置应当平衡两条流水线的延迟。举例来说，若检索耗时超过生成耗时，则增加驻留于 CPU 的分区数量，同时减少 CPU 上大语言模型张量的分配量。该平衡过程需要满足硬件内存约束，约束表达式如下：</p>
+<p>$$ w_{gpu} \cdot W_{total} + c_{gpu} \cdot C(B) + H(B) \le M_{gpu} \tag{2} $$</p>
+<p>$$ w_{cpu} \cdot W_{total} + c_{cpu} \cdot C(B) + P \cdot M_p \le M_{cpu} \tag{3} $$</p>
+<p>式中： $w_{gpu}$、$w_{cpu}$ 分别代表存放在GPU内存、CPU内存中的模型权重占比； $W_{total}$ 为模型权重总大小； $c_{gpu}$、$c_{cpu}$ 分别代表存放在GPU内存、CPU内存中的KV缓存占比； $C(B)$ 是批大小为$B$时的缓存容量； $H(B)$ 为计算工作区大小； $P$ 是驻留分区数量； $M_p$ 是单个分区的大小； $M_{gpu}$、$M_{cpu}$ 分别为GPU、CPU可用内存容量。<br>
+本文不构建精细的解析模型，而是在关键区间上对配置进行采样。 理想情况下，应当遍历检索、生成的所有并发批大小组合，最小化 $\max(t_{retrieval}, t_{generation})$，但该方式计算开销极高。 研究发现，检索与生成任务的批处理行为存在明显差异，在内存压力下该差异尤为突出，因此本文简化搜索空间。 实验观测到：检索开销主要由分区加载开销决定（见3.2节）。 因此，在给定配置、驻留分区数量固定的前提下，检索耗时几乎不会随检索批大小变化而改变。 基于该特性，本文将 $t_{retrieval}$ 视作常数项，将主动性能剖析的重心放在调优生成批大小上。 这种定向探索方式可以高效找到能够平衡两条流水线延迟的生成批大小，相比穷举搜索、纯解析模型，能更好地处理复杂的内存层次交互。</p>
+<p><strong>感知请求积压的批调度（在线）</strong> 资源受限的 RAG 系统很容易发生过载，进而产生请求积压，现有的调度方案难以高效处理该问题。针对该难点，本文分析批大小与平均延迟之间的关联。令 $T(B)$ 代表处理一批大小为 $B$ 的请求所需耗时：<br>
+$$T(B) = a \cdot B^c \tag{4}$$<br>
+其中 $a &amp;gt; 0$、$c \ge 0$ 为常数。 若将全部 $n$ 个请求放在同一个批次内处理，平均延迟为： $$L_1 = T(n) - \frac{1}{n}\sum_{i=1}^{n} t_i \tag{5}$$ 若将请求划分为 $k$ 个等大批次，每个批次大小为 $\frac{n}{k}$，平均延迟为： $$L_k = \frac{k+1}{2} \cdot T\left(\frac{n}{k}\right) - \frac{1}{n}\sum_{i=1}^{n} t_i \tag{6}$$ 当 $L_1 \le L_k$ 时，采用最大批大小是最优的，由此可得： $$T(n) \le \frac{k+1}{2} \cdot T\left(\frac{n}{k}\right) \implies 2 \cdot k^c \le k + 1 \tag{7}$$ 举例：当 $k=2$（划分为2个等大批次）： $$2 \cdot 2^c \le 3 \implies c \le \log_2\left(\frac{3}{2}\right) \approx 0.585 \tag{8}$$ 由此可得：当处理耗时随批大小呈亚线性增长、且增长速率低于由 $k$ 确定的阈值时，使用最大批大小可以最小化平均延迟；而当处理耗时随批大小增长速度更快时，拆分为更小批次会更高效。 在实际系统实现中，本文基于主动性能剖析阶段采集的样本，在运行时评估不同批大小。例如，当队列中有 64 个请求时，会利用上述公式评估批大小 8、16、32、64 对应的延迟，选出最优配置。需要注意：检索与生成的工作单元特性不同，因此采用不同批调度策略。检索任务主要依靠 CPU 执行向量运算，更大的批次通常性能更好；与之相反，大语言模型推理在批次变大时，更多张量会被下沉到更低层级内存，导致处理耗时随批大小增长更快。本文方案会根据两条流水线各自的性能特征独立优化，从而适配上述差异。</p>
+<h1>五、实现</h1>
+<p>我们基于约 5000 行代码实现了 RAGDoll 原型系统。知识库依托 LangChain 的 Document 类构建，LangChain 是一款被广泛使用、用于将大语言模型集成到应用中的框架。存储层面，我们采用 Milvus（一款在 GitHub 社区广受认可的主流向量数据库）管理文档分片及其对应的嵌入向量。此外，本系统的大模型预取模块基于 FlexGen 搭建，FlexGen 专门面向单 GPU 场景下基于卸载的推理任务设计。</p>
+<p><strong>惰性动态传输</strong>。本系统采用自适应计算工作区与动态内存层级结构，当调度策略发生变更时，需要在大模型推理过程中传输张量。我们采用惰性传输方案：不再在 CPU 内存与 GPU 显存之间同步传输模型权重，而是在后台 CUDA 流上执行传输，仅当某权重张量即将投入计算时才执行同步操作。除此之外，一旦权重张量被卸载至磁盘，系统会保留其唯一文件名，并在多轮生成过程中复用该文件，保证每个权重张量仅产生一次卸载开销。由于权重放置策略是增量式调整的，策略更新时仅需传输一小部分张量；该机制同时适用于性能剖析阶段与运行时阶段。对于 KV 缓存，系统在每一轮生成开始时，将内存层级中全部缓存数据清空并重新初始化，遵循与隐藏状态、注意力掩码一致的处理逻辑。与之类似，针对向量数据库分片，我们同样采用惰性策略：在检索阶段释放、加载分片，从而将策略变更带来的传输总开销控制在较低水平。</p>
+<p><strong>容错机制</strong>。尽管我们已经在 GPU 与 CPU 侧预留了额外内存资源，资源约束依然可能引发内存溢出（OOM）错误。为缓解该问题，我们在离线性能剖析阶段与在线运行时阶段都引入了容错机制。系统为每个分片的中间检索结果设置检查点；一旦检索失败，系统回滚至最近一次成功的检查点。针对大模型推理，系统在每一轮生成开始时维护一个检查点。若生成过程中发生 GPU 或 CPU 内存溢出，系统会首先尝试将更多张量迁移至更低层级内存，重新初始化 KV 缓存；如果该方式不足以解决内存压力，则将一部分权重张量卸载至更低层级存储。该设计尽可能避免全量重启，降低额外 I/O 操作带来的开销。</p>
+<h1>六、评估</h1>
+<p>本节在多种实验配置下，对比基线系统评估 RAGDoll 的性能，涵盖不同硬件环境、模型规模与负载。</p>
+<h2>6.1 实验设置</h2>
+<p><strong>硬件</strong>。实验在两套平台上开展，分别代表高端与低端场景：</p>
+<ul>
+<li>PF-High：Intel Xeon 4314 处理器（63 核，主频 2.4 GHz）、256 GB 主机内存、NVIDIA A30 GPU（24 GB 显存）、8 TB SSD、PCIe 4.0 接口（带宽 64 GB/s）。</li>
+<li>PF-Low：Intel Xeon 6238R 处理器（111 核，主频 2.2 GHz）、176 GB 主机内存、NVIDIA A5000 GPU（12 GB 显存）、2 TB SSD、PCIe 3.0 接口（带宽 32 GB/s）。<br>
+<strong>数据集与模型</strong>。知识库构建时，我们对 TriviaQA 数据集内文档进行分片、向量化，搭建向量数据库；选择 TriviaQA 是因为其文档体量庞大。TriviaQA 是阅读理解数据集，包含超过 65 万条问答对。向量数据库被划分为 32 个分片，每个分片大小约 8 GB，数据库总规模约 256 GB。大模型选用两个有代表性的规模：8B 参数量与 70B 参数量的 Llama 3.1。我们选择该模型区间（8B~70B），一方面是这类模型在各类大模型榜单中十分流行，另一方面它们可以在单消费级 GPU 上正常运行，同时保证大部分基线方法能够正常执行，实现公平对比。</li>
+</ul>
+<p><strong>负载</strong>。负载中的每一条请求都由 TriviaQA 中的问题合成。默认配置下，系统从向量数据库检索相关性最高的 5 个文档分片，和原始问题拼接，作为大模型的最终输入。该数据集不含时间戳，我们参考已有工作，采用泊松分布模拟请求到达时间，设置多档不同请求速率。整个负载被切分为若干 20 分钟区间，每个区间分配固定请求速率。默认使用 4 个区间，请求速率依次为每分钟 4、8、12、16 条请求，覆盖稳定负载与过载场景。</p>
+<p><strong>基线系统</strong>。正如 3.2 节所述，现有大部分 RAG 优化系统受两个关键限制，无法适配本实验设置：（1）这类系统要求将全部模型权重加载至显存；（2）它们并非面向本评估所采用的大规模磁盘知识库设计。因此，我们主要对比两套具备 RAG 能力的现代大模型服务系统：</p>
+<ul>
+<li>搭载 Accelerate 的 RAG（AccRAG）：Hugging Face Accelerate 是一套成熟的大模型服务框架，仅将部分模型权重卸载，KV 缓存始终保存在 GPU 显存。为给计算工作区与缓存预留充足内存，我们对权重初始化的内存分配上限做了限制。</li>
+<li>搭载 vLLM 的 RAG（vLLMRAG）：vLLM 是当前前沿的大模型服务系统，致力于降低内存碎片化，被广泛用于 RAG 系统。实验使用 vLLM 0.7.2 版本，该版本可以将模型权重卸载至内存，并且基于可行批大小管理计算工作区。<br>
+我们将基线大模型服务与 RAG 以串行模式整合：请求按到达顺序处理，每个区间采用自适应批大小 4$\lambda(t)$。在 PF-Low 平台上，两套基线系统在部署 70B 模型时会遭遇内存瓶颈，GPU 与 CPU 内存总和不足以支撑运行。为保证对比公平，在 PF-Low 平台运行 70B 模型实验时，我们在 SSD 上配置约 180 GB 的扩展交换分区。为避免过量 I/O 带来严重性能退化，我们对基线系统做充分性能剖析，确定内存受限条件下，吞吐与延迟综合最优的最大批大小。</li>
+</ul>
+<p><strong>核心指标</strong>。面向在线 RAG 系统，我们测量每条请求的端到端延迟，定义为请求到达至请求处理完成的时长。同时，我们在选定实验中统计全部请求的平均延迟与多档分位延迟。本系统在优化过程中保持功能等价：不引入近似、截断操作，保证输出结果的准确度与质量不变；因此我们的优化目标是在保证结果质量稳定的前提下降低延迟。</p>
+<h2>6.2 端到端性能</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111113822.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111113822.png" alt="image.png" style="max-width: 100%;"></a><br>
+如图 7 所示，我们统计动态负载下每条请求的端到端延迟。RAGDoll 的平均端到端延迟始终低于两套基线系统；相比 vLLMRAG，加速比可达 1.9 倍（图 7 (d)：1236 秒 vs 2331 秒）至 3.6 倍（图 7 (a)：555 秒 vs 1990 秒）。在资源受限、部署大模型的场景下，对比 Accelerate，加速比最高超过 11.7 倍（见图 7 (b)）。</p>
+<p>对于 8B 模型：在高负载下，RAGDoll 能够为每条请求的延迟设置上限，不会出现延迟爆炸。例如图 8 (a) 中，所有请求延迟均低于 1000 秒，且延迟不会随请求到达速率上升而持续走高。与之对比，两套基线的延迟都会随到达速率增加而上涨。虽然图 7 (c) 中的 vLLMRAG 延迟上涨趋势相对平缓，但它的延迟依然从到达速率 4 请求 / 分钟时（第 100 条请求前）的 700~800 秒，上升至到达速率 16 请求 / 分钟时（第 700 条请求后）的约 1500 秒。RAGDoll 的性能优势来自动态批调度策略。例如图 7 (a) 中，RAGDoll 使用显著更大的批大小，体现为更长的切换段长度。尽管我们为 vLLMRAG 也实现了动态批大小机制，但在高到达速率下，受限于 GPU 显存，它无法使用目标大批次；同时它不支持检索与生成流水线重叠，当请求积压时，延迟呈指数增长。而 AccRAG 如相关文献所述，没有引入预取技术，生成效率更低，更容易造成系统过载。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111115249.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111115249.png" alt="image.png" style="max-width: 100%;"></a><br>
+对于 70B 模型：虽然两套平台上所有方法在高到达速率下都会出现延迟上涨，但 RAGDoll 的延迟增长更加平缓。在 PF-Low 平台，70B 模型的 GPU、CPU 资源十分紧张，所有方法都只能使用更小的批大小；RAGDoll 依靠流水线架构与均衡配置，缓解延迟上涨。图 8 (b)、(d) 显示：相比 vLLMRAG，RAGDoll 最大延迟降低 50%；相比 AccRAG，最大延迟降低 80%，在高负载下展现出更强的稳定性。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111115257.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111115257.png" alt="image.png" style="max-width: 100%;"></a><br>
+为量化 RAGDoll 的自适应特性，我们分析 PF-High 平台上 70B 模型运行时的策略调整，如图 9。数据显示，随着负载强度上升，系统会发生系统性策略切换：生成批大小从 16 逐步扩容至 48；KV 缓存放在 CPU 内存的占比从 40% 下降至 15%；CPU 内存中缓存的向量数据库分片数量由 3 片减为 2 片。这一系列协同策略调整，用来应对高负载下持续增长的请求积压。遵循自适应调度原则，系统通过扩大批大小优先保障吞吐，而扩大批大小会占用更多 GPU 显存；显存压力促使更多 KV 缓存被卸载至 CPU 内存，进而需要将部分向量数据库分片释放回磁盘，维持整体内存平衡。</p>
+<p>在部分阶段，策略选择会出现波动。在第 200 条请求之前，生成批大小会在 16 与 32 之间震荡。波动原因是 RAGDoll 的调度决策基于系统实时状态，而非仅依靠到达速率。举例来说：即便到达速率很高，但新来请求还处在检索阶段，上下文队列规模依然较小，此时可以临时使用更小的生成批大小。当请求超过 400 条、系统负载稳定后，上下文队列持续积压，批大小选择就趋于稳定。该特性证明 RAGDoll 具备自适应能力，不需要提前掌握负载特征，就可以高效完成资源管理。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111115711.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111115711.png" alt="image.png" style="max-width: 100%;"></a></p>
+<h2>6.3 延迟拆解</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111115323.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111115323.png" alt="image.png" style="max-width: 100%;"></a><br>
+我们将平均延迟拆分为多个部分（表 1），分析各组件的开销占比。值得注意的是：RAGDoll 的等待时间远低于基线系统，但它的检索耗时、生成耗时不一定优于 vLLMRAG。例如在 PF-Low 平台运行 8B 模型时，RAGDoll 的等待时间仅为 vLLMRAG 的 10%（170 秒 vs 1640 秒），检索和生成耗时反而略高。该优势来自更大的设计空间与更高效的负载调度。具体来说：当负载强度从低负载切换至高负载时，系统可以动态启用更大批大小，同时释放更多向量数据库分片。单条请求的检索、生成延迟或许会变长，但借助 4.4 节的优化手段，整体端到端延迟下降。除此之外，流水线化的检索与生成流程虽然会互相干扰，但流水线设计能够重叠大量延迟开销，降低全体请求的平均延迟。与之对比，vLLMRAG 虽然依靠高效的交换优化实现推理加速，但缺少自适应调度能力，无法高效管理全部请求，等待延迟居高不下。和 AccRAG 相比，RAGDoll 的等待时间最多降低 20 倍，生成时间最多降低 5 倍；核心原因是 AccRAG 缺少预取这类卸载优化技术，生成耗时显著更长，最终整体延迟很高。</p>
+<h2>6.4 消融实验</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111120036.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111120036.png" alt="image.png" style="max-width: 100%;"></a><br>
+为量化本系统中各项技术的贡献，我们开展了完备的消融实验。表 2 展示了关闭 RAGDoll 各个独立组件时对延迟的影响。关闭流水线设计后，性能下降最为显著：8B 模型延迟上升 38%（663 秒对比 480 秒），70B 模型延迟上升 58%（1954 秒对比 1236 秒）。该巨大性能损失的原因是：系统虽然保留动态批大小、内存分配等其余优化，但整体灵活性受到严重限制。具体而言，检索工作线程与生成工作线程必须使用相同批大小，难以同时对两个阶段做最优调优。此外，两个阶段都会出现空闲等待，进而降低整体吞吐。</p>
+<p>关闭动态批大小策略同样会带来明显的性能退化：8B 模型为 657 秒对比 480 秒，70B 模型为 1841 秒对比 1236 秒。性能下降的根源在于，需要按照最大预设批大小预先分配内存；在请求到达率较低的时段，该方式会牺牲资源利用率，并引入额外等待时延。</p>
+<p>我们进一步将 LLM 预取模块替换为其他方案以评估其效果。首先接入适配 Llama 模型的修改版 FlexGen。在其余所有优化均保留的前提下，该配置下 8B、70B 模型的延迟相比 RAGDoll 仍分别高出 10%、4%。RAGDoll 预取模块性能更优，得益于其通信与计算流水线设计，最大化 GPU 与 CPU 利用率。70B 模型的提升幅度更小，原因是该模型有更大比例的张量存放在底层存储层级，I/O 成为主导瓶颈，预取模块能够实现的计算传输重叠空间被压缩。</p>
+<p>我们还评估了在系统中接入 vLLM 的效果。该方案相比 RAG 系统里串行执行的 vLLM（vLLMRAG）延迟大幅降低：8B 模型 561 秒对比 1000 秒，70B 模型 1432 秒对比 2331 秒，但性能依旧不及 RAGDoll。尽管 vLLM 支持不同批大小，但其权重张量在 GPU 显存与 CPU 内存之间的分布是固定约束。具体来说，vLLM 对外接口支持大范围批大小调整，但其内部实际生效批大小由内存约束决定，不会直接遵从用户指定参数。因此，当批大小持续增大时，延迟几乎随批大小线性上涨，如 4.4 节所述，该模式并非最优。FlexGen 与 RAGDoll 也存在该问题，但在 vLLM 上表现更突出。即便如此，依托我们的流水线设计与合理调参，vLLM 依然可以获得远高于 vLLMRAG 的性能。</p>
+<p>综上，我们选择基于卸载的 LLM 推理系统（FlexGen 这类方案），因为它可以在多级存储层次上动态调整模型权重与 KV 缓存的存放位置，在不同负载下更好地权衡吞吐与延迟。同时 RAGDoll 的实现能够兼容 vLLM 等其他 LLM 推理后端，体现出良好的兼容性与可扩展性，支持接入多样化推理引擎。</p>
+<h3>6.5 案例研究</h3>
+<p><strong>检索分块数量</strong><br>
+我们评估检索阶段不同 top-k 分块数量带来的影响。检索分块数量变化几乎不会显著改变检索延迟：检索流程里，数据加载开销远大于向量检索开销，增加分块带来的额外开销很小。但分块数量会改变输入序列长度，显著影响生成延迟。 对于 8B 模型，生成并非主要瓶颈，RAGDoll 的延迟涨幅可控：top-1（输入 token 长度小于 128）时 480 秒，top-10（输入 token 长度小于 1024）时 529 秒。与之类似，vLLMRAG 的延迟相对稳定（788 秒到 1080 秒），因为在 PF-High 硬件环境下，即便输入长度接近 1024 token，vLLM 依然可以为 8B 模型维持目标批大小。 但对于更大规模模型，当 top-10 检索时，RAGDoll 和 vLLMRAG 的延迟都会显著上升，此时生成延迟成为瓶颈，两种方案都无法使用更大批。即便如此，RAGDoll 相比 vLLMRAG 仍有 1.8 倍加速（2147 秒对比 3966 秒），说明即便批大小调整受限，RAGDoll 的流水线设计依然可以取得明显性能优势。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111120220.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261111120220.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>磁盘索引</strong><br>
+我们基于 Milvus 默认配置构建 DiskANN 向量索引，测试磁盘索引下本方法的性能。该设置下，检索每个数据分片大约需要 3.6GB CPU 内存存放乘积量化编码与缓存。因此，即便在 PF-High 硬件环境中，系统也无法同时把索引和大模型全部载入内存，必须在内存分配上做取舍。 如图 11 所示，使用 DiskANN 索引时 RAGDoll 延迟优于图 7 (d) 中相同硬件、相同大模型配置下的结果（平均 890 秒对比 1236 秒）。性能提升来自 RAGDoll 的主动性能探测机制：它可以均衡检索与生成流程，在索引与大模型张量之间合理分配内存，借助 DiskANN 索引加速检索。 反观 vLLMRAG，使用磁盘索引后没有观察到明显收益，性能甚至小幅下降（2427 秒对比 2331 秒）。原因是：虽然 DiskANN 索引相比原始向量数据占用更少内存，但每个分片都需要重新加载索引，额外磁盘 I/O 与索引初始化开销，使其加载耗时高于原始向量。想要充分发挥磁盘索引的能力，需要预留更多内存给索引，这又会损害大模型推理效率。 这凸显了在资源受限的 RAG 系统中，调度与内存分配策略优化的复杂性。总而言之，是否使用磁盘索引，系统的性能特征会发生变化；我们可以将其理解为检索开销与生成开销之间的权衡关系发生改变，RAGDoll 能够据此自适应优化。此外，磁盘索引可以支持更大规模知识库的高效处理，提升系统可扩展性，证明本方案在真实生产环境中的实用价值。</p>
+<h1>七、相关工作</h1>
+<h2>7.1 大模型高效服务</h2>
+<p>为在严苛的性能与资源约束条件下实现高效的大模型推理，大量系统工作 [4,15,16,28,51,57,62,68] 将 KV 缓存或模型权重进行内存卸载，以此降低 GPU 显存占用。以 FlexGen 为代表的一系列研究 [53,55,67] 优先保障推理吞吐。与之相对，vLLM 等系统 [33] 主要依靠批调度技术优化在线延迟。RAGDoll 能够兼容上述多种优化策略。本文选用 FlexGen 作为代表性实现方案，原因在于其具备灵活的张量放置能力，与本文面向资源受限场景的研究目标高度契合。另一种缩小大模型体积的手段是模型压缩 [12,18,63,65]；但该方法本身无法从根源上解决内存问题，在实际部署中，它通常作为卸载方案的辅助手段配合使用。</p>
+<h2>7.2 面向检索增强生成的大模型计算</h2>
+<p>检索增强生成（RAG）[19,35,36,42,52] 通过引入外部知识提升大模型生成质量。近期诸多研究 [25-27,30,39,64,69] 针对 RAG 场景定制高效的大模型服务方案，工作重心集中在生成计算阶段的 KV 缓存管理。RAGDoll 与这些技术形成互补：它能够在计算与存储双重约束下，对检索和生成两个阶段开展联合优化。</p>
+<h2>7.3磁盘向量检索</h2>
+<p>工业级向量数据库 [11,13,43,49] 为 RAG 系统提供基础检索能力。索引算法 [21,24,54] 通过构建磁盘索引进一步赋能数据检索，加速查询查找、降低内存开销。RAGDoll 对上述方案形成补充：在资源受限的 RAG 部署环境下，它系统性优化检索流程的执行效率。</p>
+<h1>八、结论</h1>
+<p>本文提出 RAGDoll，一套面向消费级 GPU 的自适应大模型检索增强生成融合系统。该系统通过联合内存管理、增强型多流水线处理以及自适应批调度，相比现有最优基线取得最高 3.6 倍的加速效果。实验结果表明，精心设计的资源分配策略能够让大规模检索增强生成在资源受限设备上落地可用。</p></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script><script>MathJax = {tex: {inlineMath: [["$", "$"]]}};</script><script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</html>
