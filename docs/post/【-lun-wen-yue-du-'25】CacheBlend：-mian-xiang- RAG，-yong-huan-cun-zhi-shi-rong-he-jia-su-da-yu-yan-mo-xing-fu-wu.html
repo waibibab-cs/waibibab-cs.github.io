@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html data-color-mode="light" data-dark-theme="dark" data-light-theme="light" lang="zh-CN">
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="content-type" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <link href='https://mirrors.sustech.edu.cn/cdnjs/ajax/libs/Primer/21.0.7/primer.css' rel='stylesheet' />
+    
+    <link rel="icon" href="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4"><script>
+        let theme = localStorage.getItem("meek_theme") || "light";
+        document.documentElement.setAttribute("data-color-mode", theme);
+    </script>
+<meta name="description" content="CacheBlend: Fast Large Language Model Serving for RAG with Cached Knowledge Fusion
+# 摘要
+大语言模型（LLM）经常在输入中纳入多个文本块，以提供必要的上下文。">
+<meta property="og:title" content="【论文阅读'25】CacheBlend：面向 RAG，用缓存知识融合加速大语言模型服务">
+<meta property="og:description" content="CacheBlend: Fast Large Language Model Serving for RAG with Cached Knowledge Fusion
+# 摘要
+大语言模型（LLM）经常在输入中纳入多个文本块，以提供必要的上下文。">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://waibibab-cs.github.io/post/%E3%80%90-lun-wen-yue-du-%2725%E3%80%91CacheBlend%EF%BC%9A-mian-xiang-%20RAG%EF%BC%8C-yong-huan-cun-zhi-shi-rong-he-jia-su-da-yu-yan-mo-xing-fu-wu.html">
+<meta property="og:image" content="https://avatars.githubusercontent.com/u/105782835?s=400&u=04c0291bd1e06b01ccad1d53388ed4a8a8894a53&v=4">
+<title>【论文阅读'25】CacheBlend：面向 RAG，用缓存知识融合加速大语言模型服务</title>
+
+
+
+</head>
+<style>
+body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;padding: 45px;font-size: 16px;font-family: sans-serif;line-height: 1.25;}
+#header{display:flex;padding-bottom:8px;border-bottom: 1px solid var(--borderColor-muted, var(--color-border-muted));margin-bottom: 16px;}
+#footer {margin-top:64px; text-align: center;font-size: small;}
+
+</style>
+
+<style>
+.postTitle{margin: auto 0;font-size:40px;font-weight:bold;}
+.title-right{display:flex;margin:auto 0 0 auto;}
+.title-right .circle{padding: 14px 16px;margin-right:8px;}
+#postBody{border-bottom: 1px solid var(--color-border-default);padding-bottom:36px;}
+#postBody hr{height:2px;}
+#cmButton{height:48px;margin-top:48px;}
+#comments{margin-top:64px;}
+.g-emoji{font-size:24px;}
+@media (max-width: 600px) {
+    body {padding: 8px;}
+    .postTitle{font-size:24px;}
+}
+
+</style>
+
+
+
+
+<body>
+    <div id="header">
+<h1 class="postTitle">【论文阅读'25】CacheBlend：面向 RAG，用缓存知识融合加速大语言模型服务</h1>
+<div class="title-right">
+    <a href="https://waibibab-cs.github.io" id="buttonHome" class="btn btn-invisible circle" title="首页">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathHome" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+    <a href="https://github.com/waibibab-cs/waibibab-cs.github.io/issues/93" target="_blank" class="btn btn-invisible circle" title="Issue">
+        <svg class="octicon" width="16" height="16">
+            <path id="pathIssue" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+    
+
+    <a class="btn btn-invisible circle" onclick="modeSwitch();" title="切换主题">
+        <svg class="octicon" width="16" height="16" >
+            <path id="themeSwitch" fill-rule="evenodd"></path>
+        </svg>
+    </a>
+
+</div>
+</div>
+    <div id="content">
+<div class="markdown-body" id="postBody"><p>CacheBlend: Fast Large Language Model Serving for RAG with Cached Knowledge Fusion</p>
+<h1>摘要</h1>
+<p>大语言模型（LLM）经常在输入中纳入多个文本块，以提供必要的上下文。为了加速长输入的 prefill，一种做法是预先计算某个文本的 KV 缓存，并在该上下文被复用为另一个 LLM 输入的前缀时复用这份 KV 缓存。然而，被复用的文本块<strong>并不总是</strong>输入的前缀；这使预计算好的 KV 缓存无法直接使用，因为它们忽略了该文本与前文之间的<strong>交叉注意力</strong>。因此，复用 KV 缓存本应带来的收益，至今仍大部分没有兑现。</p>
+<p>本文只处理其中一个挑战：当一个 LLM 输入包含<strong>多个文本块</strong>时，如何<strong>快速地把它们各自预计算的 KV 缓存组合起来</strong>，以取得与昂贵的完整 prefill（即不复用 KV 缓存）相同的生成质量。这一挑战在检索增强生成（RAG）中自然出现 ——RAG 的输入会附带多段检索到的文本作为上下文。我们提出 CacheBlend，该方案复用预计算的 KV 缓存，<strong>无论其是否处于前缀位置</strong>，并对<strong>一小部分 token</strong> 的 KV 值做<strong>选择性重算</strong>，从而对每份被复用的 KV 缓存做部分更新。同时，重算少量 token 带来的那一点额外延迟，可以在同一个作业内与 KV 缓存的读取<strong>流水化重叠</strong>，这使得 CacheBlend 能够把 KV 缓存存放在存储容量更大但速度更慢的设备上，并在读取它们时<strong>不增加推理延迟</strong>。通过在三个规模各异的开源 LLM 和四个任务类型不同的常用基准数据集上，将 CacheBlend 与当前最先进的 KV 缓存复用方案进行比较，我们表明：相对于完整重算 KV，CacheBlend 将首 token 延迟（TTFT）降低 <strong>2.2–3.3 倍</strong>，将推理吞吐提升 <strong>2.8–5 倍</strong>，且<strong>不损害生成质量</strong>。代码见 <a href="https://github.com/LMCache/LMCache">https://github.com/LMCache/LMCache</a></p>
+<h1>一、引言</h1>
+<p>大语言模型（LLM）凭借其出色的能力，被广泛用于个人助理、AI 医疗和问答等领域 [1, 3, 4, 9]。为保证回复的高质量与一致性，应用往往会在用户查询之外<strong>补充</strong>一些文本，用来提供领域知识或用户特定信息所必需的<strong>上下文</strong>。一个典型例子是检索增强生成（RAG）：用户查询会被<strong>前置拼接</strong>上从数据库中检索到的多个<strong>文本块</strong>，共同构成 LLM 输入。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124112919.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124112919.png" alt="image.png" style="max-width: 100%;"></a><br>
+然而，这些上下文文本块会显著拖慢 LLM 的推理速度。原因在于：在生成任何 token 之前，LLM 首先要通过 <strong>prefill</strong> 把整段输入过一遍，从而产生 <strong>KV 缓存</strong>—— 即与每个输入 token 相关联的一组张量的拼接，其中嵌入了该 token 与其前序 token 之间的 "注意力"。因此，prefill 的延迟决定了首 token 延迟（TTFT）。我们把这种情形称为<strong>完整重算 KV</strong>（图 1a）。尽管已有诸多优化，prefill 的延迟与计算量随输入长度呈<strong>超线性</strong>增长，很容易拖慢服务，在长输入场景（如 RAG）下尤其如此 [11, 53, 60]。</p>
+<p>那么，如何加快 LLM 输入的 prefill？近期的优化利用了一个事实：相同的上下文文本常被不同的 LLM 输入反复使用。于是，它们<strong>把这些文本的 KV 缓存预先算一次</strong>，再<strong>复用</strong>存下的 KV 缓存，以避免在这些被复用的文本上重复做 prefill。</p>
+<p><strong>现有方法的局限：</strong> 目前有两条做 KV 缓存复用的路线，但都存在局限。<br>
+第一，<strong>前缀缓存（prefix caching）</strong> 只存储并复用 LLM 输入<strong>前缀部分</strong>的 KV 缓存 [33, 36, 41, 42, 59]（图 1b）。由于前缀的 KV 缓存与后续文本无关，前缀缓存不会损害生成质量。然而，许多应用（如 RAG）会在 LLM 输入中放入<strong>多个</strong>文本块（而不是一个），以提供确保回复质量所需的全部上下文。于是只有第一个文本块构成前缀，其他被复用文本的 KV 缓存并没有被复用。结果是：当输入由大量被复用的文本块组成时，前缀缓存的速度会<strong>几乎与完整重算 KV 一样慢</strong>。</p>
+<p>第二，<strong>完整 KV 复用（full KV reuse）</strong> 旨在弥补这一缺陷（图 1c）。当一个被复用的文本不在输入前缀位置时，它仍然复用其 KV 缓存，做法是<strong>调整该文本的位置嵌入</strong>，使 LLM 的生成仍能产出有意义的结果 [24]。然而，这种做法忽略了重要的<strong>交叉注意力</strong>—— 即某一个 chunk 内的 token 与其<strong>前序 chunk</strong> 内 token 之间的注意力。交叉注意力信息无法预先算好，因为前序 chunk 在预先计算时并不可知。但交叉注意力对回答某些查询可能至关重要（例如涉及地缘政治的查询），这类查询天然需要<strong>联合</strong>理解来自多个 chunk 的信息（比如一部分 chunk 讲地理、另一部分讲政治）。§3.3 给出了具体例子，说明在什么情形下前缀缓存与<strong>模块化缓存（modular caching）</strong> 都不够用。</p>
+<p><strong>我们的方法：</strong> 本文只处理一个挑战：当一个 LLM 输入包含多个文本块时，如何<strong>快速把这些各自独立的预计算 KV 缓存组合起来</strong>，从而取得与昂贵的完整 prefill <strong>相同的生成质量</strong>？换句话说，我们希望同时拿到<strong>完整 KV 复用</strong>的速度与<strong>完整重算 KV</strong> 的生成质量。</p>
+<p>我们提出 CACHEBLEND：它是一个融合多份预计算 KV 缓存的系统，<strong>无论这些缓存是否处于前缀位置</strong>，做法是基于某次具体 LLM 输入中的<strong>前序文本</strong>，<strong>选择性地重算一小部分 token 的 KV 缓存</strong>。我们称之为<strong>选择性 KV 重算</strong>（图 1d）。概括地说，选择性 KV 重算仍以传统的逐层方式对输入文本执行 prefill；区别在于，在<strong>每一层</strong>中它只更新一小部分 token 的 KV，其余 token 的 KV 则直接复用。</p>
+<p>与完整重算 KV 相比，<strong>更新比例低于 15%</strong> 时，按我们的经验通常就能生成质量相同的回复。只更新一小部分 KV 就够用，更深层的原因在于<strong>注意力矩阵的稀疏性</strong>（见 §4.3）。</p>
+<p>与完整 KV 复用相比，CACHEBLEND 只多付出少量 KV 更新，就取得了更高的生成质量。此外，这点额外计算<strong>不会增加推理延迟</strong>，因为 CACHEBLEND 把 "某一层的部分 KV 更新" 与 "下一层 KV 缓存取入 GPU 显存" 这两件事<strong>并行化</strong>了。这样的流水化使 CACHEBLEND 能把 KV 缓存存放在更慢的<strong>非易失性设备</strong>（例如磁盘）上，而<strong>不产生额外延迟</strong>，从而能存下并复用更多 KV 缓存。</p>
+<p>为把我们的贡献放到已有工作的脉络中：CACHEBLEND 使<strong>单次 LLM 输入中多个文本块的 KV 缓存复用</strong>成为可能，且不损害生成质量。这与近期那些<strong>压缩 KV 缓存存储体积</strong> [28, 35, 42, 43, 45, 58] 和<strong>优化 KV 缓存访问模式</strong> [33, 59] 的工作是<strong>互补</strong>关系。</p>
+<p>我们在 vLLM 之上实现了 CACHEBLEND，并在三个规模各异的开源 LLM、两个 LLM 任务（RAG 与 QA）的三个常用基准数据集上，将其与当前最先进的 KV 缓存复用方案做了比较。结果表明：与<strong>前缀缓存</strong>相比，CACHEBLEND 把首 token 延迟（TTFT）降低 <strong>2.2–3.3 倍</strong>、把推理吞吐提升 <strong>2.8–5 倍</strong>，且不损害生成质量、也不增加存储开销。与<strong>完整 KV 复用</strong>相比，CACHEBLEND 的 TTFT 几乎持平，但在 QA 任务上的<strong>绝对 F1 高出 0.1–0.2</strong>，在摘要任务上的<strong>绝对 Rouge-L 高出 0.03–0.25</strong>。</p>
+<h1>二、背景</h1>
+<p>如今多数 LLM 服务采用 Transformer [13, 16, 52]。在收到输入 token 之后，LLM 首先借助 <strong>prefill 阶段</strong>（下文简要说明）把这些 token 变换为键（K）向量和值（V）向量，也就是 <strong>KV 缓存</strong>。prefill 完成后，LLM 便以当前的 KV 缓存<strong>迭代地解码</strong>（生成）下一个 token，并把新 token 对应的新 K、V 向量<strong>追加</strong>到 KV 缓存中，供下一次迭代使用。</p>
+<p>prefill 阶段<strong>逐层</strong>计算 KV 缓存。每一层上的输入 token 嵌入会先被变换为查询（Q）、键（K）、值（V）向量，其中 K 和 V 向量构成该层 KV 缓存的这一份内容。随后 LLM 将 Q 与 K 相乘，得到<strong>注意力矩阵</strong>—— 即每个 token 与其<strong>前序</strong> token 之间的注意力 —— 再把（经归一化与掩码处理的）注意力矩阵与 V 向量做一次点积。所得向量再经过多个神经层，得到这些 token 在<strong>下一层</strong>的嵌入。</p>
+<p>当<strong>前缀的</strong> KV 缓存已经存在时，prefill 阶段在每一层上<strong>只需要计算前向注意力矩阵</strong>（即后缀 token 与前缀 token 之间的那部分注意力），这部分直接决定生成 token 的结果。</p>
+<p>prefill 阶段可能很慢，长输入下尤其如此。举例来说，对一段 <strong>4000 token</strong> 的输入（RAG 中常见的上下文长度 [33]），在<strong>单块 A40 GPU</strong> 上跑 prefill，Llama-34B 需要<strong>三秒</strong>，Llama-70B 需要<strong>六秒</strong>。这就造成一段可观的延迟，用户必须等待这段时间才能看到第一个词被生成出来。近期工作还表明，prefill 会成为<strong>吞吐瓶颈</strong>：一旦去掉 prefill 阶段，LLM 推理系统的吞吐可以<strong>翻倍</strong> [60]。</p>
+<h1>三、动机</h1>
+<h2>3.1 复用KV缓存的机会</h2>
+<p>近期系统试图缓解预填充开销，其依据是一个观察：在许多 LLM 用例中，<strong>同样的文本会在不同的 LLM 输入里被反复使用</strong>。这使得这些被复用文本的 KV 缓存可以复用（下文将简要说明）。<br>
+当同样的文本被放进 LLM 输入、用以提供必要的上下文、从而保证回复质量高且稳定时，文本复用尤为普遍。为了讲得更具体，考虑两个场景。</p>
+<ul>
+<li>在一家使用 LLM 管理内部档案的公司里，两个查询可以是："<strong>在上次全员大会上，IT 部门里是谁提出要用 RAG 来改进客户服务 X 的？</strong>"和"<strong>IT 部门里有哪些人毕业于 Y 大学？</strong>" 两者看似不同，但都涉及 <strong>IT 部门的员工名单</strong>，都以此作为生成正确答案所必需的上下文。</li>
+<li>类似地，在一个用 LLM 摘要 Arxiv 论文的应用里，两个查询可以是："<strong>Arxiv 上目前有哪些热门的 RAG 技术？</strong>"和"<strong>最近大家都在用哪些数据集来评测 Arxiv 上与 RAG 相关的论文？</strong>" 两者都需要<strong>近期与 RAG 相关的 Arxiv 论文</strong>作为生成正确结果所必需的上下文。<br>
+由于被复用的上下文通常比用户查询携带更多信息，输入中 "<strong>上下文</strong>" 那部分的预填充占了预填充开销的<strong>大部分</strong> [22, 33]。因此，理想的做法是把被复用文本的 KV 缓存存下来并复用，以便这些文本再次出现在不同 LLM 输入中时，避开这部分预填充开销。</li>
+</ul>
+<h2>3.2 为什么前缀缓存不够用？</h2>
+<p>确实有若干近期系统通过复用 KV 缓存来降低预填充延迟。例如在<strong>前缀缓存</strong>中，一段可复用文本块的 KV 缓存被预先计算一次；如果这个文本块<strong>位于</strong>某次 LLM 输入的<strong>前缀位置</strong>，那么这份预计算好的 KV 缓存就能被复用，从而免去对该前缀的预填充。前缀缓存的优点在于：前缀的 KV 缓存不受<strong>后续</strong>文本影响，所以生成结果将与<strong>完整重算 KV</strong>（即不使用 KV 缓存）完全一致。已有若干系统采用这一思路，例如 vLLM [36]、SGLang [59] 和 RAGCache [33]。</p>
+<p>前缀缓存的缺点同样清楚。为回答一个查询，诸如 RAG 这类应用往往会在 LLM 输入中<strong>前置多个文本块</strong>，以提供回答该查询所需的多种上下文 <sup><a href="#user-content-fn-1-bf658b6ccc8fec5af44c266625622c42" id="user-content-fnref-1-bf658b6ccc8fec5af44c266625622c42" data-footnote-ref="" aria-describedby="footnote-label">1</a></sup>。结果就是：<strong>除第一个块之外，其余所有块的 KV 缓存都不会被复用，因为它们不在 LLM 输入的前缀位置上</strong>。</p>
+<p>回到 §3.1 里的那些查询。要回答 "<strong>在上次全员大会上，IT 部门里是谁提出要用 RAG 来改进客户服务 X 的？</strong>"，我们需要来自<strong>多个来源</strong>的上下文：IT 部门的员工、关于服务 X 的信息、以及那次全员大会的会议记录。同样，在那个 Arxiv 摘要应用里，回答示例查询会要求 LLM 读<strong>若干篇</strong>近期与 RAG 相关的 Arxiv 论文作为上下文。由于<strong>分属不同话题</strong>，这些上下文不太可能凑巧出现在同一个文本块里。它们是彼此独立的文本块，只在回答某个特定查询时才被一起使用。</p>
+<p>为从经验上说明 "LLM 输入需要包含多个文本块" 这一需求，我们使用两个常用的多跳问答数据集：<strong>Musique</strong> 和 <strong>2WikiMQA</strong>。这些数据集由查询、以及回答这些查询所需的多个关联上下文文本构成。按照 RAG 的常见做法，我们先用 Langchain [5] 的文本分块机制，把上下文切成 <strong>128 token</strong> 的块（这是常用取值 [29]），据此建立向量数据库。对每个查询，我们用 SentenceTransformers [49] 把查询嵌入为向量，<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124143424.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124143424.png" alt="image.png" style="max-width: 100%;"></a><br>
+再从数据库中取回 <strong>top-k</strong> 个相关块，取回依据是查询嵌入与各块嵌入之间<strong>L2 距离最小</strong>。图 2 展示了在选取文本块数量递增时的生成质量，度量采用标准的 <strong>F1-score</strong> 指标。可以看出：随着被检索来补充 LLM 输入的文本块增多，质量显著提升；但块取得过多反而会损害质量，原因是众所周知的 <strong>"中间遗忘"（lost-in-the-middle）</strong> 问题 [40, 54]。</p>
+<p>简言之，<strong>前缀缓存只能省下第一个文本块的预填充</strong>，所以当 LLM 输入包含更多文本块时，<strong>节省将是边际性的</strong>，即便这些文本块确实被复用了。</p>
+<h2>3.3 为什么全量 KV 复用不够用？</h2>
+<p>全量 KV 复用正是为处理这个问题而提出的。这条路线最近由 PromptCache [24] 开创。它借助 <strong>buffer</strong> 把反复出现的文本块各自独立预计算好的 KV 缓存拼接起来，以维持每个文本块的位置准确性。举例来说，要拼接块 C1 与 C2 的 KV 缓存，PromptCache 先要预计算 C2 的 KV 缓存，做法是在一段<strong>假想输入</strong>上跑 prefill：该输入在 C2 前面拼一个<strong>长度不小于 C1</strong> 的<strong>占位前缀</strong>。这样一来，即便 C2 不处于前缀位置，我们仍然正确保住了 C2 这份 KV 缓存的位置信息；代价是<strong>每个块的 KV 缓存都得被预计算多次</strong>。</p>
+<p>然而，即便位置信息保住了，还有一个更根本的问题：<strong>非前缀文本块</strong>（例如 C2）的 KV 缓存<strong>忽略了它与前文</strong>（例如 C1）<strong>之间的交叉注意力</strong>。原因在于，预计算这份 KV 缓存时，前文是<strong>不可知</strong>的。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124144227.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124144227.png" alt="image.png" style="max-width: 100%;"></a><br>
+忽略交叉注意力会导致错误回答。图 3 给出了一个示例：用户查询 "<strong>梅西在世界杯上的进球数比 C 罗多几个？</strong>" 前面拼接了两段关于两位球员职业生涯数据的文本块。用完整预填充或前缀缓存，结果是清晰且正确的。用全量 KV 复用时，两段文本块的 KV 缓存先被预计算（每块都带有正确的位置嵌入），再拼接成 KV 缓存。然而，如果 LLM<strong>借助这份 KV 缓存来生成答案，它就会开始絮叨跑偏，产不出正确答案。</strong><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124144500.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124144500.png" alt="image.png" style="max-width: 100%;"></a><br>
+要弄清原因，我们需要细看<strong>注意力矩阵</strong>（§2 已解释），特别是两段讨论球员数据的文本块之间的<strong>交叉注意力</strong>。图 4 可视化了两种情况下得到的注意力矩阵：一种来自原始（完整）预填充所产生的 KV 缓存，另一种来自全量 KV 复用所产生的 KV 缓存。由于全量 KV 复用是<strong>分别</strong>预计算每个块的，两块的交叉注意力在预计算 KV 缓存时<strong>被完全漏掉</strong>（从未被计算过）。在这个例子里，第一个块含梅西的进球数，第二个块含 C 罗的进球数，而 LLM 被要求比较梅西与 C 罗的进球数。<strong>忽略两块之间的相互作用（交叉注意力），答案必然有缺陷。</strong></p>
+<p>公允地说，应当指出：当块间交叉注意力<strong>较低</strong>时，全量 KV 复用确实有效。这种情形常见于 <strong>prompt 模板</strong>类应用，而那正是 PromptCache [24] 的主要目标场景。</p>
+<p>全量 KV 复用缺失交叉注意力，会在<strong>前向注意力矩阵</strong>（§2 已解释）上造成明显偏差：该矩阵包含上下文 token 与<strong>最后几个</strong> token 之间的注意力，而它<strong>直接决定</strong>生成出的 token。</p>
+<p>为表明交叉注意力在多块 LLM 输入中的普遍性，图 2 对比了两种情形下的回答质量（以 F1 score 计）：完整重算 KV（带交叉注意力）与全量 KV 复用（不带交叉注意力）。可以看到，随着相关块数增加，<strong>完整预填充与模块化缓存之间的差距越发显著</strong>。原因在于，块数越多，输入不同部分之间的<strong>相互引用与相互依赖</strong>（即交叉注意力）就越多。</p>
+<h1>四、快速 KV 缓存融合</h1>
+<p>既然完整重算 KV（即完整预填充或前缀缓存）可能太慢，而全量 KV 复用质量又低，一个自然的问题就是：如何既拿到全量 KV 复用的速度，又拿到完整重算 KV 的质量。因此，我们的目标如下：<br>
+<strong>目标</strong>： 当一次 LLM 输入包含多个被复用文本块时，如何<strong>快速更新</strong>预先计算好的 KV 缓存，使得<strong>前向注意力矩阵</strong>（以及由此得到的<strong>输出文本</strong>）与完整重算 KV 所产生的结果<strong>差异最小</strong>。 为达成该目标，我们提出 CACHEBLEND：它在<strong>每一层</strong>上重算<strong>一小部分被选中的 token</strong> 的 KV，其余 token 的 KV 继续复用。</p>
+<p>本节分三部分说明 CACHEBLEND。我们先给出符号（§4.1），再说明<strong>如何</strong>只重算一小部分 token 的 KV（§4.2），最后说明<strong>如何</strong>在每一层上<strong>选出</strong>那些 KV 会被重算的 token（§4.3）。</p>
+<h2>4.1 符号</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124152255.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124152255.png" alt="image.png" style="max-width: 100%;"></a><br>
+表 1 汇总了本节所用记号。对给定的 $N$ 个文本块组成的列表，我们用 $KV^{full}$ 表示完整重算 KV 得到的 KV 缓存，$KV^{pre}$ 表示预先计算的 KV 缓存，$KV^{new}$ 表示经 CACHEBLEND 更新后的 KV 缓存。这里，上述每一种 KV 缓存都是由各文本块对应的 KV 缓存<strong>拼接</strong>而成。KV 缓存的<strong>第 $i$ 层</strong>记为 $KV_i$，它产生前向注意力矩阵 $A_i$。<br>
+完整重算 KV（完整预填充）与全量 KV 复用之间的差异体现在两个方面。</p>
+<ul>
+<li>
+<strong>KV 偏差（KV deviation）：</strong> 我们定义 KV 缓存 $KV$ 在<strong>第 $i$ 层、第 $j$ 个 token</strong> 上的 KV 偏差为 $KV_i[j]$ 与 $KV_i^{full}[j]$ 的<strong>绝对差</strong>，记作 $\Delta_{kv}(KV_i, KV_i^{full})[j]$。它衡量在某个特定 token、特定层上，给定的 KV 与完整预填充得到的 KV <strong>相差多少</strong>。后文我们会用 KV 偏差来判断哪些 token 的 KV 偏差较大、因而<strong>需要更新</strong>。</li>
+<li>
+<strong>注意力偏差（Attention deviation）：</strong> 类似地，对第 $i$ 层的前向注意力矩阵 $A_i$，我们定义注意力偏差，记作 $\Delta_{attn}(A_i, A_i^{full})$，为它与 $A_i^{full}$ 之差的 <strong>$L_2$ 范数</strong>。回顾 §3.3：由于缺少交叉注意力，全量 KV 复用会在<strong>前向注意力矩阵</strong>上出现偏差（图 4 给出了图示）。 借助这些记号，我们的目标可以表述为：如何<strong>快速地把预计算缓存 $KV^{pre}$ 更新为新的 KV 缓存 $KV^{new}$</strong>，使得<strong>任意层 $i$</strong> 上的注意力偏差 $\Delta_{attn}(A_i^{new}, A_i^{full})$ <strong>最小</strong>。</li>
+</ul>
+<h2>4.2 选择性重算 KV 缓存</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124153106.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124153106.png" alt="image.png" style="max-width: 100%;"></a><br>
+现在先假定我们已经为每一层<strong>选定了</strong>要重算的 token 子集（选法见 §4.3）。本节说明 CACHEBLEND 如何在每一层上重算这些被选中 token 的 KV。<br>
+<strong>工作流程：</strong> prefill 的默认实现（图 5(a) 所示）<strong>不会</strong>"跳过"某些 token 而只计算某个 token 子集的 KV。CACHEBLEND 换用如下步骤（图 5(b) 所示）：</p>
+<ul>
+<li>它先在<strong>第 $i$ 层</strong>的输入上施加一个<strong>掩码</strong>，把输入收缩为被选中的 token 子集。</li>
+<li>随后它把收缩后的输入变换为 $Q_i$、$K_i$、$V_i$ 向量，这些向量同样只限于被选中的 token。</li>
+<li>接着它用第 $i$ 层上与<strong>未被选中</strong> token 相关联的 KV 缓存条目，<strong>扩展</strong> $K_i$ 向量和 $V_i$ 向量，使注意力矩阵中既包含被选中 token <strong>之间</strong>的注意力，也包含被选中 token 与<strong>其余所有 token</strong> 之间的注意力。</li>
+<li>最后它运行与原先相同的注意力模块，产出<strong>下一层的输入</strong>。<br>
+这些改动对具体 Transformer 实现所作的假设很少，因而能集成到多种主流 Transformer 中（详见 §6）。需要重视的一点是：<strong>计算开销与被选中 token 的数量成正比</strong>。原因在于，它只执行与被选中 token 相关的计算。若我们在每一层重算 $r%$ 的 token，则总计算开销就是完整预填充的 $r%$。</li>
+</ul>
+<h2>4.3 选择重算哪些token</h2>
+<p>接下来我们说明，如何在每一层上<strong>选出</strong>那些 KV 应当被重算的 token，以降低每一层上的注意力偏差——该偏差由 KV 偏差引起。因此我们的直觉是：<strong>优先重算那些 KV 偏差较高的 token 的 KV</strong>。当然，这个直觉方案<strong>并不</strong>可行，因为它需要知道完整预填充得到的 KV 缓存；我们很快就会把它变成可落地的做法。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124162247.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124162247.png" alt="image.png" style="max-width: 100%;"></a><br>
+为说明"选择 KV 偏差较高的 token"这一做法有效，图 6 在 Musique 数据集上用了三个模型（细节见 §7.1）。图中展示的是：在我们用前述方案（§4.2）选出并重算 KV 偏差 $\Delta_{kv}(KV_i, KV_i^{full})[j]$ 最高的 $r%$ 的 token $j$ 之后，<strong>跨所有层 $i$ 的平均注意力偏差</strong> $\Delta_{attn}(A_i, A_i^{full})$ 的变化。可以看出，随着重算比例 $r$ 增大，注意力偏差<strong>逐步下降</strong>；而<strong>下降最明显的部分，恰恰发生在重算 KV 偏差最高的那几个 token 的时候</strong>。经验上，这给出如下洞察。</p>
+<blockquote>
+<p><strong>洞察 1。</strong> 在第 $i$ 层上，重算 KV 偏差较高（即 $\Delta_{kv}(KV_i, KV_i^{full})[j]$ 较大）的 token $j$ 的 KV，会使注意力偏差（即 $\Delta_{attn}(A_i, A_i^{full})$）<strong>下降得更多</strong>。</p>
+</blockquote>
+<p>因此，若我们在第 $i$ 层上重算比如 $10%$ 的 token 的 KV，我们就应当挑出 KV 偏差最高的那 $10%$。$^{3}$ 我们把第 $i$ 层上的这些 token 称为 <strong>High-KV-Deviation（高 KV 偏差，简称 HKVD）token</strong>。 既然知道应当重算 HKVD token 的 KV，随之而来的有两个自然的问题。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124164923.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124164923.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>我们是否需要对大部分 token 都重算 KV？</strong> 在 §7 中，我们从经验上表明：选出 $10\text{–}20%$ 的 token 作为 HKVD token 并重算其 KV，就足以<strong>大幅降低注意力偏差并保住生成质量</strong>。<br>
+这一点可以用<strong>注意力稀疏性</strong>直观解释，它是此前研究在许多 Transformer 模型中观察到、并被充分研究的一种性质 [14, 15, 43, 58]。它说的是：在一个注意力矩阵中，高注意力通常只出现在<strong>少数</strong> token 与其前序 token 之间。为验证这一观察，图 7 使用与图 6 相同的模型和数据集，给出<strong>某一层上</strong> KV 偏差的分布。可以看到，有<strong>一小部分</strong>（约 $10\text{–}15%$）token 的 KV 偏差远高于其余 token，这与交叉注意力的稀疏性是相符的。<br>
+如果一个 token 与<strong>其他块</strong>的 token 之间注意力很低（即与其他块的交叉注意力低），那么 $A^{pre}$ 与 $A^{full}$ 之间的 KV 偏差就会很低，因而<strong>无需重算</strong>。只有当某个 token 与其他块之间有高注意力时（相对真值而言 KV 偏差高），它的 KV <strong>才</strong>应当被重算。</p>
+<p><strong>在不知道真实 KV 值或注意力矩阵的情况下，如何识别 HKVD token？</strong> 朴素地讲，要识别 HKVD token，首先必须拿到每一层 $i$ 完整重算得到的 $KV_i^{full}$；但这样做代价太高，也就<strong>违背了选择性 KV 重算的初衷</strong>。作为替代，我们观察到：<strong>不同层上的 HKVD token 并非彼此独立：</strong></p>
+<blockquote>
+<p><strong>洞察 2。</strong> 在某一层上 KV 偏差最高的那些 token，<strong>很可能在下一层上也是 KV 偏差最高的</strong></p>
+</blockquote>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124172016.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124172016.png" alt="image.png" style="max-width: 100%;"></a><br>
+举例来说，若第一层上的 HKVD token 是 2、3、5 号 token，那么这三个 token 在第二层上很可能也会比其余多数 token 具有更高的 KV 偏差。 图 8 采用与图 7 相同的设置，给出<strong>相邻两层</strong>之间各 token KV 偏差的 <strong>Spearman 秩相关系数</strong>。图中显示，HKVD token 在不同层之间<strong>保持着很高的一致性</strong>。$^{4}$</p>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124172446.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124172446.png" alt="image.png" style="max-width: 100%;"></a><br>
+这一相关性背后的直觉，来自此前的一个观察：在 Transformer 模型中，<strong>每个 token 的输入嵌入在层与层之间变化缓慢</strong> [44, 47]。因此，层与层之间的 KV 缓存也应当具有相似性——毕竟 KV 缓存是由输入嵌入经线性变换生成的。 既然 HKVD token 之间存在如此强的相关性，一个直接的方案就是：<strong>先在第一次层上做 prefill，挑出第一层的 HKVD token，然后只在其余所有层上更新这些 token 的 KV</strong>。由于 LLM 通常有 30 层以上，与完整重算 KV 相比，这一做法能省下<strong>大部分</strong>计算。话虽如此，<strong>仅凭第一层上各 token 的注意力偏差</strong>来挑出所有层（尤其是更深的层）的 HKVD token，在统计上未必可靠。 因此，我们采用一种<strong>渐进筛选（gradual filtering）</strong> 方案（图 9 所示）。</p>
+<p>如果平均而言我们希望在每一层挑出 $r%$ 的 HKVD token，我们会基于<strong>第一层上逐 token 的注意力偏差</strong>挑出 $r_1%$的 token，其中 $r_1$ 略高于 $r$，并把它们作为<strong>第二层</strong>的 HKVD token。随后我们在第二层上重算这 $r_1%$ 个 HKVD token 的 KV，并从中挑出逐 token 注意力偏差最高的 $r_2%$ 个 token（$r_2$ 略小于 $r_1$），作为<strong>下一层</strong>的 HKVD token，如此类推。直观地说，这种渐进筛选方案最终选出的 HKVD token，在<strong>第一层以及多个层上</strong>都具有较高的注意力偏差；从经验上看，以此识别每一层的 HKVD token <strong>在统计上更可靠</strong>。 尽管执行 HKVD 计算的那一层 $i$ 的 KV 缓存空间中同时保存着<strong>更新后的 KV</strong> 与<strong>预计算 KV</strong>，但一旦推理推进到第 $i+1$ 层，第 $i$ 层多出来的那份预计算 KV 就会被<strong>立刻丢弃</strong>。这使得 HKVD 带来的<strong>显存开销可以忽略</strong>。</p>
+<h1>五、CACHEBLEND 的系统设计</h1>
+<p>我们给出 CACHEBLEND 的具体系统设计，它以如下基本洞察来削弱选择性 KV 重算带来的影响。<br>
+<strong>基本洞察：</strong> 若选择性 KV 重算（§4.3）的延迟<strong>快于</strong>把 KV 装入 GPU 显存的时间，那么只要把选择性 KV 重算与 KV 装载恰当<strong>流水化</strong>，KV 重算带来的额外延迟就可以忽略不计。</p>
+<p><strong>把 KV 装载与重算做成流水：</strong> 在 CACHEBLEND 中，<strong>上一层的预计算 KV 缓存一旦装入 GPU</strong>，本层的选择性重算就可以<strong>立刻开始</strong>。原因在于：某一层上"该重算哪些 token 的 KV"，只取决于<strong>上一层 token 的 KV 偏差</strong>。因此，如果为某一层装载预计算 KV 的时间<strong>快于或等于</strong>该层选择性 KV 重算的时间，那么 KV 装载的延迟就应当能够<strong>盖住</strong>选择性重算的延迟，即<strong>不会给首 token 延迟（TTFT）带来任何额外延迟</strong>。 以 Llama-7B 模型、4K 长度的上下文为例：重算 <strong>15%</strong> 的 token（默认的重算比例）每层只需 <strong>3 ms</strong>，而从 NVME SSD 装载一层的 KV 缓存需要 <strong>16 ms</strong>（§7）。在这种情况下，KV 装载可以把"重算 15% token"的延迟完全盖住，也就是说，<strong>KV 重算不产生额外延迟</strong>。若重算更多 token（这会略微提升生成质量），只要延迟仍低于 <strong>16 ms</strong>，同样可能不产生额外延迟。相反，换成另一个模型 Llama-70B：重算 15% 的 token 需要 <strong>7 ms</strong>，而从 NVME SSD 装载一层 KV 只需 <strong>4 ms</strong>。此时 KV 装载<strong>无法完全盖住</strong>重算延迟。简言之，<strong>需要一个控制器</strong>来聪明地挑选重算比例，以及（在适用时）决定把 KV 缓存存放在哪里。</p>
+<h2>5.1 关键组件</h2>
+<p>为实现 KV 装载与重算流水化带来的收益，我们的系统包含三个主要组件。<br>
+<strong>装载控制器（Loading Controller）：</strong> 实践中我们面对两个设计问题。第一个是：<strong>在给定某一固定存储设备的前提下，如何选择重算比例（每层重算多少比例的 token 的 KV），才能不给首 token 延迟（TTFT）带来额外延迟？</strong><br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124191005.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124191005.png" alt="image.png" style="max-width: 100%;"></a><br>
+图 10(a) 给出了一个示例：只要重算比例选得恰当，在装载较慢的情况下，重算就不应对装载造成任何额外延迟。 为此，控制器用两个延迟估算器求出<strong>理想的重算比例</strong>，使重算延迟<strong>接近</strong>装载延迟。给定重算比例 $r$、待装载的上下文长度 $L$ 与具体 LLM，重算延迟估算器算出期望延迟 $T_{recompute}(r%,, LLM,, L)$ $^{5}$</p>
+<p>其中 $\text{Prefill}(LLM, L)$ 由离线 profiling 得到。 装载延迟估算器则估算<strong>一层的 KV 缓存</strong>的装载延迟 $T_{load}(LLM,, L,, \text{storage_device})$$^{6}$</p>
+<p>其依据是 LLM、该存储设备的速度（离线测得）以及上下文长度 $L$。 控制器计算一个理想的重算比例，使装载延迟能够<strong>盖住</strong>重算延迟，且不损害推理质量。它先取满足 $$ T_{recompute}(r%,, LLM,, L) = T_{load}(LLM,, L,, \text{storage_device}) $$ 的 $r%$，再取 $r%$ 与 $r^<em>%$ 中的<strong>较大者</strong>，其中 $r^</em>%$ 是经验上相对完整重算 KV 质量下降很小、可忽略的<strong>最小</strong>重算比例。实践中我们发现 $r^*%$ 为 <strong>15%</strong>（见图 16）。这意味着：即便存储设备很快（例如 CPU RAM），延迟也会被"为保住质量所需的最小重算量"这一<strong>下界</strong>卡住。</p>
+<p>实践中 CACHEBLEND 还面对另一个挑战：<strong>开发者该用哪些存储设备？</strong> 为处理这一点，我们给装载控制器提出一个更明确的问法：若我们只按一个固定的选择性重算比例（例如 15%）做 KV 重算，应当如何挑选存放 KV 的存储设备，才不产生额外延迟？ 如图 10(b) 所示，在固定重算比例下，控制器应当在所有<strong>不增加延迟</strong>的设备中挑<strong>最便宜</strong>的那个。 在 CACHEBLEND 中，系统开发者可提供一份<strong>候选存储设备</strong>清单，控制器则用存储成本估算器估计每台设备存放 KV 的成本 $$ C_{store}(LLM,, L,, T,, \text{storage_device}) $$ 其依据是 LLM、上下文长度 $L$，以及存放所需的时间长度 $T$（若为云存储）。随后它用 $T_{recompute}(15%,, LLM,, L)$ 与 $T_{load}(LLM,, L,, \text{storage_device})$ 估计所有设备上的重算延迟与装载延迟。最后，它在满足 $$ T_{recompute} \le T_{load} $$ 的设备中找出最便宜的那个。如此，在给定的、能满足生成质量要求的重算目标下，开发者就能在多种存储设备之间为 KV 缓存择路。<br>
+<strong>KV 缓存存储（把 LLM 输入映射到 KV 缓存）：</strong> KV 缓存存储模块把一次 LLM 输入切成多个文本块，每一块要么可复用、要么是新的。例如，一条 RAG 输入通常由若干检索到的上下文块（多半是固定长度）加上用户输入构成。LLM 输入的切分方式<strong>取决于具体应用</strong>，我们采用近期工作 [24, 38] 所述的同一策略。输入切成文本块之后，每块被<strong>哈希</strong>以找到其对应的 KV 缓存，做法与 vLLM [36] 中的块哈希实现相同。由 fusor（下文说明）新生成的那些块的 KV 缓存会被加入这些设备；当存储设备写满时，我们<strong>淘汰最久未被使用</strong>的 KV 缓存。本文只考虑把 KV 缓存存放在<strong>单一一级</strong>存储设备上，例如 CPU RAM 或 SSD。<br>
+<strong>Fusor：</strong> 缓存 fusor（§4）通过选择性重算把预先计算的 KV 缓存<strong>合并</strong>起来。回顾 §4.3：某一层需要重算哪些 token，取决于<strong>上一层</strong>的重算结果。因此 fusor 会等到上一层的重算完成、并且<strong>第 $L$ 层</strong>的 KV 缓存已被装入 GPU 显存中的<strong>队列</strong>，然后按装载控制器算出的重算比例 $r%$ 执行选择性重算。fusor 重复这一过程，直到所有层都被重算完毕。</p>
+<h2>5.2 组装起来</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124193532.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124193532.png" alt="image.png" style="max-width: 100%;"></a><br>
+我们用图 11 把各关键组件放进一条 LLM 推理工作流中。当某 LLM 应用的用户提交一个问题时，系统会先查询出一批相关文本块。接着，装载控制器向 KV 缓存管理器（KV cache manager）查询：这些文本块的 KV 缓存<strong>是否存在</strong>、<strong>存放在哪里</strong>。随后，KV 缓存管理器把这些信息回传给装载控制器，控制器算出理想的选择性重算比例，把它发给 fusor，并把 KV 缓存装载进 GPU 显存中的一个<strong>队列</strong>。KV 缓存 fusor 持续重算队列中的这些 KV 缓存，直到所有层重算完毕。最后，融合后的 KV 缓存被送入 LLM 推理引擎，后者基于这份 KV 缓存生成用户问题的答案。</p>
+<h1>六、实现</h1>
+<p>们在 vLLM 之上实现 CACHEBLEND，基于 PyTorch v2.0，用 Python 编写，约 <strong>3K 行</strong>代码。<br>
+<strong>把 Fusor 集成进 LLM 服务引擎：</strong> CACHEBLEND 通过三个接口，以<strong>逐层</strong>的方式完成部分 prefill 过程：</p>
+<ul>
+<li><code class="notranslate">fetch_kv(text, layer_id) -&gt; KVCache</code>：给定一段文本和一个层号，CACHEBLEND 把对应的 KV 缓存从 KV 存储取入 GPU。若该 KV 缓存不在系统内，返回 <strong>-1</strong>。</li>
+<li><code class="notranslate">prefill_layer(input_dict, KVCache) -&gt; output_dict</code>：CACHEBLEND 接收<strong>本层的输入与 KV 缓存</strong>，对这一特定层执行部分 prefill 过程。其输出用作<strong>下一层的输入</strong>。</li>
+<li><code class="notranslate">synchronize()</code>：CACHEBLEND 在<strong>每层</strong> prefill 之前都需要一次同步，以确保本层的 KV 缓存<strong>已经</strong>装入 GPU。</li>
+</ul>
+<p>我们把这三个接口实现在 vLLM 内部。对于 <code class="notranslate">fetch_kv</code>，我们先计算文本的<strong>哈希</strong>，并检索它是否在 KV 存储系统内。若存在：当 KV 缓存在<strong>磁盘</strong>上时，调用 <code class="notranslate">torch.load()</code> 把它装入 GPU 显存；当 KV 缓存在<strong>CPU 内存</strong>中时，则使用 <code class="notranslate">torch.cuda()</code>。对于 <code class="notranslate">prefill_layer</code>，我们把它实现在 vLLM 原有 "完成一层 prefill" 的层函数之上。<code class="notranslate">input_dict</code> 中记录三个键值对：</p>
+<ol>
+<li>为完成某层 prefill 所需的<strong>原始输入数据</strong> <code class="notranslate">input_org</code>（例如 <code class="notranslate">input_tensor</code>、<code class="notranslate">input_metadata</code>）；</li>
+<li>一个 <code class="notranslate">check_flag</code>，表示<strong>本层是否需要选出 HKVD token</strong>；</li>
+<li><code class="notranslate">HKVD_indices</code>，跟踪 HKVD token 的<strong>下标</strong>。</li>
+</ol>
+<p>若 <code class="notranslate">check_flag</code> 为 True，则<strong>新算出的 KV 缓存</strong>与<strong>已装载的 KV 缓存</strong>之间偏差最大的那些输入 token 会被选为 HKVD token。若 <code class="notranslate">check_flag</code> 为 False，则部分 prefill <strong>只</strong>作用于由 <code class="notranslate">HKVD_indices</code> 指定的当前 HKVD token。每一层<strong>只</strong>计算并更新 HKVD token 的 KV 缓存。在第 i 层的部分 prefill 中，用<strong>两个线程</strong>把 " 第 i 层的计算（<code class="notranslate">prefill_layer</code>）"与" 第 (i+1) 层的 KV 缓存装载（<code class="notranslate">fetch_kv</code>）" 做成<strong>流水</strong>。<code class="notranslate">synchronize</code> 在 <code class="notranslate">prefill_layer</code> 之前调用，以确保 prefill 所需的 KV 缓存已装入 GPU。</p>
+<p><strong>KV 缓存管理：</strong> CACHEBLEND 对 KV 缓存的管理方式如下：若某个 KV 缓存不在系统内、并由 LLM 引擎在运行时<strong>重算</strong>出来，我们就用 <code class="notranslate">torch.cpu()</code> 把它移到 CPU，并开一个线程用 <code class="notranslate">torch.save()</code> 在<strong>后台</strong>把它写回磁盘。在 <code class="notranslate">fetch_kv</code> 期间，我们通过<strong>哈希表</strong>为 fusor 取回 KV 缓存。哈希表保存在 <strong>CPU</strong>，因为它们体积相对很小（<strong>一百万条 chunk 约 16MB</strong>）。</p>
+<h1>七、评测</h1>
+<p>我们从评测中得到的关键结论如下：</p>
+<ul>
+<li><strong>TTFT（首 token 延迟）降低</strong>：与完整重算 KV 相比，CACHEBLEND 在多个模型和任务上把 TTFT 降低 <strong>2.2–3.3 倍</strong>。</li>
+<li><strong>质量高</strong>：与全量 KV 复用相比，CACHEBLEND 把质量在 F1-score 与 Rouge-L score 上<strong>提升 0.15 到 0.35</strong>，而与完整重算 KV、前缀缓存相比，质量下降<strong>不超过 0.01–0.03</strong>。</li>
+<li><strong>吞吐更高</strong>：在相同 TTFT 下，CACHEBLEND 相对完整重算 KV 可把吞吐<strong>提升至多 5 倍</strong>，相对前缀缓存提升 <strong>3.3 倍</strong>。</li>
+</ul>
+<h2>7.1 实验设置</h2>
+<p><strong>模型与硬件设置：</strong> 我们选用 <strong>Mistral-7B</strong> [30]、<strong>Yi-34B</strong> [56] 和 <strong>Llama-70B</strong> [2] 来覆盖较宽的模型规模区间。注意我们对 Llama-70B 与 Yi-34B 采用了 <strong>8-bit 量化</strong>。端到端实验运行在 Rumpod GPU [10] 上，配置为 128 GB RAM、<strong>2 张 Nvidia A40</strong>、以及实测吞吐为 <strong>4.8 GB/s</strong> 的 <strong>1TB NVME SSD</strong>。Mistral-7B 与 Yi-34B 用 1 张 GPU 服务，Llama-70B 用 2 张 GPU 服务。</p>
+<p><strong>数据集：</strong> 我们的评测覆盖以下数据集。</p>
+<ul>
+<li><strong>2WikiMQA</strong>⁷ [27]：该数据集通过要求模型阅读<strong>多个段落</strong>来回答同一个问题，以此考察 LLM 的推理能力。按此前工作 [12] 的数据规模，我们纳入 <strong>200 个测试用例</strong>。</li>
+<li><strong>Musique</strong>⁷ [51]：这是一个<strong>多文档问答</strong>数据集，用于考察 LLM 的多跳推理能力 —— 其中一个推理步骤<strong>关键地依赖</strong>另一个步骤的信息。含 <strong>150 个测试用例</strong>。</li>
+</ul>
+<p>[^7] 由于 2WikiMQA 与 Musique 的标准答案总是少于 5 个词，我们在其提示词后追加 "<strong>Answer within 5 words.</strong>"（用 5 个词以内作答），以减少答案长度不匹配对 F1 计算的影响。</p>
+<ul>
+<li><strong>SAMSum</strong> [25]：该数据集由多组对话与其摘要构成，要求 LLM 为一个<strong>新的</strong>对话输出摘要。它用于考察语言模型的 few-shot 学习能力，含 <strong>200 个测试用例</strong>。</li>
+<li><strong>MultiNews</strong> [20]：该数据集包含新闻文章以及来自 <a href="https://newser.com" rel="nofollow">newser.com</a> 由人工撰写的这些文章的摘要。每篇摘要均由编辑专业撰写，并附上所引原文的链接。我们抽取 <strong>60 个样例</strong>。</li>
+</ul>
+<p>我们用 Langchain 把上下文切成 <strong>512-token 的块</strong>；对 SAMSum 则使用其原始的 <strong>200–400 token</strong> 块。我们还构造了一个<strong>合成数据集</strong>，用来模拟 RAG 场景中的块复用。具体做法是：在 Musique 与 2WikiMQA 中各随机取 <strong>1500 条</strong>查询，用 Langchain [5] 把每条查询的上下文切成 <strong>512-token 块</strong> [29]，建为上下文块数据库。对每条查询，我们用 <strong>GPT4 API</strong> 再生成 <strong>3 条</strong>相似查询。在这 <strong>6000 条</strong>查询（1500 原始 + 4500 模拟）上，我们按 <strong>L2 距离</strong>取回 <strong>top-6</strong> 个块⁸，顺序<strong>随机</strong> [34]。我们把这两个数据集称为 <strong>Musique extended</strong> 与 <strong>2WikiMQA extended</strong>。我们只报告<strong>质量相当</strong>的基线结果，并<strong>跳过前 1K 条查询</strong>的结果，因为初始阶段存储完全为空。</p>
+<p><strong>质量指标：</strong> 我们采用以下标准指标来衡量生成质量。</p>
+<ul>
+<li><strong>F1-score</strong> [6] 用于评测 2WikiMQA 与 Musique 数据集 [12]。它基于<strong>词重叠数量</strong>，衡量模型输出与问题标准答案之间的相似度。</li>
+<li><strong>Rouge-L score</strong> [39] 用于评测 MultiNews 与 SAMSum 数据集 [12]。它基于<strong>最长公共子序列</strong>，衡量模型输出与标准摘要之间的相似度。</li>
+</ul>
+<p><strong>基线：</strong> 我们把 CACHEBLEND 与以下基线比较：</p>
+<ul>
+<li><strong>完整重算 KV</strong>：把原始文本直接作为 LLM 输入，LLM 在 prefill 期间计算<strong>全部</strong> token 的 KV 缓存。</li>
+<li><strong>前缀缓存</strong> [33, 36, 59]：我们采用 SGLang [59] 的技术识别频繁使用的前缀块，并把它们的 KV 缓存同时存放在 <strong>RAM 与 SSD</strong> 中。非前缀 token 的 KV 缓存仍需在 prefill 期间计算。我们还为前缀缓存做了一个<strong>偏袒它的理想化假设</strong>：从 RAM 或 SSD 到 GPU <strong>没有装载延迟</strong>。这个假设会让它的表现<strong>优于</strong>真实条件下的结果。</li>
+<li><strong>全量 KV 复用</strong> [24]：我们按 PromptCache [24] 提出的方法实现全量 KV 复用。做法是在文本前追加一个 <strong>buffer</strong>，使其 KV 缓存能带着正确的位置编码用于不同的位置。我们<strong>没有</strong>与 scaffolding 方案比较，因为它要用于 RAG 场景需要<strong>人工</strong>在运行时手动挑出重要块。</li>
+<li><strong>MapReduce</strong> [7]：不同于传统的 MapReduce [18]，这是 LangChain 中的一种替代性 RAG 方法。LLM 先<strong>并行</strong>摘要所有块并把它们拼接起来，再把拼接后的摘要再次送入 LLM 生成最终答案。</li>
+<li><strong>MapRerank</strong> [8]：这是 LangChain 中的另一种 RAG 方法。在 MapRerank 中，LLM 从<strong>每个块</strong>独立生成一个答案，并给出一个表示 "该答案正确" 的置信度的<strong>分数</strong>；取分数最高的那个答案作为最终输出。</li>
+</ul>
+<h2>7.2 整体改进</h2>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124221114.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124221114.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>在极小质量损失下降低 TTFT：</strong> 图 12 比较各请求上的平均质量与 TTFT，其中每个请求的上下文由 SentenceTransformers [49] 生成各自嵌入后、按<strong>最小 L2 距离</strong>选出的 <strong>6 个 top 块</strong>组成（每块 512 token）。如图所示，与完整重算 KV 和前缀缓存相比，CACHEBLEND 在 F1 与 Rouge-L 上的下降<strong>在 0.02 以内</strong>，同时在所有模型和数据集上把 TTFT <strong>显著降低 2.2–3.3 倍</strong>。CACHEBLEND 因为要做选择性重算而比全量 KV 复用<strong>慢</strong>，但其质量以<strong>很大幅度稳定优于</strong>全量 KV 复用（很多情形下<strong>超过 2 倍</strong>）。</p>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124221205.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124221205.png" alt="image.png" style="max-width: 100%;"></a><br>
+图 13 把 CACHEBLEND 与包括 MapReduce、MapRerank 在内的 RAG 方法做了比较。与 MapReduce 相比，CACHEBLEND 的 TTFT <strong>低 2–5 倍</strong>，且 F1 <strong>更高</strong>。</p>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124221239.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124221239.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>更低延迟、更高吞吐：</strong> 在图 14 中，我们在不同请求速率下，于 Musique extended 与 2WikiMQA 数据集上把 CACHEBLEND 与完整重算 KV、前缀缓存做了比较。在跨模型、跨数据集的情形下，CACHEBLEND 以<strong>低 2.8–5 倍</strong>的延迟取得了比<strong>所有</strong>基线都<strong>更高</strong>的吞吐。</p>
+<p><strong>如何理解 CACHEBLEND 的改进：</strong> CACHEBLEND 之所以优于所有基线，原因各不相同。</p>
+<ul>
+<li>相对<strong>完整重算 KV</strong>：CACHEBLEND 只重算少量 token，因而延迟低得多、吞吐高得多。</li>
+<li>相对<strong>全量 KV 复用</strong>：后者延迟虽比 CACHEBLEND 更低，但质量掉很多 —— 它<strong>完全没做</strong>任何重算，因而漏掉了不同块之间的<strong>交叉注意力</strong>。</li>
+<li>相对<strong>前缀缓存</strong>：CACHEBLEND 在吞吐与延迟上也更好，因为前缀缓存对<strong>同一个块</strong>在不同前缀下需要存<strong>多份</strong> KV 缓存版本。于是在总存储空间固定的前提下，前缀缓存的<strong>缺失率更高</strong>。</li>
+</ul>
+<p>最后，相对 MapReduce、MapRerank 这类其他 RAG 方法，CACHEBLEND 在质量或延迟上也更优。<strong>MapReduce</strong> 因为多出额外的 LLM 推理，延迟高于 CACHEBLEND。<strong>MapRerank</strong> 的 TTFT 虽略低于 CACHEBLEND，但质量差得多 —— 因为它<strong>逐块分别处理</strong>，忽略了块与块之间的依赖关系。</p>
+<h2>7.3 敏感性分析</h2>
+<p>为更好地理解 CACHEBLEND，我们进一步分析改变各项配置对整体性能的影响。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124222449.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124222449.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>改变块数与块长度：</strong> 图 15a 与 15b 给出在不同块数、不同块长度下，CACHEBLEND 为维持生成质量（F1 <strong>下降 ≤ 0.015</strong>）所需的<strong>最小计算时间</strong>。实验在 2WikiMQA 上用 Mistral-7B 完成。如图所示，在不同块数与块长度设置下，<strong>计算时间的缩减比例基本保持不变</strong>。</p>
+<p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124222515.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124222515.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>改变重算比例：</strong> 图 16 展示在 Yi-34B 模型上、<strong>重算比例</strong>对<strong>质量–TTFT 权衡</strong>的影响（覆盖全部数据集）。在所有数据集上，重算比例为 <strong>5%–18%</strong> 时，CACHEBLEND 相对完整重算 KV 的生成质量损失<strong>最多 0.002</strong>（F1 或 Rouge-L）。把这一数字放回语境：5%–18% 的重算比例可换算为相对完整重算 KV <strong>4.1–6.6 倍</strong>的 TTFT 降低，以及相对前缀缓存 <strong>3.4–6.1 倍</strong>的 TTFT 降低。</p>
+<p><strong>改变批大小：</strong> 图 15c 给出不同批大小下 prefill 阶段的计算时间。值得注意的是，随着批大小增大，<strong>解码阶段的时间增长比 prefill 阶段更慢</strong> [36, 60]，这使 prefill 开销随批大小增大而<strong>占据主导</strong>。因此，批大小越大，CACHEBLEND 对 prefill 阶段的改进对<strong>整体延迟下降</strong>的贡献就越显著。<br>
+<a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124222539.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124222539.png" alt="image.png" style="max-width: 100%;"></a><br>
+<strong>改变存储设备：</strong> 为研究不同存储类型对 CACHEBLEND 的影响，我们对每种方法都更换其底层存储设备，并在 Yi-34B 模型与 2WikiMQA 数据集上做了与图 12 类似的实验。如图 17 所示，当 KV 缓存存放在 <strong>RAM 或速度更慢的 SSD</strong> 上时，CACHEBLEND 均能<strong>稳定降低 TTFT</strong>，且质量退化极小。注意：存储越慢，CACHEBLEND 与全量 KV 复用的<strong>延迟差距越小</strong>—— 因为此时 CACHEBLEND 的延迟更多由<strong>装载延迟</strong>主导，而非它的<strong>部分 KV 重算</strong>。</p>
+<h1>八、相关工作</h1>
+<p><strong>检索增强生成（RAG）：</strong> RAG [22, 23, 37, 46, 48] 可以借助从外部来源取得的文本块来提升 LLM 的准确性与可靠性。然而，在 LLM 中处理这些文本块可能耗时很长。CACHEBLEND 通过<strong>存储并复用</strong>这些文本块的 KV 缓存来削减这部分开销。</p>
+<p><strong>跨请求的 KV 缓存复用：</strong> 跨不同请求存储并复用 KV 缓存，在近期工作中已被广泛研究 [24, 33, 41, 42, 59]。其中多数工作 [33, 41, 42, 59] 只关注<strong>前缀内</strong>的缓存。PromptCache [24] 允许 KV 缓存在<strong>不同位置</strong>上复用，但由于位置编码不准确、且忽略了交叉注意力，它无法保持令人满意的生成质量。CACHEBLEND 采用一种<strong>新的部分重算框架</strong>，以更好地保住位置准确性与交叉注意力。现有工作大多把 KV 缓存存放在<strong>易失性存储设备</strong>（例如 GPU HBM、CPU DRAM）上，以保证性能。虽有新兴研究尝试用高速 NVME SSD 复用 KV 缓存 [21]，CACHEBLEND 的独特之处在于把<strong>装载与部分重算做成流水</strong>，并把这套做法扩展到<strong>更慢的对象存储</strong>。</p>
+<p><strong>通用 LLM 服务系统：</strong> 已有大量通用 LLM 服务系统被开发出来 [11, 36, 57, 60]。Orca [57] 通过<strong>迭代级调度</strong>使多个请求得以并行处理。vLLM [36] 则通过更高效的 GPU 显存管理进一步提升并行度。CACHEBLEND 与这些通用 LLM 服务系统是<strong>互补</strong>关系：它为它们赋予<strong>上下文复用</strong>能力。</p>
+<p><strong>上下文压缩方法：</strong> 上下文压缩技术 [19, 31, 32, 43, 55, 58] 可以与 CACHEBLEND 互补。其中一些技术 [31, 32] 通过<strong>剪掉不重要的 token</strong>来缩短提示长度。CACHEBLEND 与这类方法兼容，因为它能接受不同的块长度（见 §7.3）。另一类工作 [19, 43, 58] 则专注于基于注意力矩阵<strong>丢弃不重要的 KV 向量</strong>，其本质是缩小 KV 缓存的体积。CACHEBLEND 可以受益于这类技术 —— 存得更少、装得更少。</p>
+<h1>九、局限与未来工作</h1>
+<p>本文的方法（例如 §4.3 中的洞察）目前<strong>只适用于 Transformer 结构的语言模型</strong>。对 Transformer 之外的架构（如 Mamba [26]、Griffin [17]）的考察，我们留待未来工作。在评测中，我们尚未在更多模型、更多数据集以及<strong>不同量化设置</strong>下测试 CACHEBLEND 的表现。为更好地理解并改进该方法，我们已将其<strong>开源</strong>，以推动更多相关工作。</p>
+<p>本文把 CACHEBLEND 集成在 <strong>vLLM</strong> 中，但尚未在最新一代服务引擎（如 <strong>DistServe</strong> [60] 或 <strong>StableGen</strong> [11]）上测试其表现；也未研究如何把 CACHEBLEND 应用于<strong>跨计算节点共享</strong> KV 缓存的工作负载。鉴于 CACHEBLEND 能够削减昂贵的 prefill 阶段，我们认为把它与这些新型服务引擎结合，可能带来更多节省。把 CACHEBLEND 集成进这些新的推理框架，我们留作未来工作。</p>
+<section data-footnotes="" class="footnotes"><h2 id="footnote-label" class="sr-only">Footnotes</h2>
+<ol>
+<li id="user-content-fn-1-bf658b6ccc8fec5af44c266625622c42">
+<p>把全部上下文<strong>前置拼接</strong>在一条 LLM 输入里，是增强用户查询的常见做法（例如 Langchain 与 LlamaIndex 中的 "stuff" 模式）。本文默认采用这一模式。其他 RAG 方法，如 "MapReduce" 或 "Rerank"，不属于这一类。它们先把每段上下文文本块<strong>分别处理</strong>，再把各段上下文的结果<strong>合并</strong>。由于分别处理时每个块<strong>始终</strong>处在前缀位置，前缀缓存在这类方法上效果很好。然而，"MapReduce" 较慢，因为它需要先<strong>逐块摘要</strong>，再基于摘要生成答案。"Rerank" 则在多个块都含有相关信息时生成质量偏低，原因是它<strong>逐个</strong>处理每个块。我们也在 §7 中经验性地评测了这些方法，并将它们与 CACHEBLEND 做了比较。 <a href="#user-content-fnref-1-bf658b6ccc8fec5af44c266625622c42" data-footnote-backref="" aria-label="Back to reference 1" class="data-footnote-backref">↩</a></p>
+</li>
+</ol>
+</section></div>
+<div style="font-size:small;margin-top:8px;float:right;"></div>
+
+<button class="btn btn-block" type="button" onclick="openComments()" id="cmButton">评论</button>
+<div class="comments" id="comments"></div>
+
+</div>
+    <div id="footer"><div id="footer1">Copyright © <span id="copyrightYear"></span> <a href="https://waibibab-cs.github.io">waibibab's blog</a></div>
+<div id="footer2">
+    <span id="runday"></span><span>Powered by <a href="https://meekdai.com/Gmeek.html" target="_blank">Gmeek</a></span>
+</div>
+
+<script>
+var now=new Date();
+document.getElementById("copyrightYear").innerHTML=now.getFullYear();
+
+if(""!=""){
+    var startSite=new Date("");
+    var diff=now.getTime()-startSite.getTime();
+    var diffDay=Math.floor(diff/(1000*60*60*24));
+    document.getElementById("runday").innerHTML="网站运行 "+diffDay+" 天"+" • ";
+}
+</script></div>
+</body>
+<script>
+var IconList={'sun': 'M8 10.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5zM8 12a4 4 0 100-8 4 4 0 000 8zM8 0a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0V.75A.75.75 0 018 0zm0 13a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 018 13zM2.343 2.343a.75.75 0 011.061 0l1.06 1.061a.75.75 0 01-1.06 1.06l-1.06-1.06a.75.75 0 010-1.06zm9.193 9.193a.75.75 0 011.06 0l1.061 1.06a.75.75 0 01-1.06 1.061l-1.061-1.06a.75.75 0 010-1.061zM16 8a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0116 8zM3 8a.75.75 0 01-.75.75H.75a.75.75 0 010-1.5h1.5A.75.75 0 013 8zm10.657-5.657a.75.75 0 010 1.061l-1.061 1.06a.75.75 0 11-1.06-1.06l1.06-1.06a.75.75 0 011.06 0zm-9.193 9.193a.75.75 0 010 1.06l-1.06 1.061a.75.75 0 11-1.061-1.06l1.06-1.061a.75.75 0 011.061 0z', 'moon': 'M9.598 1.591a.75.75 0 01.785-.175 7 7 0 11-8.967 8.967.75.75 0 01.961-.96 5.5 5.5 0 007.046-7.046.75.75 0 01.175-.786zm1.616 1.945a7 7 0 01-7.678 7.678 5.5 5.5 0 107.678-7.678z', 'sync': 'M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z', 'home': 'M6.906.664a1.749 1.749 0 0 1 2.187 0l5.25 4.2c.415.332.657.835.657 1.367v7.019A1.75 1.75 0 0 1 13.25 15h-3.5a.75.75 0 0 1-.75-.75V9H7v5.25a.75.75 0 0 1-.75.75h-3.5A1.75 1.75 0 0 1 1 13.25V6.23c0-.531.242-1.034.657-1.366l5.25-4.2Zm1.25 1.171a.25.25 0 0 0-.312 0l-5.25 4.2a.25.25 0 0 0-.094.196v7.019c0 .138.112.25.25.25H5.5V8.25a.75.75 0 0 1 .75-.75h3.5a.75.75 0 0 1 .75.75v5.25h2.75a.25.25 0 0 0 .25-.25V6.23a.25.25 0 0 0-.094-.195Z', 'github': 'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z'};
+var utterancesLoad=0;
+
+let themeSettings={
+    "dark": ["dark","moon","#00f0ff","dark-blue"],
+    "light": ["light","sun","#ff5000","github-light"],
+    "auto": ["auto","sync","","preferred-color-scheme"]
+};
+function changeTheme(mode, icon, color, utheme){
+    document.documentElement.setAttribute("data-color-mode",mode);
+    document.getElementById("themeSwitch").setAttribute("d",value=IconList[icon]);
+    document.getElementById("themeSwitch").parentNode.style.color=color;
+    if(utterancesLoad==1){utterancesTheme(utheme);}
+}
+function modeSwitch(){
+    let currentMode=document.documentElement.getAttribute('data-color-mode');
+    let newMode = currentMode === "light" ? "dark" : currentMode === "dark" ? "auto" : "light";
+    localStorage.setItem("meek_theme", newMode);
+    if(themeSettings[newMode]){
+        changeTheme(...themeSettings[newMode]);
+    }
+}
+function utterancesTheme(theme){
+    const message={type:'set-theme',theme: theme};
+    const iframe=document.getElementsByClassName('utterances-frame')[0];
+    iframe.contentWindow.postMessage(message,'https://utteranc.es');
+}
+if(themeSettings[theme]){changeTheme(...themeSettings[theme]);}
+console.log("\n %c Gmeek last https://github.com/Meekdai/Gmeek \n","padding:5px 0;background:#02d81d;color:#fff");
+</script>
+
+<script>
+document.getElementById("pathHome").setAttribute("d",IconList["home"]);
+document.getElementById("pathIssue").setAttribute("d",IconList["github"]);
+
+
+
+function openComments(){
+    cm=document.getElementById("comments");
+    cmButton=document.getElementById("cmButton");
+    cmButton.disabled=true;
+    cmButton.innerHTML="loading";
+    span=document.createElement("span");
+    span.setAttribute("class","AnimatedEllipsis");
+    cmButton.appendChild(span);
+
+    script=document.createElement("script");
+    script.setAttribute("src","https://utteranc.es/client.js");
+    script.setAttribute("repo","waibibab-cs/waibibab-cs.github.io");
+    script.setAttribute("issue-term","title");
+    
+    if(localStorage.getItem("meek_theme")=="dark"){script.setAttribute("theme","dark-blue");}
+    else if(localStorage.getItem("meek_theme")=="light") {script.setAttribute("theme","github-light");}
+    else{script.setAttribute("theme","preferred-color-scheme");}
+    
+    script.setAttribute("crossorigin","anonymous");
+    script.setAttribute("async","");
+    cm.appendChild(script);
+
+    int=self.setInterval("iFrameLoading()",200);
+}
+
+function iFrameLoading(){
+    var utterances=document.getElementsByClassName('utterances');
+    if(utterances.length==1){
+        if(utterances[0].style.height!=""){
+            utterancesLoad=1;
+            int=window.clearInterval(int);
+            document.getElementById("cmButton").style.display="none";
+            console.log("utterances Load OK");
+        }
+    }
+}
+
+
+
+</script>
+<script src='https://blog.meekdai.com/Gmeek/plugins/GmeekTOC.js'></script><script>MathJax = {tex: {inlineMath: [["$", "$"]]}};</script><script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+</html>
