@@ -111,7 +111,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 </ul>
 <h2>3.2 为什么前缀缓存不够用？</h2>
 <p>确实有若干近期系统通过复用 KV 缓存来降低预填充延迟。例如在<strong>前缀缓存</strong>中，一段可复用文本块的 KV 缓存被预先计算一次；如果这个文本块<strong>位于</strong>某次 LLM 输入的<strong>前缀位置</strong>，那么这份预计算好的 KV 缓存就能被复用，从而免去对该前缀的预填充。前缀缓存的优点在于：前缀的 KV 缓存不受<strong>后续</strong>文本影响，所以生成结果将与<strong>完整重算 KV</strong>（即不使用 KV 缓存）完全一致。已有若干系统采用这一思路，例如 vLLM [36]、SGLang [59] 和 RAGCache [33]。</p>
-<p>前缀缓存的缺点同样清楚。为回答一个查询，诸如 RAG 这类应用往往会在 LLM 输入中<strong>前置多个文本块</strong>，以提供回答该查询所需的多种上下文 <sup><a href="#user-content-fn-1-bf658b6ccc8fec5af44c266625622c42" id="user-content-fnref-1-bf658b6ccc8fec5af44c266625622c42" data-footnote-ref="" aria-describedby="footnote-label">1</a></sup>。结果就是：<strong>除第一个块之外，其余所有块的 KV 缓存都不会被复用，因为它们不在 LLM 输入的前缀位置上</strong>。</p>
+<p>前缀缓存的缺点同样清楚。为回答一个查询，诸如 RAG 这类应用往往会在 LLM 输入中<strong>前置多个文本块</strong>，以提供回答该查询所需的多种上下文 <sup><a href="#user-content-fn-1-b298e616a29da097ba68c11407eca265" id="user-content-fnref-1-b298e616a29da097ba68c11407eca265" data-footnote-ref="" aria-describedby="footnote-label">1</a></sup>。结果就是：<strong>除第一个块之外，其余所有块的 KV 缓存都不会被复用，因为它们不在 LLM 输入的前缀位置上</strong>。</p>
 <p>回到 §3.1 里的那些查询。要回答 "<strong>在上次全员大会上，IT 部门里是谁提出要用 RAG 来改进客户服务 X 的？</strong>"，我们需要来自<strong>多个来源</strong>的上下文：IT 部门的员工、关于服务 X 的信息、以及那次全员大会的会议记录。同样，在那个 Arxiv 摘要应用里，回答示例查询会要求 LLM 读<strong>若干篇</strong>近期与 RAG 相关的 Arxiv 论文作为上下文。由于<strong>分属不同话题</strong>，这些上下文不太可能凑巧出现在同一个文本块里。它们是彼此独立的文本块，只在回答某个特定查询时才被一起使用。</p>
 <p>为从经验上说明 "LLM 输入需要包含多个文本块" 这一需求，我们使用两个常用的多跳问答数据集：<strong>Musique</strong> 和 <strong>2WikiMQA</strong>。这些数据集由查询、以及回答这些查询所需的多个关联上下文文本构成。按照 RAG 的常见做法，我们先用 Langchain [5] 的文本分块机制，把上下文切成 <strong>128 token</strong> 的块（这是常用取值 [29]），据此建立向量数据库。对每个查询，我们用 SentenceTransformers [49] 把查询嵌入为向量，<br>
 <a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124143424.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124143424.png" alt="image.png" style="max-width: 100%;"></a><br>
@@ -150,20 +150,22 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 <li>随后它把收缩后的输入变换为 $Q_i$、$K_i$、$V_i$ 向量，这些向量同样只限于被选中的 token。</li>
 <li>接着它用第 $i$ 层上与<strong>未被选中</strong> token 相关联的 KV 缓存条目，<strong>扩展</strong> $K_i$ 向量和 $V_i$ 向量，使注意力矩阵中既包含被选中 token <strong>之间</strong>的注意力，也包含被选中 token 与<strong>其余所有 token</strong> 之间的注意力。</li>
 <li>最后它运行与原先相同的注意力模块，产出<strong>下一层的输入</strong>。<br>
-这些改动对具体 Transformer 实现所作的假设很少，因而能集成到多种主流 Transformer 中（详见 §6）。需要重视的一点是：<strong>计算开销与被选中 token 的数量成正比</strong>。原因在于，它只执行与被选中 token 相关的计算。若我们在每一层重算 $r%$ 的 token，则总计算开销就是完整预填充的 $r%$。</li>
+这些改动对具体 Transformer 实现所作的假设很少，因而能集成到多种主流 Transformer 中（详见 §6）。需要重视的一点是：<strong>计算开销与被选中 token 的数量成正比</strong>。原因在于，它只执行与被选中 token 相关的计算。若我们在每一层重算 $r\%$ 的 token，则总计算开销就是完整预填充的 $r\%$。</li>
 </ul>
 <h2>4.3 选择重算哪些token</h2>
 <p>接下来我们说明，如何在每一层上<strong>选出</strong>那些 KV 应当被重算的 token，以降低每一层上的注意力偏差——该偏差由 KV 偏差引起。因此我们的直觉是：<strong>优先重算那些 KV 偏差较高的 token 的 KV</strong>。当然，这个直觉方案<strong>并不</strong>可行，因为它需要知道完整预填充得到的 KV 缓存；我们很快就会把它变成可落地的做法。<br>
 <a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124162247.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124162247.png" alt="image.png" style="max-width: 100%;"></a><br>
-为说明"选择 KV 偏差较高的 token"这一做法有效，图 6 在 Musique 数据集上用了三个模型（细节见 §7.1）。图中展示的是：在我们用前述方案（§4.2）选出并重算 KV 偏差 $\Delta_{kv}(KV_i, KV_i^{full})[j]$ 最高的 $r%$ 的 token $j$ 之后，<strong>跨所有层 $i$ 的平均注意力偏差</strong> $\Delta_{attn}(A_i, A_i^{full})$ 的变化。可以看出，随着重算比例 $r$ 增大，注意力偏差<strong>逐步下降</strong>；而<strong>下降最明显的部分，恰恰发生在重算 KV 偏差最高的那几个 token 的时候</strong>。经验上，这给出如下洞察。</p>
+为说明"选择 KV 偏差较高的 token"这一做法有效，图 6 在 Musique 数据集上用了三个模型（细节见 §7.1）。图中展示的是：在我们用前述方案（§4.2）选出并重算 KV 偏差 $\Delta_{kv}(KV_i, KV_i^{full})[j]$ 最高的 $r\%$ 的 token $j$ 之后，<strong>跨所有层 $i$ 的平均注意力偏差</strong> $\Delta_{attn}(A_i, A_i^{full})$ 的变化。可以看出，随着重算比例 $r$ 增大，注意力偏差<strong>逐步下降</strong>；而<strong>下降最明显的部分，恰恰发生在重算 KV 偏差最高的那几个 token 的时候</strong>。经验上，这给出如下洞察。</p>
 <blockquote>
 <p><strong>洞察 1。</strong> 在第 $i$ 层上，重算 KV 偏差较高（即 $\Delta_{kv}(KV_i, KV_i^{full})[j]$ 较大）的 token $j$ 的 KV，会使注意力偏差（即 $\Delta_{attn}(A_i, A_i^{full})$）<strong>下降得更多</strong>。</p>
 </blockquote>
-<p>因此，若我们在第 $i$ 层上重算比如 $10%$ 的 token 的 KV，我们就应当挑出 KV 偏差最高的那 $10%$。$^{3}$ 我们把第 $i$ 层上的这些 token 称为 <strong>High-KV-Deviation（高 KV 偏差，简称 HKVD）token</strong>。 既然知道应当重算 HKVD token 的 KV，随之而来的有两个自然的问题。<br>
+<p>因此，若我们在第 $i$ 层上重算比如 $10\%$ 的 token 的 KV，我们就应当挑出 KV 偏差最高的那 $10\%$。$^{3}$ 我们把第 $i$ 层上的这些 token 称为 <strong>High-KV-Deviation（高 KV 偏差，简称 HKVD）token</strong>。 既然知道应当重算 HKVD token 的 KV，随之而来的有两个自然的问题。<br>
 <a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124164923.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124164923.png" alt="image.png" style="max-width: 100%;"></a><br>
-<strong>我们是否需要对大部分 token 都重算 KV？</strong> 在 §7 中，我们从经验上表明：选出 $10\text{–}20%$ 的 token 作为 HKVD token 并重算其 KV，就足以<strong>大幅降低注意力偏差并保住生成质量</strong>。<br>
-这一点可以用<strong>注意力稀疏性</strong>直观解释，它是此前研究在许多 Transformer 模型中观察到、并被充分研究的一种性质 [14, 15, 43, 58]。它说的是：在一个注意力矩阵中，高注意力通常只出现在<strong>少数</strong> token 与其前序 token 之间。为验证这一观察，图 7 使用与图 6 相同的模型和数据集，给出<strong>某一层上</strong> KV 偏差的分布。可以看到，有<strong>一小部分</strong>（约 $10\text{–}15%$）token 的 KV 偏差远高于其余 token，这与交叉注意力的稀疏性是相符的。<br>
+<strong>我们是否需要对大部分 token 都重算 KV？</strong> 在 §7 中，我们从经验上表明：选出 $10\text{–}20\%$ 的 token 作为 HKVD token 并重算其 KV，就足以<strong>大幅降低注意力偏差并保住生成质量</strong>。<br>
+这一点可以用<strong>注意力稀疏性</strong>直观解释，它是此前研究在许多 Transformer 模型中观察到、并被充分研究的一种性质 [14, 15, 43, 58]。它说的是：在一个注意力矩阵中，高注意力通常只出现在<strong>少数</strong> token 与其前序 token 之间。为验证这一观察，图 7 使用与图 6 相同的模型和数据集，给出<strong>某一层上</strong> KV 偏差的分布。可以看到，有<strong>一小部分</strong>（约 $10\text{–}15\%$）token 的 KV 偏差远高于其余 token，这与交叉注意力的稀疏性是相符的。<br>
 如果一个 token 与<strong>其他块</strong>的 token 之间注意力很低（即与其他块的交叉注意力低），那么 $A^{pre}$ 与 $A^{full}$ 之间的 KV 偏差就会很低，因而<strong>无需重算</strong>。只有当某个 token 与其他块之间有高注意力时（相对真值而言 KV 偏差高），它的 KV <strong>才</strong>应当被重算。</p>
+<p>$$ \begin{pmatrix} \cos m\theta &amp; -\sin m\theta \ \sin m\theta &amp; \cos m\theta \end{pmatrix} $$</p>
+<p>即可（$n$ 维情形见附录 A）。该步骤开销可忽略，因为这次乘法<strong>只做一次</strong>。</p>
 <p><strong>在不知道真实 KV 值或注意力矩阵的情况下，如何识别 HKVD token？</strong> 朴素地讲，要识别 HKVD token，首先必须拿到每一层 $i$ 完整重算得到的 $KV_i^{full}$；但这样做代价太高，也就<strong>违背了选择性 KV 重算的初衷</strong>。作为替代，我们观察到：<strong>不同层上的 HKVD token 并非彼此独立：</strong></p>
 <blockquote>
 <p><strong>洞察 2。</strong> 在某一层上 KV 偏差最高的那些 token，<strong>很可能在下一层上也是 KV 偏差最高的</strong></p>
@@ -172,7 +174,7 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 举例来说，若第一层上的 HKVD token 是 2、3、5 号 token，那么这三个 token 在第二层上很可能也会比其余多数 token 具有更高的 KV 偏差。 图 8 采用与图 7 相同的设置，给出<strong>相邻两层</strong>之间各 token KV 偏差的 <strong>Spearman 秩相关系数</strong>。图中显示，HKVD token 在不同层之间<strong>保持着很高的一致性</strong>。$^{4}$</p>
 <p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124172446.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124172446.png" alt="image.png" style="max-width: 100%;"></a><br>
 这一相关性背后的直觉，来自此前的一个观察：在 Transformer 模型中，<strong>每个 token 的输入嵌入在层与层之间变化缓慢</strong> [44, 47]。因此，层与层之间的 KV 缓存也应当具有相似性——毕竟 KV 缓存是由输入嵌入经线性变换生成的。 既然 HKVD token 之间存在如此强的相关性，一个直接的方案就是：<strong>先在第一次层上做 prefill，挑出第一层的 HKVD token，然后只在其余所有层上更新这些 token 的 KV</strong>。由于 LLM 通常有 30 层以上，与完整重算 KV 相比，这一做法能省下<strong>大部分</strong>计算。话虽如此，<strong>仅凭第一层上各 token 的注意力偏差</strong>来挑出所有层（尤其是更深的层）的 HKVD token，在统计上未必可靠。 因此，我们采用一种<strong>渐进筛选（gradual filtering）</strong> 方案（图 9 所示）。</p>
-<p>如果平均而言我们希望在每一层挑出 $r%$ 的 HKVD token，我们会基于<strong>第一层上逐 token 的注意力偏差</strong>挑出 $r_1%$的 token，其中 $r_1$ 略高于 $r$，并把它们作为<strong>第二层</strong>的 HKVD token。随后我们在第二层上重算这 $r_1%$ 个 HKVD token 的 KV，并从中挑出逐 token 注意力偏差最高的 $r_2%$ 个 token（$r_2$ 略小于 $r_1$），作为<strong>下一层</strong>的 HKVD token，如此类推。直观地说，这种渐进筛选方案最终选出的 HKVD token，在<strong>第一层以及多个层上</strong>都具有较高的注意力偏差；从经验上看，以此识别每一层的 HKVD token <strong>在统计上更可靠</strong>。 尽管执行 HKVD 计算的那一层 $i$ 的 KV 缓存空间中同时保存着<strong>更新后的 KV</strong> 与<strong>预计算 KV</strong>，但一旦推理推进到第 $i+1$ 层，第 $i$ 层多出来的那份预计算 KV 就会被<strong>立刻丢弃</strong>。这使得 HKVD 带来的<strong>显存开销可以忽略</strong>。</p>
+<p>如果平均而言我们希望在每一层挑出 $r\%$ 的 HKVD token，我们会基于<strong>第一层上逐 token 的注意力偏差</strong>挑出 $r_1\%$的 token，其中 $r_1$ 略高于 $r$，并把它们作为<strong>第二层</strong>的 HKVD token。随后我们在第二层上重算这 $r_1\%$ 个 HKVD token 的 KV，并从中挑出逐 token 注意力偏差最高的 $r_2\&lt;/code&gt;%$ 个 token（$&lt;code&gt;r_2$ 略小于 $r_1$），作为<strong>下一层</strong>的 HKVD token，如此类推。直观地说，这种渐进筛选方案最终选出的 HKVD token，在<strong>第一层以及多个层上</strong>都具有较高的注意力偏差；从经验上看，以此识别每一层的 HKVD token <strong>在统计上更可靠</strong>。 尽管执行 HKVD 计算的那一层 $i$ 的 KV 缓存空间中同时保存着<strong>更新后的 KV</strong> 与<strong>预计算 KV</strong>，但一旦推理推进到第 $i+1$ 层，第 $i$ 层多出来的那份预计算 KV 就会被<strong>立刻丢弃</strong>。这使得 HKVD 带来的<strong>显存开销可以忽略</strong>。</p>
 <h1>五、CACHEBLEND 的系统设计</h1>
 <p>我们给出 CACHEBLEND 的具体系统设计，它以如下基本洞察来削弱选择性 KV 重算带来的影响。<br>
 <strong>基本洞察：</strong> 若选择性 KV 重算（§4.3）的延迟<strong>快于</strong>把 KV 装入 GPU 显存的时间，那么只要把选择性 KV 重算与 KV 装载恰当<strong>流水化</strong>，KV 重算带来的额外延迟就可以忽略不计。</p>
@@ -181,12 +183,18 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 <p>为实现 KV 装载与重算流水化带来的收益，我们的系统包含三个主要组件。<br>
 <strong>装载控制器（Loading Controller）：</strong> 实践中我们面对两个设计问题。第一个是：<strong>在给定某一固定存储设备的前提下，如何选择重算比例（每层重算多少比例的 token 的 KV），才能不给首 token 延迟（TTFT）带来额外延迟？</strong><br>
 <a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124191005.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124191005.png" alt="image.png" style="max-width: 100%;"></a><br>
-图 10(a) 给出了一个示例：只要重算比例选得恰当，在装载较慢的情况下，重算就不应对装载造成任何额外延迟。 为此，控制器用两个延迟估算器求出<strong>理想的重算比例</strong>，使重算延迟<strong>接近</strong>装载延迟。给定重算比例 $r$、待装载的上下文长度 $L$ 与具体 LLM，重算延迟估算器算出期望延迟 $T_{recompute}(r%,, LLM,, L)$ $^{5}$</p>
-<p>其中 $\text{Prefill}(LLM, L)$ 由离线 profiling 得到。 装载延迟估算器则估算<strong>一层的 KV 缓存</strong>的装载延迟 $T_{load}(LLM,, L,, \text{storage_device})$$^{6}$</p>
-<p>其依据是 LLM、该存储设备的速度（离线测得）以及上下文长度 $L$。 控制器计算一个理想的重算比例，使装载延迟能够<strong>盖住</strong>重算延迟，且不损害推理质量。它先取满足 $$ T_{recompute}(r%,, LLM,, L) = T_{load}(LLM,, L,, \text{storage_device}) $$ 的 $r%$，再取 $r%$ 与 $r^<em>%$ 中的<strong>较大者</strong>，其中 $r^</em>%$ 是经验上相对完整重算 KV 质量下降很小、可忽略的<strong>最小</strong>重算比例。实践中我们发现 $r^*%$ 为 <strong>15%</strong>（见图 16）。这意味着：即便存储设备很快（例如 CPU RAM），延迟也会被"为保住质量所需的最小重算量"这一<strong>下界</strong>卡住。</p>
-<p>实践中 CACHEBLEND 还面对另一个挑战：<strong>开发者该用哪些存储设备？</strong> 为处理这一点，我们给装载控制器提出一个更明确的问法：若我们只按一个固定的选择性重算比例（例如 15%）做 KV 重算，应当如何挑选存放 KV 的存储设备，才不产生额外延迟？ 如图 10(b) 所示，在固定重算比例下，控制器应当在所有<strong>不增加延迟</strong>的设备中挑<strong>最便宜</strong>的那个。 在 CACHEBLEND 中，系统开发者可提供一份<strong>候选存储设备</strong>清单，控制器则用存储成本估算器估计每台设备存放 KV 的成本 $$ C_{store}(LLM,, L,, T,, \text{storage_device}) $$ 其依据是 LLM、上下文长度 $L$，以及存放所需的时间长度 $T$（若为云存储）。随后它用 $T_{recompute}(15%,, LLM,, L)$ 与 $T_{load}(LLM,, L,, \text{storage_device})$ 估计所有设备上的重算延迟与装载延迟。最后，它在满足 $$ T_{recompute} \le T_{load} $$ 的设备中找出最便宜的那个。如此，在给定的、能满足生成质量要求的重算目标下，开发者就能在多种存储设备之间为 KV 缓存择路。<br>
+图 10(a) 给出了一个示例：只要重算比例选得恰当，在装载较慢的情况下，重算就不应对装载造成任何额外延迟。 为此，控制器用两个延迟估算器求出<strong>理想的重算比例</strong>，使重算延迟<strong>接近</strong>装载延迟。给定重算比例 $r$、待装载的上下文长度 $L$ 与具体 LLM，重算延迟估算器算出期望延迟 $T_{recompute}(r\%,\, LLM,\, L)$    $^{5}$</p>
+<p>其中 $\text{Prefill}(LLM, L)$ 由离线 profiling 得到。 装载延迟估算器则估算<strong>一层的 KV 缓存</strong>的装载延迟 $T_{load}(LLM,\, L,\, \text{storage\_device})$   $^{6}$</p>
+<p>其依据是 LLM、该存储设备的速度（离线测得）以及上下文长度 $L$。 控制器计算一个理想的重算比例，使装载延迟能够<strong>盖住</strong>重算延迟，且不损害推理质量。它先取满足</p>
+<p>$$ T_{recompute}(r%,, LLM,, L) = T_{load}(LLM,, L,, \text{storage_device}) $$</p>
+<p>的 $r\%$，再取 $r\%$ 与 $r^*\%$ 中的<strong>较大者</strong>，其中 $r^*\%$ 是经验上相对完整重算 KV 质量下降很小、可忽略的<strong>最小</strong>重算比例。实践中我们发现 $r^*\%$ 为 <strong>15%</strong>（见图 16）。这意味着：即便存储设备很快（例如 CPU RAM），延迟也会被"为保住质量所需的最小重算量"这一<strong>下界</strong>卡住。</p>
+<p>实践中 CACHEBLEND 还面对另一个挑战：<strong>开发者该用哪些存储设备？</strong> 为处理这一点，我们给装载控制器提出一个更明确的问法：若我们只按一个固定的选择性重算比例（例如 15%）做 KV 重算，应当如何挑选存放 KV 的存储设备，才不产生额外延迟？ 如图 10(b) 所示，在固定重算比例下，控制器应当在所有<strong>不增加延迟</strong>的设备中挑<strong>最便宜</strong>的那个。 在 CACHEBLEND 中，系统开发者可提供一份<strong>候选存储设备</strong>清单，控制器则用存储成本估算器估计每台设备存放 KV 的成本</p>
+<p>$$ C_{store}(LLM,, L,, T,, \text{storage device}) $$</p>
+<p>其依据是 LLM、上下文长度 $L$，以及存放所需的时间长度 $T$（若为云存储）。随后它用 $T_{recompute}(15\%,\, LLM,\, L)$ 与 $T_{load}(LLM,\, L,\, \text{storage\_device})$ 估计所有设备上的重算延迟与装载延迟。最后，它在满足</p>
+<p>$$ T_{recompute} \le T_{load} $$</p>
+<p>的设备中找出最便宜的那个。如此，在给定的、能满足生成质量要求的重算目标下，开发者就能在多种存储设备之间为 KV 缓存择路。<br>
 <strong>KV 缓存存储（把 LLM 输入映射到 KV 缓存）：</strong> KV 缓存存储模块把一次 LLM 输入切成多个文本块，每一块要么可复用、要么是新的。例如，一条 RAG 输入通常由若干检索到的上下文块（多半是固定长度）加上用户输入构成。LLM 输入的切分方式<strong>取决于具体应用</strong>，我们采用近期工作 [24, 38] 所述的同一策略。输入切成文本块之后，每块被<strong>哈希</strong>以找到其对应的 KV 缓存，做法与 vLLM [36] 中的块哈希实现相同。由 fusor（下文说明）新生成的那些块的 KV 缓存会被加入这些设备；当存储设备写满时，我们<strong>淘汰最久未被使用</strong>的 KV 缓存。本文只考虑把 KV 缓存存放在<strong>单一一级</strong>存储设备上，例如 CPU RAM 或 SSD。<br>
-<strong>Fusor：</strong> 缓存 fusor（§4）通过选择性重算把预先计算的 KV 缓存<strong>合并</strong>起来。回顾 §4.3：某一层需要重算哪些 token，取决于<strong>上一层</strong>的重算结果。因此 fusor 会等到上一层的重算完成、并且<strong>第 $L$ 层</strong>的 KV 缓存已被装入 GPU 显存中的<strong>队列</strong>，然后按装载控制器算出的重算比例 $r%$ 执行选择性重算。fusor 重复这一过程，直到所有层都被重算完毕。</p>
+<strong>Fusor：</strong> 缓存 fusor（§4）通过选择性重算把预先计算的 KV 缓存<strong>合并</strong>起来。回顾 §4.3：某一层需要重算哪些 token，取决于<strong>上一层</strong>的重算结果。因此 fusor 会等到上一层的重算完成、并且<strong>第 $L$ 层</strong>的 KV 缓存已被装入 GPU 显存中的<strong>队列</strong>，然后按装载控制器算出的重算比例 $r\%$ 执行选择性重算。fusor 重复这一过程，直到所有层都被重算完毕。</p>
 <h2>5.2 组装起来</h2>
 <p><a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124193532.png"><img src="https://raw.githubusercontent.com/waibibab-cs/blog_img/main/cdnimg/20261124193532.png" alt="image.png" style="max-width: 100%;"></a><br>
 我们用图 11 把各关键组件放进一条 LLM 推理工作流中。当某 LLM 应用的用户提交一个问题时，系统会先查询出一批相关文本块。接着，装载控制器向 KV 缓存管理器（KV cache manager）查询：这些文本块的 KV 缓存<strong>是否存在</strong>、<strong>存放在哪里</strong>。随后，KV 缓存管理器把这些信息回传给装载控制器，控制器算出理想的选择性重算比例，把它发给 fusor，并把 KV 缓存装载进 GPU 显存中的一个<strong>队列</strong>。KV 缓存 fusor 持续重算队列中的这些 KV 缓存，直到所有层重算完毕。最后，融合后的 KV 缓存被送入 LLM 推理引擎，后者基于这份 KV 缓存生成用户问题的答案。</p>
@@ -272,8 +280,8 @@ body{box-sizing: border-box;min-width: 200px;max-width: 900px;margin: 20px auto;
 <p>本文把 CACHEBLEND 集成在 <strong>vLLM</strong> 中，但尚未在最新一代服务引擎（如 <strong>DistServe</strong> [60] 或 <strong>StableGen</strong> [11]）上测试其表现；也未研究如何把 CACHEBLEND 应用于<strong>跨计算节点共享</strong> KV 缓存的工作负载。鉴于 CACHEBLEND 能够削减昂贵的 prefill 阶段，我们认为把它与这些新型服务引擎结合，可能带来更多节省。把 CACHEBLEND 集成进这些新的推理框架，我们留作未来工作。</p>
 <section data-footnotes="" class="footnotes"><h2 id="footnote-label" class="sr-only">Footnotes</h2>
 <ol>
-<li id="user-content-fn-1-bf658b6ccc8fec5af44c266625622c42">
-<p>把全部上下文<strong>前置拼接</strong>在一条 LLM 输入里，是增强用户查询的常见做法（例如 Langchain 与 LlamaIndex 中的 "stuff" 模式）。本文默认采用这一模式。其他 RAG 方法，如 "MapReduce" 或 "Rerank"，不属于这一类。它们先把每段上下文文本块<strong>分别处理</strong>，再把各段上下文的结果<strong>合并</strong>。由于分别处理时每个块<strong>始终</strong>处在前缀位置，前缀缓存在这类方法上效果很好。然而，"MapReduce" 较慢，因为它需要先<strong>逐块摘要</strong>，再基于摘要生成答案。"Rerank" 则在多个块都含有相关信息时生成质量偏低，原因是它<strong>逐个</strong>处理每个块。我们也在 §7 中经验性地评测了这些方法，并将它们与 CACHEBLEND 做了比较。 <a href="#user-content-fnref-1-bf658b6ccc8fec5af44c266625622c42" data-footnote-backref="" aria-label="Back to reference 1" class="data-footnote-backref">↩</a></p>
+<li id="user-content-fn-1-b298e616a29da097ba68c11407eca265">
+<p>把全部上下文<strong>前置拼接</strong>在一条 LLM 输入里，是增强用户查询的常见做法（例如 Langchain 与 LlamaIndex 中的 "stuff" 模式）。本文默认采用这一模式。其他 RAG 方法，如 "MapReduce" 或 "Rerank"，不属于这一类。它们先把每段上下文文本块<strong>分别处理</strong>，再把各段上下文的结果<strong>合并</strong>。由于分别处理时每个块<strong>始终</strong>处在前缀位置，前缀缓存在这类方法上效果很好。然而，"MapReduce" 较慢，因为它需要先<strong>逐块摘要</strong>，再基于摘要生成答案。"Rerank" 则在多个块都含有相关信息时生成质量偏低，原因是它<strong>逐个</strong>处理每个块。我们也在 §7 中经验性地评测了这些方法，并将它们与 CACHEBLEND 做了比较。 <a href="#user-content-fnref-1-b298e616a29da097ba68c11407eca265" data-footnote-backref="" aria-label="Back to reference 1" class="data-footnote-backref">↩</a></p>
 </li>
 </ol>
 </section></div>
